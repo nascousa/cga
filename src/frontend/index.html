@@ -823,6 +823,10 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .schedule-summary-cell strong[data-schedule-status="success"] { color: var(--accent); }
+    .schedule-summary-cell strong[data-schedule-status="failed"] { color: var(--danger); }
+    .schedule-summary-cell strong[data-schedule-status="running"] { color: var(--info); }
+    .schedule-summary-cell strong[data-schedule-status="empty"] { color: var(--muted); }
     .schedule-editor-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -836,6 +840,65 @@
       font-size: 12px;
       line-height: 1.45;
       resize: vertical;
+    }
+    .schedule-browser-panel {
+      background: rgba(10,14,22,.52);
+      border: 1px solid rgba(70,80,104,.42);
+      border-radius: 8px;
+      padding: 12px;
+      display: grid;
+      gap: 12px;
+    }
+    .schedule-browser-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .schedule-browser-head label {
+      margin: 0;
+    }
+    .schedule-browser-head select {
+      width: auto;
+      min-width: 180px;
+    }
+    .schedule-browser-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .schedule-browser-grid .form-group {
+      margin-bottom: 0;
+    }
+    .schedule-browser-grid .wide {
+      grid-column: 1 / -1;
+    }
+    .schedule-browser-grid textarea {
+      min-height: 88px;
+    }
+    .schedule-artifacts-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+      align-items: center;
+    }
+    .schedule-check {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      margin: 0;
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .schedule-check input[type="checkbox"] {
+      width: 14px !important;
+      height: 14px;
+      margin: 0;
+      padding: 0;
+      accent-color: var(--accent);
+      flex: 0 0 auto;
     }
     .schedule-target-text {
       max-width: 280px;
@@ -853,6 +916,7 @@
     @media (max-width: 1050px) {
       .schedule-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .schedule-editor-grid { grid-template-columns: 1fr; }
+      .schedule-browser-grid { grid-template-columns: 1fr; }
     }
     @media (max-width: 640px) {
       .schedule-summary-grid { grid-template-columns: 1fr; }
@@ -2078,8 +2142,8 @@
             <input id="schedule-agent-id" placeholder="edge-agent-a or browseragent-local" />
           </div>
           <div class="form-group">
-            <label>Target URL</label>
-            <input id="schedule-target-url" placeholder="http://localhost:9876/command" />
+            <label>Runner URL</label>
+            <input id="schedule-target-url" placeholder="http://localhost:9876/command/batch" />
           </div>
           <div class="form-group">
             <label>Every N Minutes</label>
@@ -2099,6 +2163,41 @@
           <div class="form-group wide">
             <label>Description</label>
             <input id="schedule-description" placeholder="Optional notes for admins" />
+          </div>
+          <div class="form-group wide" id="schedule-browser-task-panel">
+            <div class="schedule-browser-panel">
+              <div class="schedule-browser-head">
+                <label>Browser Test</label>
+                <select id="schedule-browser-template" onchange="applyBrowserTaskTemplate(this.value)">
+                  <option value="page_smoke">Page smoke</option>
+                  <option value="screenshot">Screenshot capture</option>
+                  <option value="console_metrics">Console and metrics</option>
+                </select>
+              </div>
+              <div class="schedule-browser-grid">
+                <div class="form-group wide">
+                  <label>Page URL</label>
+                  <input id="schedule-browser-url" placeholder="http://localhost:18001/admin/schedule" oninput="syncBrowserTaskPayload()" />
+                </div>
+                <div class="form-group wide">
+                  <label>Goal</label>
+                  <textarea id="schedule-browser-goal" spellcheck="false" oninput="syncBrowserTaskPayload()"></textarea>
+                </div>
+                <div class="form-group wide">
+                  <label>Text Assertions</label>
+                  <textarea id="schedule-browser-assertions" spellcheck="false" oninput="syncBrowserTaskPayload()"></textarea>
+                </div>
+                <div class="form-group wide">
+                  <label>Artifacts</label>
+                  <div class="schedule-artifacts-row">
+                    <label class="schedule-check"><input id="schedule-browser-artifact-screenshot" type="checkbox" onchange="syncBrowserTaskPayload()" />Screenshot</label>
+                    <label class="schedule-check"><input id="schedule-browser-artifact-console" type="checkbox" onchange="syncBrowserTaskPayload()" />Console</label>
+                    <label class="schedule-check"><input id="schedule-browser-artifact-metrics" type="checkbox" onchange="syncBrowserTaskPayload()" />Metrics</label>
+                    <label class="schedule-check"><input id="schedule-browser-artifact-dom" type="checkbox" onchange="syncBrowserTaskPayload()" />DOM Snapshot</label>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <div class="form-group wide">
             <label>JSON Payload</label>
@@ -2127,6 +2226,7 @@
               <th class="center-col-header">HTTP</th>
               <th class="center-col-header">Duration</th>
               <th>Error</th>
+              <th class="actions-col-header">Actions</th>
             </tr></thead>
             <tbody id="schedule-runs-body"></tbody>
           </table>
@@ -3050,6 +3150,12 @@ function renderProjectIdWithCopy(projectId, { placeholder = '—', extraClass = 
   return `<span class="project-id-inline">${esc(value)}${renderCopyIdButton(value, extraClass)}</span>`;
 }
 
+function renderScheduleTaskIdWithCopy(taskId, { placeholder = 'ΓÇö', extraClass = 'copy-id-btn-sm' } = {}) {
+  const value = String(taskId ?? '').trim();
+  if (!value) return esc(placeholder);
+  return `<span class="project-id-inline">${esc(value)}${renderCopyButton(value, 'Task ID', extraClass)}</span>`;
+}
+
 function loginWithGitHub() {
   window.location.href = '/api/auth/github/start';
 }
@@ -3620,18 +3726,139 @@ const SCHEDULE_TYPE_LABELS = Object.freeze({
   http_request: 'HTTP Request',
 });
 
+const BROWSER_TASK_TEMPLATES = Object.freeze({
+  page_smoke: {
+    kind: 'page_test',
+    goal: 'Open the page, wait for it to load, verify key text is present, and capture evidence.',
+    assertions: ['Schedule', 'Scheduled tasks'],
+    artifacts: { screenshot: true, console: true, metrics: true, dom_snapshot: false },
+  },
+  screenshot: {
+    kind: 'page_test',
+    goal: 'Open the page and capture a fresh screenshot.',
+    assertions: [],
+    artifacts: { screenshot: true, console: false, metrics: false, dom_snapshot: false },
+  },
+  console_metrics: {
+    kind: 'page_test',
+    goal: 'Open the page, capture console output, and collect page metrics.',
+    assertions: [],
+    artifacts: { screenshot: false, console: true, metrics: true, dom_snapshot: false },
+  },
+});
+
 function scheduleTypeLabel(value) {
   return SCHEDULE_TYPE_LABELS[value] || value || 'Task';
+}
+
+function defaultBrowserTaskUrl() {
+  try { return window.location.origin + '/admin/schedule'; } catch { return 'http://localhost:18001/admin/schedule'; }
+}
+
+function defaultBrowserTaskSpec(template = 'page_smoke') {
+  const base = BROWSER_TASK_TEMPLATES[template] || BROWSER_TASK_TEMPLATES.page_smoke;
+  return {
+    kind: base.kind,
+    url: defaultBrowserTaskUrl(),
+    goal: base.goal,
+    assertions: [...base.assertions],
+    artifacts: { ...base.artifacts },
+    ai: { provider: 'copilot_cli', summarize: true },
+    safety: { destructive_actions: false },
+  };
+}
+
+function browserTaskSpecFromPayload(payload) {
+  const spec = payload?.browser_task;
+  return spec && typeof spec === 'object' && !Array.isArray(spec) ? spec : null;
+}
+
+function splitScheduleLines(value) {
+  return String(value || '').split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+}
+
+function setScheduleCheckbox(id, checked) {
+  const el = document.getElementById(id);
+  if (el) el.checked = !!checked;
+}
+
+function getScheduleCheckbox(id) {
+  return !!document.getElementById(id)?.checked;
+}
+
+function readSchedulePayloadLenient() {
+  const raw = document.getElementById('schedule-payload')?.value.trim() || '{}';
+  try {
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function hydrateBrowserTaskEditor(spec = null) {
+  const browserSpec = spec || defaultBrowserTaskSpec();
+  const artifacts = browserSpec.artifacts || {};
+  const urlEl = document.getElementById('schedule-browser-url');
+  const goalEl = document.getElementById('schedule-browser-goal');
+  const assertionsEl = document.getElementById('schedule-browser-assertions');
+  if (urlEl) urlEl.value = browserSpec.url || browserSpec.target_url || defaultBrowserTaskUrl();
+  if (goalEl) goalEl.value = browserSpec.goal || '';
+  if (assertionsEl) assertionsEl.value = Array.isArray(browserSpec.assertions)
+    ? browserSpec.assertions.join('\n')
+    : String(browserSpec.assertions || '');
+  setScheduleCheckbox('schedule-browser-artifact-screenshot', artifacts.screenshot !== false);
+  setScheduleCheckbox('schedule-browser-artifact-console', artifacts.console !== false);
+  setScheduleCheckbox('schedule-browser-artifact-metrics', artifacts.metrics !== false);
+  setScheduleCheckbox('schedule-browser-artifact-dom', !!artifacts.dom_snapshot);
+}
+
+function toggleBrowserTaskEditor(type) {
+  const panel = document.getElementById('schedule-browser-task-panel');
+  if (!panel) return;
+  panel.hidden = type !== 'browseragent_task';
+}
+
+function syncBrowserTaskPayload() {
+  const type = document.getElementById('schedule-task-type')?.value || 'browseragent_task';
+  if (type !== 'browseragent_task') return;
+  const payloadEl = document.getElementById('schedule-payload');
+  if (!payloadEl) return;
+  const payload = readSchedulePayloadLenient();
+  const previous = browserTaskSpecFromPayload(payload) || defaultBrowserTaskSpec();
+  const spec = {
+    ...previous,
+    kind: previous.kind || 'page_test',
+    url: document.getElementById('schedule-browser-url')?.value.trim() || defaultBrowserTaskUrl(),
+    goal: document.getElementById('schedule-browser-goal')?.value.trim() || '',
+    assertions: splitScheduleLines(document.getElementById('schedule-browser-assertions')?.value || ''),
+    artifacts: {
+      screenshot: getScheduleCheckbox('schedule-browser-artifact-screenshot'),
+      console: getScheduleCheckbox('schedule-browser-artifact-console'),
+      metrics: getScheduleCheckbox('schedule-browser-artifact-metrics'),
+      dom_snapshot: getScheduleCheckbox('schedule-browser-artifact-dom'),
+    },
+    ai: previous.ai || { provider: 'copilot_cli', summarize: true },
+    safety: previous.safety || { destructive_actions: false },
+  };
+  payload.browser_task = spec;
+  payloadEl.value = JSON.stringify(payload, null, 2);
+}
+
+function applyBrowserTaskTemplate(template) {
+  const spec = defaultBrowserTaskSpec(template || 'page_smoke');
+  hydrateBrowserTaskEditor(spec);
+  syncBrowserTaskPayload();
 }
 
 function defaultSchedulePayload(type) {
   if (type === 'agent_activation') return { action: 'activate_agent', params: {} };
   if (type === 'http_request') return { ok: true };
-  return { action: 'ping', params: {} };
+  return { browser_task: defaultBrowserTaskSpec() };
 }
 
 function defaultScheduleTarget(type) {
-  if (type === 'browseragent_task') return 'http://localhost:9876/command';
+  if (type === 'browseragent_task') return 'http://localhost:9876/command/batch';
   if (type === 'agent_activation') return 'http://localhost:3002/activate';
   return '';
 }
@@ -3650,12 +3877,17 @@ function applyScheduleTypeDefaults(force = false) {
   const targetEl = document.getElementById('schedule-target-url');
   const payloadEl = document.getElementById('schedule-payload');
   const targetDefault = defaultScheduleTarget(type);
-  const knownTargets = ['http://localhost:9876/command', 'http://localhost:3002/activate'];
+  const knownTargets = ['http://localhost:9876/command', 'http://localhost:9876/command/batch', 'http://localhost:3002/activate'];
+  toggleBrowserTaskEditor(type);
   if (targetEl && (force || !targetEl.value.trim() || knownTargets.includes(targetEl.value.trim()))) {
     targetEl.value = targetDefault;
   }
   if (payloadEl && (force || !payloadEl.value.trim())) {
     payloadEl.value = JSON.stringify(defaultSchedulePayload(type), null, 2);
+  }
+  if (type === 'browseragent_task') {
+    hydrateBrowserTaskEditor(browserTaskSpecFromPayload(readSchedulePayloadLenient()));
+    syncBrowserTaskPayload();
   }
 }
 
@@ -3688,6 +3920,9 @@ function closeScheduleEditor() {
 }
 
 function readSchedulePayload() {
+  if ((document.getElementById('schedule-task-type')?.value || '') === 'browseragent_task') {
+    syncBrowserTaskPayload();
+  }
   const raw = document.getElementById('schedule-payload')?.value.trim() || '{}';
   try {
     const parsed = raw ? JSON.parse(raw) : {};
@@ -3703,6 +3938,7 @@ async function saveScheduleTask() {
   if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
   try {
     const projectValue = document.getElementById('schedule-project-id')?.value || '';
+    const payload = readSchedulePayload();
     const body = {
       name: document.getElementById('schedule-name')?.value.trim() || '',
       description: document.getElementById('schedule-description')?.value.trim() || '',
@@ -3713,10 +3949,13 @@ async function saveScheduleTask() {
       cadence_minutes: Math.max(1, Number(document.getElementById('schedule-cadence')?.value || 60)),
       timeout_seconds: Math.max(1, Number(document.getElementById('schedule-timeout')?.value || 30)),
       enabled: document.getElementById('schedule-enabled')?.value === 'true',
-      payload: readSchedulePayload(),
+      payload,
     };
     if (!body.name) throw new Error('Name is required');
     if (body.enabled && !body.target_url) throw new Error('Target URL is required for enabled tasks');
+    if (body.task_type === 'browseragent_task' && body.payload?.browser_task && !String(body.payload.browser_task.url || '').trim()) {
+      throw new Error('Page URL is required for BrowserAgent tasks');
+    }
     if (_scheduleEditingId) {
       await api('PATCH', `/admin/schedules/${_scheduleEditingId}`, body);
       toast('Scheduled task updated');
@@ -3750,6 +3989,12 @@ function scheduleStatusClass(status) {
   if (status === 'failed') return 'pill-red';
   if (status === 'running') return 'pill-blue';
   return 'pill-gray';
+}
+
+function scheduleSummaryStatusTone(status) {
+  if (status === 'success' || status === 'failed' || status === 'running') return status;
+  if (!status || status === 'ΓÇö') return 'empty';
+  return 'default';
 }
 
 function renderSchedules() {
@@ -3799,6 +4044,7 @@ function renderSchedules() {
           <td>
             <div class="project-actions">
               <button class="btn btn-sm btn-accent" onclick="runScheduleTask(${task.id},this)">Run</button>
+              ${retryButton}
               <button class="btn btn-sm btn-ghost" onclick="toggleScheduleTask(${task.id},${task.enabled ? 'false' : 'true'})">${task.enabled ? 'Disable' : 'Enable'}</button>
               <button class="btn btn-sm" onclick="openScheduleEditor(${task.id})">Edit</button>
               <button class="btn btn-sm btn-danger" onclick="deleteScheduleTask(${task.id})">Delete</button>
