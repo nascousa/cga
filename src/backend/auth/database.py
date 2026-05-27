@@ -20,6 +20,8 @@ Public surface
 from __future__ import annotations
 
 import json
+import secrets
+import string
 from datetime import datetime, timezone
 from typing import AsyncGenerator
 
@@ -83,6 +85,7 @@ CREATE INDEX IF NOT EXISTS idx_token_hash
 
 CREATE TABLE IF NOT EXISTS scheduled_tasks (
     id              BIGSERIAL PRIMARY KEY,
+    task_id         TEXT    NOT NULL,
     name            TEXT    NOT NULL,
     description     TEXT    NOT NULL DEFAULT '',
     task_type       TEXT    NOT NULL,
@@ -189,11 +192,39 @@ async def init_db(dsn: str | None = None) -> None:
     pool = await init_pool(dsn)
     async with pool.acquire() as db:
         await db.executescript(_CREATE_TABLES)
+        await _ensure_scheduled_task_ids(db)
         # Best-effort legacy role rename.
         try:
             await db.execute("UPDATE users SET role = 'developer' WHERE role = 'viewer'")
         except Exception:
             pass
+
+
+def _random_scheduled_task_id(length: int = 8) -> str:
+    alphabet = string.ascii_uppercase + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
+
+
+async def _ensure_scheduled_task_ids(db: Connection) -> None:
+    try:
+        await db.execute("ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_id TEXT")
+        async with db.execute(
+            "SELECT id FROM scheduled_tasks WHERE task_id IS NULL OR task_id = '' OR length(task_id) <> 8 ORDER BY id"
+        ) as cur:
+            rows = await cur.fetchall()
+        for row in rows:
+            for _ in range(20):
+                candidate = _random_scheduled_task_id()
+                async with db.execute("SELECT 1 FROM scheduled_tasks WHERE task_id = ?", (candidate,)) as cur:
+                    if await cur.fetchone():
+                        continue
+                await db.execute("UPDATE scheduled_tasks SET task_id = ? WHERE id = ?", (candidate, row["id"]))
+                break
+        await db.execute("ALTER TABLE scheduled_tasks ALTER COLUMN task_id SET NOT NULL")
+        await db.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_scheduled_tasks_task_id ON scheduled_tasks(task_id)")
+        await db.commit()
+    except Exception:
+        pass
 
 
 async def get_db() -> AsyncGenerator[Connection, None]:

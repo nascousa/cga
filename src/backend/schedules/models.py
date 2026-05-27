@@ -95,6 +95,7 @@ class ScheduledTaskUpdate(BaseModel):
 
 class ScheduledTaskOut(BaseModel):
     id: int
+    task_id: str
     name: str
     description: str = ""
     task_type: ScheduledTaskType
@@ -118,6 +119,7 @@ class ScheduledTaskOut(BaseModel):
 class ScheduledTaskRunOut(BaseModel):
     id: int
     schedule_id: int
+    task_id: str | None = None
     started_at: str
     finished_at: str
     status: str
