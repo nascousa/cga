@@ -1,9 +1,9 @@
 # CGA (ContextGraphAdmin)
 
-**Version:** 1.30.18
+**Version:** 1.30.25
 **Status:** Published
 **Author:** Nate Scott
-**Date:** 2026-05-27 (Schedule admin automation page)
+**Date:** 2026-05-27 (Editable WSR save button)
 
 CGA, aka ContextGraphAdmin, is a local-first graph context service for AI-assisted development. It indexes repository structure, symbols, calls, imports, and lightweight data flow into FalkorDB, then exposes retrieval and analysis tools through an MCP-compatible API.
 
@@ -32,13 +32,16 @@ CGA includes an admin-only Schedule surface for recurring automation jobs.
 
 - Admin UI: `http://localhost:18001/admin/schedule` (Schedule tab beside Project)
 - Admin schedule API: `/api/admin/schedules`
-- Supported task types: BrowserAgent command POSTs, agent activation HTTP calls, and generic HTTP POST jobs
-- Each task stores cadence, target URL, project binding, agent ID, JSON payload, last run status, next run time, and recent execution history.
-- A lightweight background worker runs due enabled tasks and records each result in `scheduled_task_runs`.
+- Supported task types: BrowserAgent command POSTs, BrowserAgent page-test workflows, agent activation HTTP calls, and generic HTTP POST jobs
+- BrowserAgent page tests can target a page URL, text assertions, console capture, metrics, screenshots, and optional DOM snapshots from the Schedule editor.
+- Each task stores a unique copyable 8-character task ID, cadence, runner URL, project binding, agent ID, JSON payload, last run status, next run time, and recent execution history.
+- A lightweight background worker runs due enabled tasks, carries the opened BrowserAgent tab ID through each page-test step, retries text assertions while the page settles, and records each result in `scheduled_task_runs`.
 
 ## Runtime Persistence And Backup
 
 - CGA runtime state lives in a PostgreSQL database (`postgres` service, volume `postgres_data`) for users / projects / tokens / audit logs, and in FalkorDB for graph data.
+- The admin UI's **System Settings -> Indexing** panel stores the default repos folder used when project indexing resolves a project without an explicit Repository Path.
+- Runtime UI configuration is persisted in `data/runtime-config.json` by default, or in `CGA_RUNTIME_CONFIG_PATH` when that environment variable is set.
 - A backup sidecar dumps the auth PG database (`pg_dump --format=plain | gzip`) and FalkorDB runtime data into `data/backups/<stack>/` every hour by default.
 - The admin UI's **System Settings → Backup** panel reads and writes the same folder, so manual "Back Up Now" / restore / delete actions are visible to both the UI and the sidecar.
 - Override the backup destination with `CGA_BACKUP_DIR` and the schedule with `CGA_BACKUP_INTERVAL_SECONDS` / `CGA_BACKUP_KEEP_COUNT`.

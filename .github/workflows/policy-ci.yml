@@ -42,6 +42,7 @@ jobs:
           FALKORDB_PORT: "16379"
           QUEUE_REDIS_URL: redis://localhost:6380/1
           CACHE_REDIS_URL: redis://localhost:6380
+          BACKUP_DIR: ${{ github.workspace }}/data/backups
         run: |
           mkdir -p .ci-logs
           set -o pipefail
@@ -55,6 +56,7 @@ jobs:
           FALKORDB_PORT: "16379"
           QUEUE_REDIS_URL: redis://localhost:6380/1
           CACHE_REDIS_URL: redis://localhost:6380
+          BACKUP_DIR: ${{ github.workspace }}/data/backups
         run: |
           mkdir -p .ci-logs
           set -o pipefail
@@ -68,6 +70,7 @@ jobs:
           FALKORDB_PORT: "16379"
           QUEUE_REDIS_URL: redis://localhost:6380/1
           CACHE_REDIS_URL: redis://localhost:6380
+          BACKUP_DIR: ${{ github.workspace }}/data/backups
         run: |
           mkdir -p .ci-logs
           set -o pipefail
