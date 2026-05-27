@@ -253,7 +253,39 @@
     .settings-card .settings-row:last-child { border-bottom: 0; }
     .settings-card .settings-row label { color: var(--muted); font-weight: 500; }
     .settings-card .settings-value { color: var(--text); text-align: right; word-break: break-all; }
-    .settings-card .settings-value.mono { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+    .settings-card .settings-value.mono,
+    .settings-card .settings-copy-text.mono { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+    .settings-card .settings-row.settings-form-row { align-items: flex-start; }
+    .settings-card .settings-row.settings-form-row > label { padding-top: 8px; }
+    .settings-control {
+      display: grid;
+      gap: 6px;
+      flex: 1 1 420px;
+      max-width: 560px;
+    }
+    .settings-control input { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+    .settings-status {
+      min-height: 16px;
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 1.4;
+      text-align: right;
+    }
+    .settings-status.ok { color: var(--accent); }
+    .settings-status.warn { color: var(--warn); }
+    .settings-copy-value {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .settings-copy-text {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .settings-copy-value .copy-id-btn { flex: 0 0 auto; }
     .settings-actions { display: flex; gap: 8px; padding: 12px 0; }
 
     .viewer-frame {
@@ -2568,8 +2600,18 @@
             <h2>Indexing</h2>
             <p class="settings-hint">Project indexing defaults. Per-project overrides remain on the Project tab.</p>
             <div class="settings-card">
+              <div class="settings-row settings-form-row">
+                <label for="settings-indexing-repos-root">Repos Folder</label>
+                <span class="settings-control">
+                  <input id="settings-indexing-repos-root" placeholder="D:/Repos" spellcheck="false" />
+                  <span id="settings-indexing-repos-root-status" class="settings-status">Loading...</span>
+                </span>
+              </div>
               <div class="settings-row"><label>Incremental Indexing</label><span class="settings-value">Enabled</span></div>
               <div class="settings-row"><label>Default Token Budget</label><span class="settings-value">1500</span></div>
+              <div class="settings-actions">
+                <button class="btn btn-primary" onclick="saveIndexingSettings()">Save Settings</button>
+              </div>
             </div>
           </section>
 
@@ -2808,6 +2850,7 @@ let _auditPagination = { page: 1, pageSize: 25 };
 let _allUsers = [];
 let _auditTotal = 0;
 let _falkordbUrl = 'falkor://localhost:6379';
+let _runtimeConfig = null;
 let _workBriefingLoading = false;
 let _workBriefingSummary = null;
 let _workBriefingRequestedLimit = 25;
@@ -3318,11 +3361,45 @@ async function loadSettings() {
   if (fdbEl)  fdbEl.textContent  = _falkordbUrl || '—';
   try {
     const cfg = await api('GET', '/admin/runtime-config');
+    _runtimeConfig = cfg;
     if (cfg?.falkordb_url) {
       _falkordbUrl = cfg.falkordb_url;
       if (fdbEl) fdbEl.textContent = _falkordbUrl;
     }
+    renderIndexingSettings(cfg);
   } catch {}
+}
+
+function renderIndexingSettings(cfg) {
+  const indexing = cfg?.indexing || {};
+  const input = document.getElementById('settings-indexing-repos-root');
+  const status = document.getElementById('settings-indexing-repos-root-status');
+  if (input && document.activeElement !== input) input.value = indexing.repos_root || '';
+  if (!status) return;
+  const sourceLabel = indexing.repos_root_source === 'saved'
+    ? 'Saved'
+    : indexing.repos_root_source === 'environment'
+      ? 'Environment'
+      : 'Default';
+  const existsLabel = indexing.repos_root_exists ? 'folder found' : 'folder not found';
+  const defaultLabel = indexing.default_repos_root ? `Default: ${indexing.default_repos_root}` : '';
+  status.textContent = [sourceLabel, existsLabel, defaultLabel].filter(Boolean).join(' · ');
+  status.classList.toggle('ok', Boolean(indexing.repos_root_exists));
+  status.classList.toggle('warn', !indexing.repos_root_exists);
+}
+
+async function saveIndexingSettings() {
+  const input = document.getElementById('settings-indexing-repos-root');
+  const reposRoot = (input?.value || '').trim();
+  if (!reposRoot) { toast('Repos Folder is required', 'error'); return; }
+  try {
+    const cfg = await api('PATCH', '/admin/runtime-config', { indexing: { repos_root: reposRoot } });
+    _runtimeConfig = cfg;
+    renderIndexingSettings(cfg);
+    toast('Indexing settings saved');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 function switchSettingsSubtab(name, btn) {

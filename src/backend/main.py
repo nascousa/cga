@@ -37,6 +37,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
+from backend import runtime_config
 from backend.auth.database import DB_PATH, init_db, insert_audit_log
 from backend.auth.dependencies import require_admin
 from backend.auth.middleware import ProjectTokenMiddleware
@@ -59,7 +60,7 @@ from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.18"
+APP_VERSION = "1.30.25"
 
 FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
 FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", "6379"))
@@ -212,7 +213,7 @@ async def lifespan(app: FastAPI):
     log.info("cga.stopped")
 
 
-app = FastAPI(title="CGA (ContextGraphAdmin)", version="1.30.18", lifespan=lifespan)
+app = FastAPI(title="CGA (ContextGraphAdmin)", version="1.30.25", lifespan=lifespan)
 
 # ── Auth middleware (validates Bearer token on /mcp routes) ────────────────
 app.add_middleware(ProjectTokenMiddleware)
@@ -556,7 +557,17 @@ async def api_benchmark_context_quality(payload: dict) -> dict:
 async def api_admin_runtime_config(_: dict = Depends(require_admin)) -> dict:
     return {
         "falkordb_url": FALKORDB_URL,
+        **runtime_config.get_runtime_config(),
     }
+
+
+@app.patch("/api/admin/runtime-config")
+async def api_admin_runtime_config_update(payload: dict, _: dict = Depends(require_admin)) -> dict:
+    try:
+        updated = runtime_config.update_runtime_config(payload or {})
+    except runtime_config.RuntimeConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, "falkordb_url": FALKORDB_URL, **updated}
 
 
 @app.get("/api/admin/backups")
