@@ -24,7 +24,8 @@ def test_promotional_site_keeps_author_credit_to_footer() -> None:
 
     assert index.count("Nate Scott") == 1
     assert 'class="footer-credit"' in index
-    assert "Created and authored by <strong>Nate Scott</strong>" in index
+    assert 'href="mailto:nate@ucia.us"' in index
+    assert "Created and authored by <a href=\"mailto:nate@ucia.us\" aria-label=\"Email project author\"><strong>Nate Scott</strong></a>" in index
     assert "by Nate Scott" not in index
     assert "Author spotlight" not in index
     assert "#author" not in index
