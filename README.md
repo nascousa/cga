@@ -1,9 +1,9 @@
 # CGA (ContextGraphAgent)
 
-**Version:** 1.30.38
+**Version:** 1.30.39
 **Status:** Published
 **Author:** Nate Scott
-**Date:** 2026-06-02 (author attribution documented and Pages credit simplified)
+**Date:** 2026-06-02 (live HPS benchmark refresh and report sanitization)
 
 CGA, aka ContextGraphAgent, is a local-first graph context service for AI-assisted development. It indexes repository structure, symbols, calls, imports, and lightweight data flow into FalkorDB, then exposes retrieval and analysis tools through an MCP-compatible API.
 
@@ -489,9 +489,9 @@ API: `POST http://localhost:8001/api/benchmark/token-efficiency` (shared cross-p
 
 | Scenario | LOC¹ | Baseline (tokens) | CG (tokens) | Saved | Ratio |
 |---|---:|---:|---:|---:|---:|
-| ba-server HTTP 路由 | ~70 | — | — | 50.8% | 2.03x |
-| BA 工作流执行函数签名 | ~75 | — | — | 57.2% | 2.34x |
-| 并行工作流定义 | ~76 | — | — | 77.5% | 4.45x |
+| ba-server HTTP routes | ~70 | — | — | 50.8% | 2.03x |
+| BA workflow execution function signatures | ~75 | — | — | 57.2% | 2.34x |
+| Parallel workflow definitions | ~76 | — | — | 77.5% | 4.45x |
 | batch+monitor | ~123 | — | — | 84.8% | 6.60x |
 | **TOTAL** | **~344** | — | — | **69.0%** | **3.22x** |
 
@@ -501,10 +501,10 @@ API: `POST http://localhost:8001/api/benchmark/token-efficiency` (shared cross-p
 
 | Scenario | LOC | Baseline (tokens) | CG (tokens) | Saved | Ratio |
 |---|---:|---:|---:|---:|---:|
-| protocol.rs 消息认证函数 | 80 | 797 | 167 | 79.0% | 4.77x |
-| security.rs 安全配置类型 | 89 | 889 | 305 | 65.7% | 2.92x |
-| osa-ca/lib.rs CA 工作流类型 + trait | 61 | 609 | 200 | 67.2% | 3.04x |
-| roles.rs 跨 crate 共享角色类型 | 49 | 326 | 171 | 47.5% | 1.91x |
+| protocol.rs message authentication function | 80 | 797 | 167 | 79.0% | 4.77x |
+| security.rs security configuration types | 89 | 889 | 305 | 65.7% | 2.92x |
+| osa-ca/lib.rs CA workflow types and trait | 61 | 609 | 200 | 67.2% | 3.04x |
+| roles.rs shared cross-crate role types | 49 | 326 | 171 | 47.5% | 1.91x |
 | **TOTAL** | **279** | **2621** | **843** | **67.8%** | **3.11x** |
 
 ### 4.3 Cross-Project Summary
@@ -521,22 +521,29 @@ Both projects converge near **~68–69% savings / ~3.1–3.2x ratio**, suggestin
 
 CGA also includes a deterministic context-quality benchmark for **Hallucination Pressure Score (HPS)**. HPS estimates pre-answer context risk from missing evidence, useless context, duplicated context, and ambiguous symbol hits.
 
-Run the sample CodexCLI and ClaudeCLI benchmark:
+Run the live database-backed benchmark against currently registered CGA projects:
 
 ```powershell
-python -m src.scripts.run_context_quality_benchmark `
-  --input docs/benchmarks/context-quality.codex-claude.jsonl `
-  --output docs/benchmarks/context-quality-report.json `
-  --markdown docs/benchmarks/context-quality-report.md
+python -m src.scripts.run_live_context_quality_benchmark `
+  --projects BrowserAgent IcM_Automation ADC `
+  --cases-per-project 34 `
+  --output docs/benchmarks/context-quality-live-projects.report.json `
+  --markdown docs/benchmarks/context-quality-live-projects.report.md `
+  --run-date 2026-06-02
 ```
 
-Latest sample report: `docs/benchmarks/context-quality-report.md`.
+Live JSON and Markdown reports are generated locally and ignored by git because they may include real project identifiers, source excerpts, and host-specific paths.
 
-| Project | Baseline HPS | CG HPS | HPS Reduction | Token Reduction |
-|---|---:|---:|---:|---:|
-| ClaudeCLI | 66.08 | 17.50 | 73.52% | 57.51% |
-| CodexCLI | 55.60 | 10.73 | 80.70% | 13.29% |
-| **Average** | **60.84** | **14.12** | **77.11%** | **35.40%** |
+The 2026-06-02 run selected three active projects from the CGA PostgreSQL `projects` table, read their current FalkorDB project graphs, and generated 34 deterministic symbol-level HPS cases per project from real local source files. The CG context used the target symbol excerpt plus one neighboring graph excerpt, so the numbers below reflect a conservative graph-scoped context rather than an ideal single-snippet case.
+
+| Project | Cases | Baseline HPS | CG HPS | HPS Reduction | Baseline Tokens | CG Tokens | Token Reduction |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| ADC | 34 | 13.91 | 14.35 | -15.64% | 2,831.74 | 313.00 | 88.88% |
+| BrowserAgent | 34 | 19.24 | 12.37 | 34.46% | 7,471.56 | 120.56 | 98.31% |
+| IcM_Automation | 34 | 19.83 | 15.08 | 21.20% | 6,121.56 | 1,016.32 | 84.12% |
+| **Average** | **102** | **17.66** | **13.94** | **13.34%** | **5,474.95** | **483.29** | **90.44%** |
+
+The live run is intentionally not flattened into a single success claim: ADC's HPS increased slightly under this conservative neighboring-context setup, while BrowserAgent and IcM_Automation improved. Across all 102 real-data cases, CG reduced average tokens by 90.44% and reduced average HPS by 13.34%.
 
 **Example constraints to include:**
 - **Amendment Proposals**: "Any change to the `.adc/` directory by an AI Agent MUST be submitted as an independent Pull Request titled prefix `[AMENDMENT]`. AI Agents are strictly forbidden from committing changes directly to the `main` branch if they affect the `.adc/` ruleset."

@@ -235,9 +235,9 @@ Example result shape:
 
 This lets agents answer:
 
-- "这个返回值受哪些参数影响？"
-- "输入参数经过哪些中间变量后进入返回值？"
-- "是否存在未参与返回值计算的参数？"
+- "Which parameters influence this return value?"
+- "Which intermediate variables does the input pass through before reaching the return value?"
+- "Are there parameters that do not participate in the return value computation?"
 
 ## Multi-language data-flow insights (v1.20.0)
 
@@ -245,8 +245,8 @@ Variable-flow tracking is now available for **Go**, **Rust**, and **Java** in ad
 
 New high-level tools:
 
-- `analyze_scope_variables(scope_qname, limit)` - 找出未使用参数和关键中间变量
-- `explain_data_flow(scope_qname, limit)` - 生成函数级数据转换解释，适合 agent 直接消费
+- `analyze_scope_variables(scope_qname, limit)` - Identifies unused parameters and key intermediate variables
+- `explain_data_flow(scope_qname, limit)` - Generates function-level data transformation explanations suitable for direct agent consumption
 
 Usage example:
 
@@ -282,9 +282,9 @@ With cross-function propagation, agents can trace that `render:input_text` influ
 
 This helps answer:
 
-- "这个返回值是不是经过别的函数加工后得到的？"
-- "调用链里参数是怎样跨函数传播的？"
-- "当前函数只是转发了下游函数的返回值，还是做了额外转换？"
+- "Was this return value produced through another function first?"
+- "How do parameters propagate across the call chain?"
+- "Does the current function only forward a downstream return value, or does it apply an additional transformation?"
 
 ## Live graph integration coverage (v1.23.0)
 
@@ -365,9 +365,9 @@ This complements `GITHUB_STEP_SUMMARY`: summary gives quick tails, artifact give
 
 These tools let agents answer:
 
-- "哪些参数根本没有参与函数内部的数据流？"
-- "哪些中间变量是数据转换链路的关键节点？"
-- "这个函数是如何把输入一步步转换成返回值的？"
+- "Which parameters do not participate in the function's internal data flow?"
+- "Which intermediate variables are key nodes in the data transformation chain?"
+- "How does this function transform inputs step by step into the return value?"
 
 Language coverage for variable flow:
 

@@ -79,6 +79,10 @@ src/logs/*
 !src/logs/.gitkeep
 *.log
 
+# Local live benchmark reports can include project IDs, source excerpts, and host paths.
+docs/benchmarks/context-quality-live-projects.report.json
+docs/benchmarks/context-quality-live-projects.report.md
+
 # Auth SQLite database (runtime data, never commit)
 *.db
 data/
