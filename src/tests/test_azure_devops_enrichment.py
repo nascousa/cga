@@ -39,3 +39,18 @@ def test_extract_azure_devops_pull_request_from_url() -> None:
     assert pull_requests[0].organization == "contoso"
     assert pull_requests[0].project == "CGA"
     assert pull_requests[0].repository == "cga"
+
+
+def test_extract_azure_devops_pr_metadata_requires_allowed_host() -> None:
+    refs = extract_azure_devops_refs(
+        {
+            "source_url": "https://example.test/activity/1",
+            "raw_metadata": {
+                "pr": {
+                    "url": "https://evil.example.test/redirect?next=https://dev.azure.com/contoso/CGA/_git/cga/pullrequest/42"
+                }
+            },
+        }
+    )
+
+    assert [ref for ref in refs if ref.item_type == "pull_request"] == []

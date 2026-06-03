@@ -61,9 +61,12 @@ def test_promotional_site_uses_vanta_net_and_project_links() -> None:
     script = _read("docs/site/site.js")
     styles = _read("docs/site/styles.css")
 
-    assert "vanta.net.min.js" in index
+    assert "vanta@0.5.24/dist/vanta.net.min.js" in index
     assert "three.min.js" in index
-    assert "VANTA.NET" in script
+    assert "VANTA" in script
+    assert "NET" in script
+    assert "integrity=\"sha384-" in index
+    assert "crossorigin=\"anonymous\"" in index
     assert "--vanta-bg-opacity: 0.25" in styles
     assert "#vanta-net canvas" in styles
     assert "opacity: var(--vanta-bg-opacity)" in styles

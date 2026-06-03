@@ -708,8 +708,8 @@ class GoParser:
     _INTERFACE_RE = re.compile(r"type\s+(\w+)\s+interface\s*\{")
     _METHOD_RE = re.compile(r"func\s*\(\s*(\w+)\s+\*?(\w+)\s*\)\s+(\w+)\s*\(")
     _METHOD_SCOPE_RE = re.compile(r"func\s*\(\s*(\w+)\s+\*?(\w+)\s*\)\s+(\w+)\s*\(([^\)]*)\)")
-    _IMPORT_RE = re.compile(r'import\s+(?:"([^"]+)"|(?:\(\s*(?:[^)]+)\s*\)))')
-    _IMPORT_BLOCK_RE = re.compile(r'import\s*\(\s*((?:[^)]+)+)\s*\)')
+    _IMPORT_RE = re.compile(r'^\s*import\s+"([^"]+)"\s*$')
+    _IMPORT_PATH_RE = re.compile(r'"([^"]+)"')
 
     def parse(self, file_path: str) -> ParsedFile:
         path = Path(file_path)
@@ -797,23 +797,25 @@ class GoParser:
 
     def _extract_imports(self, result: ParsedFile, source: str) -> None:
         """Extract Go imports."""
-        for match in self._IMPORT_RE.finditer(source):
-            import_path = match.group(1)
-            if import_path:
+        in_block = False
+        for raw_line in source.splitlines():
+            line = raw_line.split("//", 1)[0].strip()
+            if not line:
+                continue
+            if in_block:
+                if line.startswith(")"):
+                    in_block = False
+                    continue
+                match = self._IMPORT_PATH_RE.search(line)
+            elif line.startswith("import (") or line == "import(":
+                in_block = True
+                continue
+            else:
+                match = self._IMPORT_RE.match(line)
+            if match:
                 result.imports.append(
-                    ParsedImport(source_path=result.path, imported_module=import_path)
+                    ParsedImport(source_path=result.path, imported_module=match.group(1))
                 )
-
-        for match in self._IMPORT_BLOCK_RE.finditer(source):
-            block = match.group(1)
-            for line in block.split("\n"):
-                line = line.strip()
-                if line and not line.startswith("//"):
-                    import_path = line.strip('"\'')
-                    if import_path:
-                        result.imports.append(
-                            ParsedImport(source_path=result.path, imported_module=import_path)
-                        )
 
     def _extract_variable_flows(self, result: ParsedFile, lines: list[str], module_qname: str) -> None:
         scope_stack: list[tuple[str, int, set[str]]] = []
@@ -870,7 +872,7 @@ class RustParser:
     _MOD_RE = re.compile(r"mod\s+(\w+)")
     _STRUCT_RE = re.compile(r"struct\s+(\w+)")
     _TRAIT_RE = re.compile(r"trait\s+(\w+)")
-    _IMPL_RE = re.compile(r"impl\s+(?:<[^>]+>)?\s*(\w+)")
+    _IMPL_RE = re.compile(r"impl\s*(?:<[A-Za-z0-9_:'\s,&]+>\s*)?(\w+)")
     _FUNC_RE = re.compile(r"fn\s+(\w+)\s*\(")
     _FUNC_SCOPE_RE = re.compile(r"fn\s+(\w+)\s*\(([^\)]*)\)")
     _USE_RE = re.compile(r"use\s+([^\s;]+)")
@@ -983,12 +985,15 @@ class RustParser:
 class JavaParser:
     """Parse Java source files."""
 
+    _JAVA_TYPE_TOKEN_RE = r"[A-Za-z_][A-Za-z0-9_]*(?:<[A-Za-z0-9_?,\s]+>)?(?:\[\])?"
     _PACKAGE_RE = re.compile(r"package\s+([a-zA-Z0-9_.]+)\s*;")
     _CLASS_RE = re.compile(r"(?:public|private|protected)?\s*(?:static\s+)?class\s+(\w+)")
     _INTERFACE_RE = re.compile(r"(?:public|private|protected)?\s*interface\s+(\w+)")
     _ENUM_RE = re.compile(r"(?:public|private|protected)?\s*enum\s+(\w+)")
     _METHOD_RE = re.compile(r"(?:public|private|protected)?\s+(?:static\s+)?(?:\w+\s+)+(\w+)\s*\([^)]*\)")
-    _METHOD_SCOPE_RE = re.compile(r"(?:public|private|protected)?\s+(?:static\s+)?(?:[A-Za-z0-9_<>\[\]]+\s+)+(\w+)\s*\(([^)]*)\)")
+    _METHOD_SCOPE_RE = re.compile(
+        r"(?:public|private|protected)?\s+(?:static\s+)?(?:" + _JAVA_TYPE_TOKEN_RE + r"\s+)+(\w+)\s*\(([^)]*)\)"
+    )
     _IMPORT_RE = re.compile(r"import\s+([a-zA-Z0-9_.]+)\s*;")
 
     def parse(self, file_path: str) -> ParsedFile:
@@ -1094,7 +1099,7 @@ class JavaParser:
         class_stack: list[tuple[str, int]] = []
         scope_stack: list[tuple[str, int, set[str]]] = []
         brace_depth = 0
-        assign_re = re.compile(r"^\s*(?:[A-Za-z0-9_<>\[\]]+\s+)?(\w+)\s*=\s*(.+);?$")
+        assign_re = re.compile(r"^\s*(?:" + self._JAVA_TYPE_TOKEN_RE + r"\s+)?(\w+)\s*=\s*(.+);?$")
         for lineno, line in enumerate(lines, start=1):
             class_match = self._CLASS_RE.search(line)
             if class_match:

@@ -267,6 +267,26 @@ def test_parse_go_file(tmp_path):
     assert names["Greet"] == "method"
 
 
+def test_parse_go_import_block_with_aliases(tmp_path):
+    go_file = tmp_path / "imports.go"
+    go_file.write_text(
+        textwrap.dedent("""\
+        package main
+
+        import (
+            "fmt"
+            alias "example.com/project/pkg"
+            _ "github.com/lib/pq"
+        )
+        """),
+        encoding="utf-8",
+    )
+
+    result = GoParser().parse(str(go_file))
+    imports = [item.imported_module for item in result.imports]
+    assert imports == ["fmt", "example.com/project/pkg", "github.com/lib/pq"]
+
+
 def test_parse_go_variable_flows(tmp_path):
     go_file = tmp_path / "vars.go"
     go_file.write_text(
@@ -317,6 +337,26 @@ def test_parse_rust_file(tmp_path):
     assert names["Config"] == "struct"
     assert names["Handler"] == "trait"
     assert names["parse"] == "function"
+
+
+def test_parse_rust_impl_with_generics(tmp_path):
+    rs_file = tmp_path / "generic.rs"
+    rs_file.write_text(
+        textwrap.dedent("""\
+        pub struct Store<T> {
+            value: T,
+        }
+
+        impl<T> Store<T> {
+            pub fn get(&self) {}
+        }
+        """),
+        encoding="utf-8",
+    )
+
+    result = RustParser().parse(str(rs_file))
+    names = {s.name: s.symbol_type for s in result.symbols}
+    assert names["Store"] == "impl"
 
 
 def test_parse_rust_variable_flows(tmp_path):

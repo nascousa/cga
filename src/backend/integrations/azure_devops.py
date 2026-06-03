@@ -389,7 +389,7 @@ def _parse_ado_url(value: str) -> dict[str, str]:
     if not value:
         return {}
     parsed = urlparse(value)
-    host = parsed.netloc.lower()
+    host = (parsed.hostname or "").lower()
     path = [unquote(part) for part in parsed.path.strip("/").split("/") if part]
     context: dict[str, str] = {}
     if host == "dev.azure.com" and path:
@@ -429,17 +429,19 @@ def _pr_context_from_metadata(metadata: dict[str, Any], url_context: dict[str, s
         ),
         "url": ado_pr.get("url") or first_pr.get("url"),
     }
-    if not context["item_id"] and isinstance(pr_meta, dict) and "dev.azure.com" in str(pr_meta.get("url") or ""):
-        parsed = _parse_ado_url(str(pr_meta.get("url") or ""))
-        context.update(
-            {
-                "organization": context["organization"] or parsed.get("organization"),
-                "project": context["project"] or parsed.get("project"),
-                "repository": context["repository"] or parsed.get("repository"),
-                "item_id": parsed.get("pull_request_id"),
-                "url": pr_meta.get("url"),
-            }
-        )
+    if not context["item_id"] and isinstance(pr_meta, dict):
+        pr_url = str(pr_meta.get("url") or "")
+        parsed = _parse_ado_url(pr_url)
+        if parsed.get("pull_request_id"):
+            context.update(
+                {
+                    "organization": context["organization"] or parsed.get("organization"),
+                    "project": context["project"] or parsed.get("project"),
+                    "repository": context["repository"] or parsed.get("repository"),
+                    "item_id": parsed.get("pull_request_id"),
+                    "url": pr_url,
+                }
+            )
     return context
 
 

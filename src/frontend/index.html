@@ -6061,12 +6061,10 @@ function _wsrExternalRefs(activity) {
 }
 
 function _wsrCompactText(value, maxLen = 260) {
+  const entityMap = { nbsp: ' ', amp: '&', lt: '<', gt: '>' };
   const text = String(value || '')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
+    .replace(/&(nbsp|amp|lt|gt);/gi, (_, entity) => entityMap[entity.toLowerCase()] || '')
     .replace(/\s+/g, ' ')
     .trim();
   if (!text) return '';
