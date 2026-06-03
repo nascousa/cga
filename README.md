@@ -11,6 +11,8 @@ CGA is designed for evidence-first generation: agents retrieve the right code ev
 
 It also hosts WA-compatible work briefing aggregation so progress signals from other repos can be recorded and summarized centrally inside CGA through the Admin Dashboard surface.
 
+![CGA Admin Project dashboard](docs/site/cga-admin-project-dashboard.png)
+
 ## Author And Attribution
 
 CGA (ContextGraphAgent) was created and authored by Nate Scott. Public documentation, release notes, desktop bundle documentation, redistributions, and project notices should preserve that attribution while keeping the promotional website itself focused on the product experience.
