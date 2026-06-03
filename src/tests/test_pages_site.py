@@ -44,6 +44,18 @@ def test_author_attribution_lives_in_project_documents() -> None:
     assert "Project author and creator: Nate Scott" in open_source
 
 
+def test_readme_uses_live_multi_project_benchmark_results() -> None:
+    readme = _read("README.md")
+
+    assert "### 4.2 Live Multi-Project Benchmark Results" in readme
+    assert "34 deterministic symbol-level cases per project" in readme
+    assert "**102**" in readme
+    assert "**90.44%**" in readme
+    assert "BrowserAgent (BA)" not in readme
+    assert "OSAgent (OSA)" not in readme
+    assert "**68.4%**" not in readme
+
+
 def test_promotional_site_uses_vanta_net_and_project_links() -> None:
     index = _read("docs/site/index.html")
     script = _read("docs/site/site.js")
@@ -59,8 +71,41 @@ def test_promotional_site_uses_vanta_net_and_project_links() -> None:
     assert "https://codespaces.new/nascousa/cga?quickstart=1" in index
 
 
+def test_promotional_site_topbar_links_to_linkedin() -> None:
+    index = _read("docs/site/index.html")
+
+    assert '<a class="nav-action" href="https://nate.ucia.us" target="_blank" rel="noopener noreferrer">' in index
+    assert 'class="linkedin-icon"' in index
+    assert 'viewBox="0 0 24 24" fill="currentColor"' in index
+    assert 'data-lucide="external-link"' not in index
+    assert "LinkedIn" in index
+    assert '<a class="nav-action" href="https://github.com/nascousa/cga"' not in index
+    assert "GitHub\n      </a>" not in index
+
+
+def test_promotional_site_topbar_uses_full_brand_text() -> None:
+    index = _read("docs/site/index.html")
+    styles = _read("docs/site/styles.css")
+
+    assert '<span class="brand-copy">CONTEXT GRAPH AGENT</span>' in index
+    assert '<span class="brand-copy">ContextGraphAgent</span>' not in index
+    assert ".brand-copy { color: var(--muted); font-size: 14px; font-weight: 700; letter-spacing: 0; white-space: nowrap; }" in styles
+
+
 def test_promotional_site_uses_contextgraphagent_name() -> None:
     index = _read("docs/site/index.html")
 
     assert "ContextGraphAgent" in index
     assert "ContextGraph" + "Admin" not in index
+
+
+def test_promotional_site_highlights_cga_retrieval_model() -> None:
+    index = _read("docs/site/index.html")
+
+    assert "retrieves the right evidence before generation" in index
+    assert "query repository relationships" in index
+    assert "keyword search alone" in index
+    assert "Evidence Before Generation" in index
+    assert "Repository Relationships" in index
+    assert "Impact graph -> optimized context -> minimal code" in index
+    assert "Better file and symbol targeting with dependency awareness" in index

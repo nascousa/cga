@@ -99,6 +99,8 @@ out/
 # Note: Do not ignore .adc/ itself as it contains the constitution!
 # You should however ignore temporary AI outputs or raw generated templates if you don't track them.
 # adc-template/  # Uncomment if you want to ignore the generated template test output
+.adc/contextgraph-edge-agent/scratchpad/
+.adc/contextgraph-edge-agent/tasks/
 
 *.ps1
 !src/scripts/*.ps1

@@ -81,7 +81,7 @@ a { color: inherit; text-decoration: none; }
   font-weight: 800;
 }
 
-.brand-copy { color: var(--muted); font-size: 14px; font-weight: 700; }
+.brand-copy { color: var(--muted); font-size: 14px; font-weight: 700; letter-spacing: 0; white-space: nowrap; }
 
 .nav-links {
   display: flex;
@@ -155,6 +155,36 @@ a { color: inherit; text-decoration: none; }
 
 .hero-actions, .cta-strip, .metric-row { display: flex; flex-wrap: wrap; gap: 14px; }
 
+.hero-proof-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  max-width: 1020px;
+}
+
+.hero-proof {
+  min-height: 108px;
+  padding: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(8, 16, 24, 0.68);
+  box-shadow: 0 18px 54px rgba(0, 0, 0, 0.34);
+}
+
+.hero-proof strong {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--gold);
+  font-size: 15px;
+}
+
+.hero-proof span {
+  display: block;
+  color: #d6e2ec;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
 .button { min-height: 50px; padding: 0 18px; border: 1px solid transparent; font-size: 15px; }
 .button.primary { background: var(--green); color: #04100d; box-shadow: 0 18px 54px rgba(57, 242, 189, 0.2); }
 .button.secondary { border-color: rgba(255, 255, 255, 0.16); background: rgba(255, 255, 255, 0.06); color: var(--text); }
@@ -170,7 +200,7 @@ a { color: inherit; text-decoration: none; }
 
 .feature-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .feature-card, .terminal-panel, .metric-row div { border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; background: var(--panel); box-shadow: var(--shadow); }
-.feature-card { min-height: 236px; padding: 24px; }
+.feature-card { min-height: 252px; padding: 24px; }
 .feature-card svg { width: 28px; height: 28px; color: var(--green); }
 .feature-card h3 { margin: 30px 0 10px; font-size: 22px; }
 .feature-card p { margin: 0; }
@@ -201,7 +231,7 @@ pre { margin: 0; padding: 24px; overflow-x: auto; color: #dffcf3; font-size: 17p
   .hero h1 { font-size: 112px; }
   .hero-subtitle { font-size: 24px; }
   .section { padding: 68px 28px; }
-  .feature-grid, .split-band { grid-template-columns: 1fr; }
+  .feature-grid, .split-band, .hero-proof-grid { grid-template-columns: 1fr; }
   .section-heading h2 { font-size: 44px; }
   .footer { padding: 28px; }
 }
@@ -213,6 +243,7 @@ pre { margin: 0; padding: 24px; overflow-x: auto; color: #dffcf3; font-size: 17p
   .hero { padding: 152px 18px 58px; }
   .hero h1 { font-size: 82px; }
   .hero-subtitle { font-size: 21px; }
+  .hero-proof { min-height: 0; }
   .section { padding: 62px 18px; }
   .hero-actions, .cta-strip { align-items: stretch; flex-direction: column; }
   .button { width: 100%; }
