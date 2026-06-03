@@ -1,9 +1,9 @@
-# CGA (ContextGraphAgent)
+# CGA (Context Graph Agent)
 
-**Version:** 1.30.43
+**Version:** 1.30.44
 **Status:** Published
 **Author:** Nate Scott
-**Date:** 2026-06-02 (CGA feature highlights update)
+**Date:** 2026-06-02 (live multi-project benchmark results update)
 
 CGA, aka ContextGraphAgent, is a local-first graph context service for AI-assisted development. It indexes repository structure, symbols, calls, imports, and lightweight data flow into FalkorDB, then exposes retrieval and analysis tools through an MCP-compatible API.
 
@@ -482,46 +482,38 @@ CGA's graph-indexed retrieval delivers **precise, structured context** (type sig
 
 Token savings are not just an efficiency metric — they are a direct proxy for **response speed, reasoning accuracy, and the breadth of codebase an Agent can reason about in a single turn**.
 
-### 4.2 Benchmark Results
+### 4.2 Live Multi-Project Benchmark Results
 
-All scenarios use `heuristic-char-mix-v1` (non-CJK ~4 chars/token, CJK ~1.6 chars/token).  
-API: `POST http://localhost:8001/api/benchmark/token-efficiency` (shared cross-project endpoint).
+CGA's current public benchmark is the live database-backed **Hallucination Pressure Score (HPS)** benchmark. HPS estimates pre-answer context risk from missing evidence, useless context, duplicated context, and ambiguous symbol hits. Lower HPS is better.
 
-#### BrowserAgent (BA) — 2026-04-19
+The 2026-06-02 run used the currently running CGA runtime, selected three active projects from the PostgreSQL `projects` table, read indexed symbols from each FalkorDB project graph, and generated **34 deterministic symbol-level cases per project** from real local source files. The final results below are averaged across **102 total real-code cases**.
 
-| Scenario | LOC¹ | Baseline (tokens) | CG (tokens) | Saved | Ratio |
-|---|---:|---:|---:|---:|---:|
-| ba-server HTTP routes | ~70 | — | — | 50.8% | 2.03x |
-| BA workflow execution function signatures | ~75 | — | — | 57.2% | 2.34x |
-| Parallel workflow definitions | ~76 | — | — | 77.5% | 4.45x |
-| batch+monitor | ~123 | — | — | 84.8% | 6.60x |
-| **TOTAL** | **~344** | — | — | **69.0%** | **3.22x** |
+Each case compares broad source context against graph-scoped CG context made from the target symbol excerpt plus one neighboring graph excerpt. The table is intentionally based on multiple projects and many code symbols, not a small hand-entered sample.
 
-> ¹ BA LOC values estimated from source section ranges in `ba-server.ps1` / `ba-tools.ps1` (benchmark script no longer retained).
+| Project | Cases | Baseline HPS | CG HPS | HPS Reduction | Baseline Tokens | CG Tokens | Token Reduction |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| ADC | 34 | 13.91 | 14.35 | -15.64% | 2,831.74 | 313.00 | 88.88% |
+| BrowserAgent | 34 | 19.24 | 12.37 | 34.46% | 7,471.56 | 120.56 | 98.31% |
+| IcM_Automation | 34 | 19.83 | 15.08 | 21.20% | 6,121.56 | 1,016.32 | 84.12% |
+| **Average** | **102** | **17.66** | **13.94** | **13.34%** | **5,474.95** | **483.29** | **90.44%** |
 
-#### OSAgent (OSA) — 2026-04-19
+### 4.3 Cross-Project Average
 
-| Scenario | LOC | Baseline (tokens) | CG (tokens) | Saved | Ratio |
-|---|---:|---:|---:|---:|---:|
-| protocol.rs message authentication function | 80 | 797 | 167 | 79.0% | 4.77x |
-| security.rs security configuration types | 89 | 889 | 305 | 65.7% | 2.92x |
-| osa-ca/lib.rs CA workflow types and trait | 61 | 609 | 200 | 67.2% | 3.04x |
-| roles.rs shared cross-crate role types | 49 | 326 | 171 | 47.5% | 1.91x |
-| **TOTAL** | **279** | **2621** | **843** | **67.8%** | **3.11x** |
+| Metric | Result |
+|---|---:|
+| Projects | 3 |
+| Cases per project | 34 |
+| Total real-code cases | 102 |
+| Average baseline HPS | 17.66 |
+| Average CG HPS | 13.94 |
+| Average HPS reduction | 13.34% |
+| Average baseline tokens | 5,474.95 |
+| Average CG tokens | 483.29 |
+| Average token reduction | 90.44% |
 
-### 4.3 Cross-Project Summary
+The live run is intentionally not flattened into a single success claim: ADC's HPS increased slightly under this conservative neighboring-context setup, while BrowserAgent and IcM_Automation improved. Across all 102 real-data cases, CG reduced average tokens by 90.44% and reduced average HPS by 13.34%.
 
-| Project | Token Savings | Ratio | Stack |
-|---|---:|---:|---|
-| BrowserAgent | 69.0% | 3.22x | PowerShell + Chrome MV3 |
-| OSAgent | 67.8% | 3.11x | Rust (CA/EA/IA/VA) |
-| **Average** | **68.4%** | **3.17x** | — |
-
-Both projects converge near **~68–69% savings / ~3.1–3.2x ratio**, suggesting this is a reliable baseline for ADC-compliant Rust and scripting-language codebases using CG graph retrieval.
-
-### 4.4 Context Quality HPS Benchmark
-
-CGA also includes a deterministic context-quality benchmark for **Hallucination Pressure Score (HPS)**. HPS estimates pre-answer context risk from missing evidence, useless context, duplicated context, and ambiguous symbol hits.
+### 4.4 Reproduce The Live Benchmark
 
 Run the live database-backed benchmark against currently registered CGA projects:
 
@@ -535,17 +527,6 @@ python -m src.scripts.run_live_context_quality_benchmark `
 ```
 
 Live JSON and Markdown reports are generated locally and ignored by git because they may include real project identifiers, source excerpts, and host-specific paths.
-
-The 2026-06-02 run selected three active projects from the CGA PostgreSQL `projects` table, read their current FalkorDB project graphs, and generated 34 deterministic symbol-level HPS cases per project from real local source files. The CG context used the target symbol excerpt plus one neighboring graph excerpt, so the numbers below reflect a conservative graph-scoped context rather than an ideal single-snippet case.
-
-| Project | Cases | Baseline HPS | CG HPS | HPS Reduction | Baseline Tokens | CG Tokens | Token Reduction |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| ADC | 34 | 13.91 | 14.35 | -15.64% | 2,831.74 | 313.00 | 88.88% |
-| BrowserAgent | 34 | 19.24 | 12.37 | 34.46% | 7,471.56 | 120.56 | 98.31% |
-| IcM_Automation | 34 | 19.83 | 15.08 | 21.20% | 6,121.56 | 1,016.32 | 84.12% |
-| **Average** | **102** | **17.66** | **13.94** | **13.34%** | **5,474.95** | **483.29** | **90.44%** |
-
-The live run is intentionally not flattened into a single success claim: ADC's HPS increased slightly under this conservative neighboring-context setup, while BrowserAgent and IcM_Automation improved. Across all 102 real-data cases, CG reduced average tokens by 90.44% and reduced average HPS by 13.34%.
 
 **Example constraints to include:**
 - **Amendment Proposals**: "Any change to the `.adc/` directory by an AI Agent MUST be submitted as an independent Pull Request titled prefix `[AMENDMENT]`. AI Agents are strictly forbidden from committing changes directly to the `main` branch if they affect the `.adc/` ruleset."
@@ -603,6 +584,16 @@ How to view deployment status and URL:
 1. Open **GitHub -> Actions** and run **Deploy Docs To Pages**.
 2. After success, open **GitHub -> Settings -> Pages** to see the published site URL.
 3. The deployed URL is also exposed in the workflow job output (`github-pages` environment URL).
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=nascousa%2Fcga&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=nascousa/cga&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=nascousa/cga&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=nascousa/cga&type=date&legend=top-left" />
+ </picture>
+</a>
 
 
 

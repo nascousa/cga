@@ -222,7 +222,7 @@ def test_viewer_entrypoint_is_served() -> None:
     assert "<title>CGA Viewer</title>" in response.text
     assert '"sigma"' in response.text
     assert '"graphology"' in response.text
-    assert 'src="./main.js?v=1.30.43"' in response.text
+    assert 'src="./main.js?v=1.30.44"' in response.text
     assert 'id="copy-falkor-url"' in response.text
     assert 'aria-label="Copy FalkorDB connection URL"' in response.text
     assert '<label for="chunk-limit">Display Nodes</label>' in response.text
@@ -382,7 +382,7 @@ def test_admin_embeds_versioned_graph_viewer() -> None:
     response = TestClient(app).get("/admin")
 
     assert response.status_code == 200
-    assert 'data-src="/viewer/?v=1.30.43"' in response.text
+    assert 'data-src="/viewer/?v=1.30.44"' in response.text
     assert '<h1>CONTEXT GRAPH AGENT</h1>' in response.text
     assert '<span class="logo-text">CONTEXT GRAPH AGENT</span>' in response.text
     assert '<strong>Retrieve the right evidence before generation</strong>' in response.text

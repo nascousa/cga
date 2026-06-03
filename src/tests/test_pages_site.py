@@ -44,6 +44,18 @@ def test_author_attribution_lives_in_project_documents() -> None:
     assert "Project author and creator: Nate Scott" in open_source
 
 
+def test_readme_uses_live_multi_project_benchmark_results() -> None:
+    readme = _read("README.md")
+
+    assert "### 4.2 Live Multi-Project Benchmark Results" in readme
+    assert "34 deterministic symbol-level cases per project" in readme
+    assert "**102**" in readme
+    assert "**90.44%**" in readme
+    assert "BrowserAgent (BA)" not in readme
+    assert "OSAgent (OSA)" not in readme
+    assert "**68.4%**" not in readme
+
+
 def test_promotional_site_uses_vanta_net_and_project_links() -> None:
     index = _read("docs/site/index.html")
     script = _read("docs/site/site.js")
