@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from backend.auth import pgshim
+from backend import runtime_config
 from backend.auth import router as auth_router
 
 
@@ -16,11 +17,13 @@ async def _seed_project(
     project_id: int = 1,
     project_name: str = "osagent",
     project_external_id: str = "OESIJQWHXY",
+    repo_path: str | None = None,
 ) -> None:
+    resolved_repo_path = repo_path or f"D:/Repos/{project_name}"
     await db.execute(
-        "INSERT INTO projects(id, project_name, project_id, is_active) "
-        "VALUES (?, ?, ?, 1)",
-        (project_id, project_name, project_external_id),
+        "INSERT INTO projects(id, project_name, project_id, repo_path, is_active) "
+        "VALUES (?, ?, ?, ?, 1)",
+        (project_id, project_name, project_external_id, resolved_repo_path),
     )
 
 
@@ -64,6 +67,22 @@ def test_candidate_repo_paths_matches_punctuation_insensitive_local_repo(
 
     assert claude_candidates[0] == str(tmp_path / "ClaudeCLI")
     assert hermes_candidates[0] == str(tmp_path / "HermesAgent")
+
+
+def test_candidate_repo_paths_uses_configured_indexing_repos_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configured_root = tmp_path / "configured-repos"
+    configured_root.mkdir()
+    (configured_root / "BrowserAgent").mkdir()
+
+    monkeypatch.setattr(runtime_config, "RUNTIME_CONFIG_PATH", tmp_path / "runtime-config.json")
+    monkeypatch.setattr(auth_router, "_LOCAL_REPOS_ROOT", tmp_path / "unused-local-root")
+    runtime_config.update_runtime_config({"indexing": {"repos_root": str(configured_root)}})
+
+    candidates = auth_router._candidate_repo_paths("browser-agent")
+
+    assert candidates[0] == str(configured_root / "BrowserAgent")
 
 
 def test_build_index_job_status_marks_stale_processing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -152,7 +171,7 @@ async def test_trigger_project_index_calls_mcp_server_with_resolved_repo_path(
     auth_pg_pool,
 ) -> None:
     async with auth_pg_pool.acquire() as db:
-        await _seed_project(db)
+        await _seed_project(db, repo_path="D:/Repos/OSAgent")
 
         with patch.object(
             auth_router, "_resolve_repo_path", return_value="D:/Repos/OSAgent"
@@ -309,6 +328,55 @@ async def test_list_projects_index_status_uses_latest_job_across_repo_path_varia
 
 
 @pytest.mark.asyncio
+async def test_list_projects_index_status_uses_stored_repo_path_when_name_differs(
+    auth_pg_pool,
+) -> None:
+    consumer = AsyncMock()
+    consumer.get_queue_snapshot.return_value = {
+        "pending_jobs": [],
+        "processing_jobs": [],
+        "avg_duration_sec": 30,
+    }
+    consumer.get_jobs_by_repo.side_effect = [
+        [
+            {
+                "job_id": "echo-job",
+                "job_type": "index_full",
+                "repo_path": "/repos/orcasql-agctools-echo-ops",
+                "status": "done",
+                "created_at": "2026-05-27T08:30:27+00:00",
+                "updated_at": "2026-05-27T08:30:28+00:00",
+            }
+        ],
+        [],
+    ]
+
+    async with auth_pg_pool.acquire() as db:
+        await _seed_project(
+            db,
+            project_name="Echo-Ops",
+            project_external_id="R5Q1OHYLQ7",
+            repo_path="/repos/orcasql-agctools-echo-ops",
+        )
+
+        with patch.object(
+            auth_router,
+            "_candidate_repo_paths",
+            return_value=["/repos/echo-ops"],
+        ):
+            result = await auth_router.list_projects_index_status(
+                _={"username": "admin", "role": "admin"},
+                db=db,
+                consumer=consumer,
+            )
+
+    assert len(result) == 1
+    assert result[0].latest_job is not None
+    assert result[0].latest_job.job_id == "echo-job"
+    consumer.get_jobs_by_repo.assert_any_await("/repos/orcasql-agctools-echo-ops")
+
+
+@pytest.mark.asyncio
 async def test_recover_project_stale_index_jobs_delegates_to_consumer(
     auth_pg_pool,
 ) -> None:
@@ -327,7 +395,7 @@ async def test_recover_project_stale_index_jobs_delegates_to_consumer(
     ]
 
     async with auth_pg_pool.acquire() as db:
-        await _seed_project(db)
+        await _seed_project(db, repo_path="D:/Repos/OSAgent")
 
         with patch.object(
             auth_router, "_resolve_repo_path", return_value="D:/Repos/OSAgent"

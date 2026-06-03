@@ -253,7 +253,39 @@
     .settings-card .settings-row:last-child { border-bottom: 0; }
     .settings-card .settings-row label { color: var(--muted); font-weight: 500; }
     .settings-card .settings-value { color: var(--text); text-align: right; word-break: break-all; }
-    .settings-card .settings-value.mono { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+    .settings-card .settings-value.mono,
+    .settings-card .settings-copy-text.mono { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+    .settings-card .settings-row.settings-form-row { align-items: flex-start; }
+    .settings-card .settings-row.settings-form-row > label { padding-top: 8px; }
+    .settings-control {
+      display: grid;
+      gap: 6px;
+      flex: 1 1 420px;
+      max-width: 560px;
+    }
+    .settings-control input { font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+    .settings-status {
+      min-height: 16px;
+      color: var(--muted);
+      font-size: 11.5px;
+      line-height: 1.4;
+      text-align: right;
+    }
+    .settings-status.ok { color: var(--accent); }
+    .settings-status.warn { color: var(--warn); }
+    .settings-copy-value {
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .settings-copy-text {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .settings-copy-value .copy-id-btn { flex: 0 0 auto; }
     .settings-actions { display: flex; gap: 8px; padding: 12px 0; }
 
     .viewer-frame {
@@ -699,6 +731,31 @@
     .btn-ghost:hover { color: var(--text); border-color: var(--border-strong); background: var(--panel-elevated); }
     #pane-report {
       position: relative;
+    }
+    .wsr-preview-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .wsr-preview-editor {
+      width: 100%;
+      height: min(60vh, 680px);
+      min-height: 320px;
+      display: block;
+      background: #04060a !important;
+      border: 1px solid var(--border) !important;
+      border-radius: 8px !important;
+      padding: 14px;
+      font-family: Consolas, Menlo, monospace;
+      font-size: 12.5px;
+      line-height: 1.55;
+      overflow: auto;
+      color: var(--text) !important;
+      resize: vertical;
+    }
+    .wsr-preview-editor.is-dirty {
+      border-color: var(--warn) !important;
+      box-shadow: 0 0 0 2px var(--warn-soft) !important;
     }
     .wsr-busy-overlay {
       position: absolute;
@@ -2049,8 +2106,8 @@
         <table>
           <thead><tr>
             <th></th>
-            <th class="sortable center-col-header" onclick="setProjectsSort('project_id')">Project ID <span id="sort-project_id"></span></th>
             <th class="sortable center-col-header" onclick="setProjectsSort('project_name')">Project Name <span id="sort-project_name"></span></th>
+            <th class="sortable center-col-header" onclick="setProjectsSort('project_id')">Project ID <span id="sort-project_id"></span></th>
             <th class="sortable center-col-header" onclick="setProjectsSort('is_active')">Status <span id="sort-is_active"></span></th>
             <th class="sortable center-col-header" onclick="setProjectsSort('created_at')">Created <span id="sort-created_at"></span></th>
             <th class="actions-col-header">Actions</th>
@@ -2098,6 +2155,7 @@
           <table>
             <thead><tr>
               <th>Task</th>
+              <th class="center-col-header">Task ID</th>
               <th class="center-col-header">Type</th>
               <th class="center-col-header">Project</th>
               <th>Target</th>
@@ -2461,6 +2519,10 @@
         <div class="briefing-section-head">
           <div>
             <h3 id="wsr-title">Week —</h3>
+            <p style="margin-top:4px;font-size:12px;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap">
+              <span id="wsr-status">Ready.</span>
+              <span>Saved: <span id="wsr-generated-at">—</span></span>
+            </p>
           </div>
           <div style="display:flex;gap:6px;align-items:center">
             <a class="btn btn-sm" href="/admin/settings" onclick="event.preventDefault(); switchTab('settings'); setTimeout(()=>switchSettingsSubtab('report'),0);" title="Edit template in Settings → Report">Edit template</a>
@@ -2471,18 +2533,22 @@
             <div style="position:relative">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
                 <span style="font-size:12px;color:var(--muted)" id="wsr-prev-label">Last week</span>
-                <button onclick="copyWorkReportPrev()" title="Copy last week" aria-label="Copy last week"
-                  style="background:rgba(20,26,40,.85);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:2px 6px;font-size:13px;cursor:pointer">&#128203;</button>
+                <div class="wsr-preview-actions">
+                  <button class="btn btn-sm" id="wsr-save-prev-btn" onclick="saveWorkReportEdit('prev')" disabled>Save</button>
+                  <button class="btn btn-sm" onclick="copyWorkReportPrev()" title="Copy last week" aria-label="Copy last week">Copy</button>
+                </div>
               </div>
-              <pre id="wsr-preview-prev" style="white-space:pre-wrap;background:#04060a;border:1px solid var(--border);border-radius:8px;padding:14px;font-family:Consolas,Menlo,monospace;font-size:12.5px;line-height:1.55;max-height:60vh;overflow:auto;color:var(--text)">Click Generate to build the report.</pre>
+              <textarea id="wsr-preview-prev" class="wsr-preview-editor" spellcheck="false" aria-label="Last week WSR" oninput="markWorkReportDirty('prev')" onkeydown="handleWorkReportEditorKeydown(event, 'prev')">Click Generate to build the report.</textarea>
             </div>
             <div style="position:relative">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
                 <span style="font-size:12px;color:var(--muted)" id="wsr-this-label">This week</span>
-                <button onclick="copyWorkReport()" title="Copy this week" aria-label="Copy this week"
-                  style="background:rgba(20,26,40,.85);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:2px 6px;font-size:13px;cursor:pointer">&#128203;</button>
+                <div class="wsr-preview-actions">
+                  <button class="btn btn-sm" id="wsr-save-btn" onclick="saveWorkReportEdit('this')" disabled>Save</button>
+                  <button class="btn btn-sm" onclick="copyWorkReport()" title="Copy this week" aria-label="Copy this week">Copy</button>
+                </div>
               </div>
-              <pre id="wsr-preview" style="white-space:pre-wrap;background:#04060a;border:1px solid var(--border);border-radius:8px;padding:14px;font-family:Consolas,Menlo,monospace;font-size:12.5px;line-height:1.55;max-height:60vh;overflow:auto;color:var(--text)">Click Generate to build the report.</pre>
+              <textarea id="wsr-preview" class="wsr-preview-editor" spellcheck="false" aria-label="This week WSR" oninput="markWorkReportDirty('this')" onkeydown="handleWorkReportEditorKeydown(event, 'this')">Click Generate to build the report.</textarea>
             </div>
           </div>
         </div>
@@ -2526,7 +2592,7 @@
 
     <!-- GRAPH VIEWER -->
     <div class="pane" id="pane-viewer">
-      <iframe id="graph-viewer-frame" class="viewer-frame" title="CGA graph viewer" data-src="/viewer/?v=1.30.18"></iframe>
+      <iframe id="graph-viewer-frame" class="viewer-frame" title="CGA graph viewer" data-src="/viewer/?v=1.30.25"></iframe>
     </div>
 
     <!-- SETTINGS (admin only) -->
@@ -2557,7 +2623,18 @@
             <h2>Graph Database</h2>
             <p class="settings-hint">FalkorDB connection used by indexing and graph queries.</p>
             <div class="settings-card">
-              <div class="settings-row"><label>FalkorDB URL</label><span id="settings-falkordb-url" class="settings-value mono">…</span></div>
+              <div class="settings-row">
+                <label>FalkorDB URL</label>
+                <span class="settings-value settings-copy-value">
+                  <span id="settings-falkordb-url" class="settings-copy-text mono">…</span>
+                  <button type="button" class="copy-id-btn" onclick="copyFalkorDbUrl()" title="Copy FalkorDB connection URL" aria-label="Copy FalkorDB connection URL">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <rect x="9" y="9" width="11" height="11" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  </button>
+                </span>
+              </div>
               <div class="settings-actions">
                 <button class="btn btn-primary" onclick="openFdbBrowser()">Open FalkorDB Browser</button>
               </div>
@@ -2568,8 +2645,18 @@
             <h2>Indexing</h2>
             <p class="settings-hint">Project indexing defaults. Per-project overrides remain on the Project tab.</p>
             <div class="settings-card">
+              <div class="settings-row settings-form-row">
+                <label for="settings-indexing-repos-root">Repos Folder</label>
+                <span class="settings-control">
+                  <input id="settings-indexing-repos-root" placeholder="D:/Repos" spellcheck="false" />
+                  <span id="settings-indexing-repos-root-status" class="settings-status">Loading...</span>
+                </span>
+              </div>
               <div class="settings-row"><label>Incremental Indexing</label><span class="settings-value">Enabled</span></div>
               <div class="settings-row"><label>Default Token Budget</label><span class="settings-value">1500</span></div>
+              <div class="settings-actions">
+                <button class="btn btn-primary" onclick="saveIndexingSettings()">Save Settings</button>
+              </div>
             </div>
           </section>
 
@@ -2808,6 +2895,7 @@ let _auditPagination = { page: 1, pageSize: 25 };
 let _allUsers = [];
 let _auditTotal = 0;
 let _falkordbUrl = 'falkor://localhost:6379';
+let _runtimeConfig = null;
 let _workBriefingLoading = false;
 let _workBriefingSummary = null;
 let _workBriefingRequestedLimit = 25;
@@ -3150,7 +3238,7 @@ function renderProjectIdWithCopy(projectId, { placeholder = '—', extraClass = 
   return `<span class="project-id-inline">${esc(value)}${renderCopyIdButton(value, extraClass)}</span>`;
 }
 
-function renderScheduleTaskIdWithCopy(taskId, { placeholder = 'ΓÇö', extraClass = 'copy-id-btn-sm' } = {}) {
+function renderScheduleTaskIdWithCopy(taskId, { placeholder = '—', extraClass = 'copy-id-btn-sm' } = {}) {
   const value = String(taskId ?? '').trim();
   if (!value) return esc(placeholder);
   return `<span class="project-id-inline">${esc(value)}${renderCopyButton(value, 'Task ID', extraClass)}</span>`;
@@ -3295,6 +3383,10 @@ async function openFdbBrowser() {
   }
 }
 
+function copyFalkorDbUrl() {
+  copyText(_falkordbUrl, 'FalkorDB URL');
+}
+
 function goHome(event) {
   event?.preventDefault();
   const target = _me?.role === 'admin' ? 'briefing' : 'projects';
@@ -3318,11 +3410,45 @@ async function loadSettings() {
   if (fdbEl)  fdbEl.textContent  = _falkordbUrl || '—';
   try {
     const cfg = await api('GET', '/admin/runtime-config');
+    _runtimeConfig = cfg;
     if (cfg?.falkordb_url) {
       _falkordbUrl = cfg.falkordb_url;
       if (fdbEl) fdbEl.textContent = _falkordbUrl;
     }
+    renderIndexingSettings(cfg);
   } catch {}
+}
+
+function renderIndexingSettings(cfg) {
+  const indexing = cfg?.indexing || {};
+  const input = document.getElementById('settings-indexing-repos-root');
+  const status = document.getElementById('settings-indexing-repos-root-status');
+  if (input && document.activeElement !== input) input.value = indexing.repos_root || '';
+  if (!status) return;
+  const sourceLabel = indexing.repos_root_source === 'saved'
+    ? 'Saved'
+    : indexing.repos_root_source === 'environment'
+      ? 'Environment'
+      : 'Default';
+  const existsLabel = indexing.repos_root_exists ? 'folder found' : 'folder not found';
+  const defaultLabel = indexing.default_repos_root ? `Default: ${indexing.default_repos_root}` : '';
+  status.textContent = [sourceLabel, existsLabel, defaultLabel].filter(Boolean).join(' · ');
+  status.classList.toggle('ok', Boolean(indexing.repos_root_exists));
+  status.classList.toggle('warn', !indexing.repos_root_exists);
+}
+
+async function saveIndexingSettings() {
+  const input = document.getElementById('settings-indexing-repos-root');
+  const reposRoot = (input?.value || '').trim();
+  if (!reposRoot) { toast('Repos Folder is required', 'error'); return; }
+  try {
+    const cfg = await api('PATCH', '/admin/runtime-config', { indexing: { repos_root: reposRoot } });
+    _runtimeConfig = cfg;
+    renderIndexingSettings(cfg);
+    toast('Indexing settings saved');
+  } catch (e) {
+    toast(e.message, 'error');
+  }
 }
 
 function switchSettingsSubtab(name, btn) {
@@ -3993,7 +4119,7 @@ function scheduleStatusClass(status) {
 
 function scheduleSummaryStatusTone(status) {
   if (status === 'success' || status === 'failed' || status === 'running') return status;
-  if (!status || status === 'ΓÇö') return 'empty';
+  if (!status || status === '—') return 'empty';
   return 'default';
 }
 
@@ -4012,28 +4138,50 @@ function renderSchedules() {
   document.getElementById('schedule-total-count').textContent = String(_scheduleTasks.length);
   document.getElementById('schedule-enabled-count').textContent = String(enabledCount);
   document.getElementById('schedule-due-count').textContent = String(dueSoon);
-  document.getElementById('schedule-last-status').textContent = lastStatus;
+  const lastStatusEl = document.getElementById('schedule-last-status');
+  lastStatusEl.textContent = lastStatus;
+  lastStatusEl.dataset.scheduleStatus = scheduleSummaryStatusTone(lastStatus);
 
   const rows = _scheduleTasks.filter(task => {
     if (typeFilter && task.task_type !== typeFilter) return false;
     if (!query) return true;
-    return [task.name, task.description, task.task_type, task.project_name, task.project_external_id, task.agent_id, task.target_url, task.last_run_status]
+    const browserTask = browserTaskSpecFromPayload(task.payload || {});
+    return [
+      task.task_id,
+      task.name,
+      task.description,
+      task.task_type,
+      task.project_name,
+      task.project_external_id,
+      task.agent_id,
+      task.target_url,
+      task.last_run_status,
+      browserTask?.url,
+      browserTask?.goal,
+      ...(Array.isArray(browserTask?.assertions) ? browserTask.assertions : []),
+    ]
       .join(' ').toLowerCase().includes(query);
   });
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state">${_scheduleTasks.length ? 'No matching schedules' : 'No scheduled tasks yet'}</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">${_scheduleTasks.length ? 'No matching schedules' : 'No scheduled tasks yet'}</div></td></tr>`;
   } else {
     tbody.innerHTML = rows.map(task => {
       const status = task.last_run_status || 'never';
       const statusCls = task.last_run_status ? scheduleStatusClass(task.last_run_status) : 'pill-gray';
       const projectText = task.project_name || task.project_external_id || '—';
+      const browserTask = browserTaskSpecFromPayload(task.payload || {});
+      const retryButton = task.last_run_status === 'failed'
+        ? `<button class="btn btn-sm btn-danger" onclick="retryScheduleTask(${task.id},this)" title="Retry this failed schedule now">Retry</button>`
+        : '';
       return `
         <tr>
           <td>
             <strong>${esc(task.name)}</strong>
             ${task.description ? `<div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(task.description)}</div>` : ''}
+            ${browserTask?.url ? `<div class="mono" style="font-size:11px;margin-top:3px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(browserTask.url)}">${esc(browserTask.url)}</div>` : ''}
           </td>
+          <td class="mono" style="text-align:center">${renderScheduleTaskIdWithCopy(task.task_id)}</td>
           <td style="text-align:center"><span class="pill pill-blue">${esc(scheduleTypeLabel(task.task_type))}</span></td>
           <td style="text-align:center">${esc(projectText)}</td>
           <td><div class="mono schedule-target-text" title="${esc(task.target_url || '')}">${esc(task.target_url || '—')}</div></td>
@@ -4056,32 +4204,45 @@ function renderSchedules() {
   }
 
   if (!_scheduleRuns.length) {
-    runsBody.innerHTML = '<tr><td colspan="6"><div class="empty-state">No scheduled runs recorded yet</div></td></tr>';
+    runsBody.innerHTML = '<tr><td colspan="7"><div class="empty-state">No scheduled runs recorded yet</div></td></tr>';
   } else {
     runsBody.innerHTML = _scheduleRuns.map(run => `
       <tr>
         <td class="mono" style="text-align:center">${esc(_fmtIso(run.started_at))}</td>
-        <td class="mono" style="text-align:center">#${esc(run.schedule_id)}</td>
+        <td class="mono" style="text-align:center">${renderScheduleTaskIdWithCopy(run.task_id || ('#' + run.schedule_id))}</td>
         <td style="text-align:center"><span class="pill ${scheduleStatusClass(run.status)}">${esc(run.status || '')}</span></td>
         <td class="mono" style="text-align:center">${run.status_code == null ? '—' : esc(String(run.status_code))}</td>
         <td class="mono" style="text-align:center">${esc(String(run.duration_ms || 0))} ms</td>
         <td><div class="schedule-run-error" title="${esc(run.error || '')}">${esc(run.error || '—')}</div></td>
+        <td>
+          <div class="project-actions">
+            ${run.status === 'failed' ? `<button class="btn btn-sm btn-danger" onclick="retryScheduleTask(${run.schedule_id},this)" title="Retry this failed schedule now">Retry</button>` : '<span style="color:var(--muted)">—</span>'}
+          </div>
+        </td>
       </tr>
     `).join('');
   }
 }
 
-async function runScheduleTask(taskId, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = 'Running...'; }
+async function runScheduleTask(taskId, btn, options = {}) {
+  const isRetry = options?.retry === true;
+  const originalText = btn?.textContent || (isRetry ? 'Retry' : 'Run');
+  if (btn) { btn.disabled = true; btn.textContent = isRetry ? 'Retrying...' : 'Running...'; }
   try {
     const run = await api('POST', `/admin/schedules/${taskId}/run`);
-    toast(run.status === 'success' ? 'Schedule run completed' : 'Schedule run failed', run.status === 'success' ? 'success' : 'error');
+    const successMessage = isRetry ? 'Schedule retry completed' : 'Schedule run completed';
+    const failureMessage = isRetry ? 'Schedule retry failed' : 'Schedule run failed';
+    toast(run.status === 'success' ? successMessage : failureMessage, run.status === 'success' ? 'success' : 'error');
     await loadSchedules();
   } catch (e) {
     toast(e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Run'; }
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
   }
+}
+
+async function retryScheduleTask(taskId, btn) {
+  await runScheduleTask(taskId, btn, { retry: true });
 }
 
 async function toggleScheduleTask(taskId, enabled) {
@@ -4438,15 +4599,15 @@ function filterProjects(q) {
     <tr>
       <td><button class="expand-btn" onclick="toggleTokens(${p.id},this)">${expanded ? '&#9660;' : '&#9654;'}</button></td>
       <td>
+        <strong style="color:${p.is_active ? 'var(--accent)' : 'var(--danger)'}">${esc(p.project_name)}</strong>
+      </td>
+      <td>
         <div class="project-id-cell">
           <span>${esc(p.project_id)}</span>
           <button type="button" class="copy-id-btn" onclick="copyProjectId(${jsArg(p.project_id)})" title="Copy project ID" aria-label="Copy project ID">
             <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke-width="1.5"></rect><path d="M3 10.5V3.5C3 3 3.5 2.5 4 2.5H10.5" stroke-width="1.5" stroke-linecap="round"></path></svg>
           </button>
         </div>
-      </td>
-      <td>
-        <strong style="color:${p.is_active ? 'var(--accent)' : 'var(--danger)'}">${esc(p.project_name)}</strong>
       </td>
       <td>
         <div class="index-status-panel">
@@ -5500,6 +5661,7 @@ let _wsrBusyWatchdog = null;
 let _wsrAutoGeneratedOnce = false;
 let _wsrWindowEventCounts = new Map();
 let _wsrHistoryStatusRefreshedAt = 0;
+let _wsrActiveSnapshot = null;
 let _msAdoPollTimer = null;
 let _msAdoPollId = '';
 
@@ -6118,10 +6280,8 @@ async function generateWorkReport() {
     _wsrLastMarkdown = md;
     _wsrLastMarkdownPrev = mdPrev;
     _wsrSetTitle(thisEnd);
-    const pre = document.getElementById('wsr-preview');
-    if (pre) pre.textContent = md;
-    const preP = document.getElementById('wsr-preview-prev');
-    if (preP) preP.textContent = mdPrev;
+    _wsrSetPreviewText('this', md);
+    _wsrSetPreviewText('prev', mdPrev);
     const prevLabel = document.getElementById('wsr-prev-label');
     if (prevLabel) {
       const wkP = _wsrIsoWeek(new Date(prevEnd.getTime() - 1));
@@ -6137,7 +6297,9 @@ async function generateWorkReport() {
     if (genEl) genEl.textContent = stamp;
     _wsrSetBusyMessage('Saving history...');
     setWsrStatus('Saving history…');
-    try { localStorage.setItem(WSR_STORAGE_KEY, JSON.stringify({ md, mdPrev, stamp, days, dataStatusVersion: 2 })); } catch {}
+    const currentMeta = _wsrBuildSnapshotMeta(thisStart, thisEnd, { stamp, days: 7, dataStatusVersion: 2 });
+    _wsrSetActiveSnapshotMeta(currentMeta);
+    _wsrWriteCachedReport({ md, mdPrev, stamp, days, dataStatusVersion: 2, windowStart: currentMeta.windowStart, windowEnd: currentMeta.windowEnd });
     appendWorkReportToHistory(_wsrBuildWeeklyHistoryEntries(summary, days, thisEnd, stamp));
     setWsrStatus('Ready.');
   } catch (e) {
@@ -6262,6 +6424,148 @@ function _wsrSetPreviewLabels(currentEnd, prevEnd) {
   }
 }
 
+function _wsrPreviewKind(which) {
+  return which === 'prev' ? 'prev' : 'this';
+}
+
+function _wsrPreviewId(which) {
+  return _wsrPreviewKind(which) === 'prev' ? 'wsr-preview-prev' : 'wsr-preview';
+}
+
+function _wsrSaveButtonId(which) {
+  return _wsrPreviewKind(which) === 'prev' ? 'wsr-save-prev-btn' : 'wsr-save-btn';
+}
+
+function _wsrPreviewLabel(which) {
+  return _wsrPreviewKind(which) === 'prev' ? 'Last week WSR' : 'This week WSR';
+}
+
+function _wsrGetPreviewText(which) {
+  const el = document.getElementById(_wsrPreviewId(which));
+  if (!el) return '';
+  if (typeof el.value === 'string') return el.value;
+  return el.innerText || el.textContent || '';
+}
+
+function _wsrSetPreviewText(which, markdown, clean = true) {
+  const el = document.getElementById(_wsrPreviewId(which));
+  if (!el) return;
+  const text = String(markdown || '');
+  if (typeof el.value === 'string') el.value = text;
+  else el.textContent = text;
+  if (clean) _wsrSetPreviewDirty(which, false);
+}
+
+function _wsrSetPreviewDirty(which, isDirty) {
+  const kind = _wsrPreviewKind(which);
+  const btn = document.getElementById(_wsrSaveButtonId(kind));
+  const editor = document.getElementById(_wsrPreviewId(kind));
+  if (btn) btn.disabled = !isDirty;
+  if (editor) editor.classList.toggle('is-dirty', !!isDirty);
+}
+
+function markWorkReportDirty(which) {
+  _wsrSetPreviewDirty(which, true);
+  setWsrStatus(`${_wsrPreviewLabel(which)} has unsaved edits.`);
+}
+
+function handleWorkReportEditorKeydown(event, which) {
+  if (!event || !(event.ctrlKey || event.metaKey) || String(event.key || '').toLowerCase() !== 's') return;
+  event.preventDefault();
+  saveWorkReportEdit(which);
+}
+
+function _wsrBuildSnapshotMeta(windowStart, windowEnd, extra = {}) {
+  const start = new Date(windowStart);
+  const end = new Date(windowEnd);
+  const meta = { ...extra };
+  if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())) {
+    meta.windowStart = _wsrFormatDate(start);
+    meta.windowEnd = _wsrFormatDate(end);
+    meta.prevWindowEnd = meta.windowStart;
+    meta.prevWindowStart = _wsrFormatDate(new Date(start.getTime() - 7 * 86400000));
+  }
+  return meta;
+}
+
+function _wsrSetActiveSnapshotMeta(meta = {}) {
+  _wsrActiveSnapshot = { ...meta };
+}
+
+function _wsrReadCachedReport() {
+  try {
+    const raw = localStorage.getItem(WSR_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch { return {}; }
+}
+
+function _wsrWriteCachedReport(patch) {
+  const next = { ..._wsrReadCachedReport(), ...patch };
+  try { localStorage.setItem(WSR_STORAGE_KEY, JSON.stringify(next)); } catch {}
+  return next;
+}
+
+function _wsrFindHistoryEntry(windowStart, windowEnd) {
+  const key = _wsrWindowKey(windowStart, windowEnd);
+  return readWorkReportHistory().find(entry => _wsrWindowKey(entry?.windowStart, entry?.windowEnd) === key) || null;
+}
+
+function saveWorkReportEdit(which = 'this') {
+  const kind = _wsrPreviewKind(which);
+  _wsrLastMarkdown = _wsrGetPreviewText('this');
+  _wsrLastMarkdownPrev = _wsrGetPreviewText('prev');
+  const savedAt = new Date().toISOString();
+  const active = _wsrActiveSnapshot || {};
+  const cached = _wsrReadCachedReport();
+  const cachePatch = {
+    md: _wsrLastMarkdown,
+    mdPrev: _wsrLastMarkdownPrev,
+    stamp: savedAt,
+    editedAt: savedAt,
+    days: active.days || cached.days || 7,
+    dataStatusVersion: active.dataStatusVersion || cached.dataStatusVersion || 2,
+  };
+  if (active.windowStart && active.windowEnd) {
+    cachePatch.windowStart = active.windowStart;
+    cachePatch.windowEnd = active.windowEnd;
+  }
+  _wsrWriteCachedReport(cachePatch);
+
+  const historyUpdates = [];
+  if (active.windowStart && active.windowEnd) {
+    historyUpdates.push({
+      ...active,
+      ...cachePatch,
+      title: active.title,
+      totalEvents: active.totalEvents,
+    });
+  }
+  if (kind === 'prev' && active.prevWindowStart && active.prevWindowEnd) {
+    const existingPrev = _wsrFindHistoryEntry(active.prevWindowStart, active.prevWindowEnd) || {};
+    historyUpdates.push({
+      ...existingPrev,
+      md: _wsrLastMarkdownPrev,
+      mdPrev: existingPrev.mdPrev || '',
+      stamp: savedAt,
+      editedAt: savedAt,
+      days: existingPrev.days || 7,
+      windowStart: active.prevWindowStart,
+      windowEnd: active.prevWindowEnd,
+      dataStatusVersion: existingPrev.dataStatusVersion || active.dataStatusVersion || 2,
+    });
+  }
+  if (historyUpdates.length) appendWorkReportToHistory(historyUpdates);
+  else renderWorkReportHistory();
+
+  _wsrSetActiveSnapshotMeta({ ...active, ...cachePatch });
+  _wsrSetPreviewDirty(kind, false);
+  const stampEl = document.getElementById('wsr-generated-at');
+  if (stampEl) stampEl.textContent = savedAt;
+  setWsrStatus(`${_wsrPreviewLabel(kind)} saved.`);
+  toast(`${_wsrPreviewLabel(kind)} saved`);
+}
+
 function _wsrResetHistoryPagination() {
   _wsrHistoryVisibleCount = WSR_HISTORY_BATCH_SIZE;
 }
@@ -6324,14 +6628,15 @@ function viewWorkReportFromHistory(idx) {
   _wsrLastMarkdown = e.md;
   _wsrLastMarkdownPrev = e.mdPrev || '';
   if (e.windowEnd) _wsrSetTitle(new Date(e.windowEnd));
-  const pre = document.getElementById('wsr-preview');
-  if (pre) pre.textContent = e.md;
-  const preP = document.getElementById('wsr-preview-prev');
-  if (preP) preP.textContent = e.mdPrev || '_(no previous-week snapshot stored)_';
+  _wsrSetPreviewText('this', e.md);
+  _wsrSetPreviewText('prev', e.mdPrev || '_(no previous-week snapshot stored)_');
   if (e.windowEnd) {
     const currentEnd = new Date(e.windowEnd);
     const prevEnd = e.windowStart ? new Date(e.windowStart) : new Date(currentEnd.getTime() - 7 * 86400000);
     _wsrSetPreviewLabels(currentEnd, prevEnd);
+    _wsrSetActiveSnapshotMeta(_wsrBuildSnapshotMeta(prevEnd, currentEnd, { ...e }));
+  } else {
+    _wsrSetActiveSnapshotMeta({ ...e });
   }
   const stampEl = document.getElementById('wsr-generated-at');
   if (stampEl) stampEl.textContent = e.stamp || '—';
@@ -6451,6 +6756,7 @@ async function regenerateAllWorkReports() {
 
 async function copyWorkReport() {
   if (!_wsrLastMarkdown) { await generateWorkReport(); }
+  _wsrLastMarkdown = _wsrGetPreviewText('this') || _wsrLastMarkdown;
   try {
     await navigator.clipboard.writeText(_wsrLastMarkdown || '');
     toast('This week WSR copied');
@@ -6461,6 +6767,7 @@ async function copyWorkReport() {
 
 async function copyWorkReportPrev() {
   if (!_wsrLastMarkdownPrev) { await generateWorkReport(); }
+  _wsrLastMarkdownPrev = _wsrGetPreviewText('prev') || _wsrLastMarkdownPrev;
   try {
     await navigator.clipboard.writeText(_wsrLastMarkdownPrev || '');
     toast('Last week WSR copied');
@@ -6485,23 +6792,22 @@ function loadWorkReport() {
   const reportWindow = _wsrGetReportWeekWindow(new Date());
   _wsrSetTitle(reportWindow.weekEnd);
   _wsrSetPreviewLabels(reportWindow.weekEnd, reportWindow.weekStart);
+  _wsrSetActiveSnapshotMeta(_wsrBuildSnapshotMeta(reportWindow.weekStart, reportWindow.weekEnd, { days: 7, dataStatusVersion: 2 }));
   _wsrResetHistoryPagination();
   renderWorkReportHistory();
   // Restore last cached report so the tab is not blank.
   if (!_wsrLastMarkdown) {
     try {
-      const raw = localStorage.getItem(WSR_STORAGE_KEY);
-      if (raw) {
-        const cached = JSON.parse(raw);
-        if (cached?.md) {
-          _wsrLastMarkdown = cached.md;
-          _wsrLastMarkdownPrev = cached.mdPrev || '';
-          const pre = document.getElementById('wsr-preview');
-          if (pre) pre.textContent = cached.md;
-          const preP = document.getElementById('wsr-preview-prev');
-          if (preP && cached.mdPrev) preP.textContent = cached.mdPrev;
-          const stampEl = document.getElementById('wsr-generated-at');
-          if (stampEl) stampEl.textContent = cached.stamp || '—';
+      const cached = _wsrReadCachedReport();
+      if (cached?.md) {
+        _wsrLastMarkdown = cached.md;
+        _wsrLastMarkdownPrev = cached.mdPrev || '';
+        _wsrSetPreviewText('this', cached.md);
+        if (cached.mdPrev) _wsrSetPreviewText('prev', cached.mdPrev);
+        const stampEl = document.getElementById('wsr-generated-at');
+        if (stampEl) stampEl.textContent = cached.stamp || '—';
+        if (cached.windowStart && cached.windowEnd) {
+          _wsrSetActiveSnapshotMeta(_wsrBuildSnapshotMeta(cached.windowStart, cached.windowEnd, { ...cached }));
         }
       }
     } catch {}
