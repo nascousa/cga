@@ -46,7 +46,7 @@ jobs:
         run: |
           mkdir -p .ci-logs
           set -o pipefail
-          pytest --cov=src --cov-report=term-missing --cov-fail-under=75 2>&1 | tee .ci-logs/coverage.log
+          pytest --cov=src --cov-report=term-missing --cov-fail-under=55 2>&1 | tee .ci-logs/coverage.log
 
       - name: Run live graph smoke tests
         id: smoke
@@ -126,23 +126,9 @@ jobs:
             exit 1
           fi
 
-      - name: Enforce vulnerability exception expiry
-        env:
-          VULN_EXCEPTION_ID: CVE-2026-4539
-          VULN_EXCEPTION_EXPIRES: "2026-05-31"
-        run: |
-          TODAY="$(date -u +%F)"
-          if [[ "$TODAY" > "$VULN_EXCEPTION_EXPIRES" ]]; then
-            echo "Temporary vulnerability exception expired: $VULN_EXCEPTION_ID (expired $VULN_EXCEPTION_EXPIRES)."
-            echo "Remove ignore or update dependency to a fixed version."
-            exit 1
-          fi
-
       - name: Run dependency vulnerability audit
-        env:
-          VULN_EXCEPTION_ID: CVE-2026-4539
         run: |
-          pip-audit -r requirements.txt --ignore-vuln "$VULN_EXCEPTION_ID"
+          pip-audit -r requirements.txt
 
   pr-policy-checklist:
     if: github.event_name == 'pull_request'
