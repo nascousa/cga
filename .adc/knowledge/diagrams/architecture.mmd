@@ -6,6 +6,7 @@ flowchart TB
     GitHub[GitHub OAuth]
     Microsoft[Microsoft Device Code OAuth]
     AzureDevOps[Azure DevOps REST API]
+    BrowserAgentBridge[BrowserAgent Bridge at localhost:9876]
     FdbBrowser[FalkorDB Browser UI]
 
     subgraph Runtime[ContextGraph Runtime]
@@ -15,7 +16,9 @@ flowchart TB
             AdminSPA[Admin SPA at /admin]
             ViewerStatic[Viewer Static App at /viewer]
             AuthAPI[Auth and Admin API at /api/auth]
+            RuntimeConfigAPI[Runtime Config API at /api/admin/runtime-config]
             WorkBriefingAPI[WorkBriefing and Report API]
+            ScheduleAPI[Schedule API at /api/admin/schedules]
             ViewerAPI[Viewer API at /api/viewer]
             MCPServer[MCP SSE Server at /mcp]
             AuditMW[Audit Middleware]
@@ -32,6 +35,7 @@ flowchart TB
             TraceRecorder[Trace Recorder]
             TraceEvaluator[Trace Evaluator]
             AdoEnrichment[ADO Ticket Enrichment]
+            ScheduledTaskWorker[Scheduled Task Worker]
         end
     end
 
@@ -41,32 +45,46 @@ flowchart TB
         JobStream[(Redis Streams: contextgraph:jobs)]
         TraceStream[(Redis Traces and Cache DB)]
         Falkor[(FalkorDB Project Graphs)]
+        RuntimeConfigFile[(Runtime Config JSON)]
     end
 
     Operator --> Browser
     Browser --> AdminSPA
     Browser --> ViewerStatic
     Browser --> AuthAPI
+    Browser --> RuntimeConfigAPI
     Browser --> WorkBriefingAPI
+    Browser --> ScheduleAPI
     AgentClient --> MCPServer
 
     AuthAPI --> AuditMW
+    RuntimeConfigAPI --> AuditMW
     WorkBriefingAPI --> AuditMW
+    ScheduleAPI --> AuditMW
     ViewerAPI --> AuditMW
     MCPServer --> AuditMW
     MCPServer --> TokenMW
 
     AdminSPA --> AuthAPI
+    AdminSPA --> RuntimeConfigAPI
     AdminSPA --> WorkBriefingAPI
+    AdminSPA --> ScheduleAPI
     AdminSPA --> ViewerAPI
     AdminSPA -->|launch browser| FdbBrowser
     ViewerStatic --> ViewerAPI
 
     AuthAPI --> AuthDB
+    AuthAPI --> RuntimeConfigFile
+    RuntimeConfigAPI --> RuntimeConfigFile
     AuthAPI --> GitHub
     AuthAPI --> Microsoft
     WorkBriefingAPI --> WorkDB
     WorkBriefingAPI --> AdoEnrichment
+    ScheduleAPI --> AuthDB
+    ScheduleAPI --> ScheduledTaskWorker
+    ScheduledTaskWorker --> AuthDB
+    ScheduledTaskWorker -->|BrowserAgent sequential page-test commands| BrowserAgentBridge
+    BrowserAgentBridge -->|queued command results| ScheduledTaskWorker
     AdoEnrichment --> AuthDB
     AdoEnrichment --> AzureDevOps
     ViewerAPI --> GraphRegistry
