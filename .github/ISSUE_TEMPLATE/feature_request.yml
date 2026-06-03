@@ -1,0 +1,58 @@
+name: Feature request
+description: Suggest an improvement or new capability for CGA.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. Please describe the workflow or outcome you want CGA to support.
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Admin UI
+        - MCP server
+        - Graph indexing
+        - Work briefing
+        - Docker/Desktop packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do, and what currently gets in the way?
+      placeholder: Describe the user workflow, limitation, or desired outcome.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What should CGA do differently?
+      placeholder: Describe the change you would like to see.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Share any workaround, alternate design, or related tool you considered.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Add links, screenshots, examples, or constraints that would help evaluate the request.
+    validations:
+      required: false

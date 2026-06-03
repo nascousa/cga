@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: CGA documentation
+    url: https://github.com/nascousa/cga#readme
+    about: Check the README and project documentation before opening an issue.

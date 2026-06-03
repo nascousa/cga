@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible problem in CGA.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve CGA. Please include enough detail for maintainers to reproduce the problem.
+
+  - type: input
+    id: version
+    attributes:
+      label: CGA version
+      description: Use the version from the README, release artifact, or Admin UI when available.
+      placeholder: "1.30.44"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Admin UI
+        - MCP server
+        - Graph indexing
+        - Work briefing
+        - Docker/Desktop packaging
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect to happen?
+      placeholder: Describe the issue clearly and concisely.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: List the smallest set of steps that reproduces the problem.
+      placeholder: |
+        1. Start CGA with ...
+        2. Open ...
+        3. Click ...
+        4. See ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Include OS, Docker/Desktop version, browser, Python version, and any relevant deployment details.
+      placeholder: "Windows 11, Docker Desktop 4.x, Chrome, Python 3.11"
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Paste relevant logs or attach screenshots. Remove secrets, tokens, and private data first.
+      render: shell
+    validations:
+      required: false
