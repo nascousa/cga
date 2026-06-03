@@ -11,7 +11,23 @@ CGA is designed for evidence-first generation: agents retrieve the right code ev
 
 It also hosts WA-compatible work briefing aggregation so progress signals from other repos can be recorded and summarized centrally inside CGA through the Admin Dashboard surface.
 
-![CGA Admin Project dashboard](docs/site/cga-admin-project-dashboard.png)
+## Project Screenshots
+
+### 3D Graph Viewer
+
+![CGA 3D graph viewer rotating project relationships](docs/site/cga-ui-3d-graph-rotating.png)
+
+| Project Console | Work Dashboard |
+|---|---|
+| ![CGA project console with retrieval highlights and indexing status](docs/site/cga-ui-projects.png) | ![CGA work dashboard with cross-project activity briefing](docs/site/cga-ui-work-briefing.png) |
+
+| Schedule Automation | Runtime Settings |
+|---|---|
+| ![CGA schedule automation tasks and recent executions](docs/site/cga-ui-schedule.png) | ![CGA runtime settings and admin configuration](docs/site/cga-ui-settings.png) |
+
+| Graph Layout Controls | Graph Canvas Focus |
+|---|---|
+| ![CGA graph viewer layout settings over the graph canvas](docs/site/cga-ui-viewer-layout-settings.png) | ![CGA graph canvas focused on projected relationships](docs/site/cga-ui-3d-graph-stage.png) |
 
 ## Author And Attribution
 
