@@ -2106,8 +2106,8 @@
         <table>
           <thead><tr>
             <th></th>
-            <th class="sortable center-col-header" onclick="setProjectsSort('project_id')">Project ID <span id="sort-project_id"></span></th>
             <th class="sortable center-col-header" onclick="setProjectsSort('project_name')">Project Name <span id="sort-project_name"></span></th>
+            <th class="sortable center-col-header" onclick="setProjectsSort('project_id')">Project ID <span id="sort-project_id"></span></th>
             <th class="sortable center-col-header" onclick="setProjectsSort('is_active')">Status <span id="sort-is_active"></span></th>
             <th class="sortable center-col-header" onclick="setProjectsSort('created_at')">Created <span id="sort-created_at"></span></th>
             <th class="actions-col-header">Actions</th>
@@ -2155,6 +2155,7 @@
           <table>
             <thead><tr>
               <th>Task</th>
+              <th class="center-col-header">Task ID</th>
               <th class="center-col-header">Type</th>
               <th class="center-col-header">Project</th>
               <th>Target</th>
@@ -2591,7 +2592,7 @@
 
     <!-- GRAPH VIEWER -->
     <div class="pane" id="pane-viewer">
-      <iframe id="graph-viewer-frame" class="viewer-frame" title="CGA graph viewer" data-src="/viewer/?v=1.30.18"></iframe>
+      <iframe id="graph-viewer-frame" class="viewer-frame" title="CGA graph viewer" data-src="/viewer/?v=1.30.25"></iframe>
     </div>
 
     <!-- SETTINGS (admin only) -->
@@ -2622,7 +2623,18 @@
             <h2>Graph Database</h2>
             <p class="settings-hint">FalkorDB connection used by indexing and graph queries.</p>
             <div class="settings-card">
-              <div class="settings-row"><label>FalkorDB URL</label><span id="settings-falkordb-url" class="settings-value mono">…</span></div>
+              <div class="settings-row">
+                <label>FalkorDB URL</label>
+                <span class="settings-value settings-copy-value">
+                  <span id="settings-falkordb-url" class="settings-copy-text mono">…</span>
+                  <button type="button" class="copy-id-btn" onclick="copyFalkorDbUrl()" title="Copy FalkorDB connection URL" aria-label="Copy FalkorDB connection URL">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <rect x="9" y="9" width="11" height="11" rx="2" ry="2"></rect>
+                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                  </button>
+                </span>
+              </div>
               <div class="settings-actions">
                 <button class="btn btn-primary" onclick="openFdbBrowser()">Open FalkorDB Browser</button>
               </div>
@@ -3226,7 +3238,7 @@ function renderProjectIdWithCopy(projectId, { placeholder = '—', extraClass = 
   return `<span class="project-id-inline">${esc(value)}${renderCopyIdButton(value, extraClass)}</span>`;
 }
 
-function renderScheduleTaskIdWithCopy(taskId, { placeholder = 'ΓÇö', extraClass = 'copy-id-btn-sm' } = {}) {
+function renderScheduleTaskIdWithCopy(taskId, { placeholder = '—', extraClass = 'copy-id-btn-sm' } = {}) {
   const value = String(taskId ?? '').trim();
   if (!value) return esc(placeholder);
   return `<span class="project-id-inline">${esc(value)}${renderCopyButton(value, 'Task ID', extraClass)}</span>`;
@@ -3369,6 +3381,10 @@ async function openFdbBrowser() {
       window.open('http://localhost:13000/login', '_blank', 'noopener,noreferrer');
     }
   }
+}
+
+function copyFalkorDbUrl() {
+  copyText(_falkordbUrl, 'FalkorDB URL');
 }
 
 function goHome(event) {
@@ -4103,7 +4119,7 @@ function scheduleStatusClass(status) {
 
 function scheduleSummaryStatusTone(status) {
   if (status === 'success' || status === 'failed' || status === 'running') return status;
-  if (!status || status === 'ΓÇö') return 'empty';
+  if (!status || status === '—') return 'empty';
   return 'default';
 }
 
@@ -4122,28 +4138,50 @@ function renderSchedules() {
   document.getElementById('schedule-total-count').textContent = String(_scheduleTasks.length);
   document.getElementById('schedule-enabled-count').textContent = String(enabledCount);
   document.getElementById('schedule-due-count').textContent = String(dueSoon);
-  document.getElementById('schedule-last-status').textContent = lastStatus;
+  const lastStatusEl = document.getElementById('schedule-last-status');
+  lastStatusEl.textContent = lastStatus;
+  lastStatusEl.dataset.scheduleStatus = scheduleSummaryStatusTone(lastStatus);
 
   const rows = _scheduleTasks.filter(task => {
     if (typeFilter && task.task_type !== typeFilter) return false;
     if (!query) return true;
-    return [task.name, task.description, task.task_type, task.project_name, task.project_external_id, task.agent_id, task.target_url, task.last_run_status]
+    const browserTask = browserTaskSpecFromPayload(task.payload || {});
+    return [
+      task.task_id,
+      task.name,
+      task.description,
+      task.task_type,
+      task.project_name,
+      task.project_external_id,
+      task.agent_id,
+      task.target_url,
+      task.last_run_status,
+      browserTask?.url,
+      browserTask?.goal,
+      ...(Array.isArray(browserTask?.assertions) ? browserTask.assertions : []),
+    ]
       .join(' ').toLowerCase().includes(query);
   });
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state">${_scheduleTasks.length ? 'No matching schedules' : 'No scheduled tasks yet'}</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">${_scheduleTasks.length ? 'No matching schedules' : 'No scheduled tasks yet'}</div></td></tr>`;
   } else {
     tbody.innerHTML = rows.map(task => {
       const status = task.last_run_status || 'never';
       const statusCls = task.last_run_status ? scheduleStatusClass(task.last_run_status) : 'pill-gray';
       const projectText = task.project_name || task.project_external_id || '—';
+      const browserTask = browserTaskSpecFromPayload(task.payload || {});
+      const retryButton = task.last_run_status === 'failed'
+        ? `<button class="btn btn-sm btn-danger" onclick="retryScheduleTask(${task.id},this)" title="Retry this failed schedule now">Retry</button>`
+        : '';
       return `
         <tr>
           <td>
             <strong>${esc(task.name)}</strong>
             ${task.description ? `<div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(task.description)}</div>` : ''}
+            ${browserTask?.url ? `<div class="mono" style="font-size:11px;margin-top:3px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(browserTask.url)}">${esc(browserTask.url)}</div>` : ''}
           </td>
+          <td class="mono" style="text-align:center">${renderScheduleTaskIdWithCopy(task.task_id)}</td>
           <td style="text-align:center"><span class="pill pill-blue">${esc(scheduleTypeLabel(task.task_type))}</span></td>
           <td style="text-align:center">${esc(projectText)}</td>
           <td><div class="mono schedule-target-text" title="${esc(task.target_url || '')}">${esc(task.target_url || '—')}</div></td>
@@ -4166,32 +4204,45 @@ function renderSchedules() {
   }
 
   if (!_scheduleRuns.length) {
-    runsBody.innerHTML = '<tr><td colspan="6"><div class="empty-state">No scheduled runs recorded yet</div></td></tr>';
+    runsBody.innerHTML = '<tr><td colspan="7"><div class="empty-state">No scheduled runs recorded yet</div></td></tr>';
   } else {
     runsBody.innerHTML = _scheduleRuns.map(run => `
       <tr>
         <td class="mono" style="text-align:center">${esc(_fmtIso(run.started_at))}</td>
-        <td class="mono" style="text-align:center">#${esc(run.schedule_id)}</td>
+        <td class="mono" style="text-align:center">${renderScheduleTaskIdWithCopy(run.task_id || ('#' + run.schedule_id))}</td>
         <td style="text-align:center"><span class="pill ${scheduleStatusClass(run.status)}">${esc(run.status || '')}</span></td>
         <td class="mono" style="text-align:center">${run.status_code == null ? '—' : esc(String(run.status_code))}</td>
         <td class="mono" style="text-align:center">${esc(String(run.duration_ms || 0))} ms</td>
         <td><div class="schedule-run-error" title="${esc(run.error || '')}">${esc(run.error || '—')}</div></td>
+        <td>
+          <div class="project-actions">
+            ${run.status === 'failed' ? `<button class="btn btn-sm btn-danger" onclick="retryScheduleTask(${run.schedule_id},this)" title="Retry this failed schedule now">Retry</button>` : '<span style="color:var(--muted)">—</span>'}
+          </div>
+        </td>
       </tr>
     `).join('');
   }
 }
 
-async function runScheduleTask(taskId, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = 'Running...'; }
+async function runScheduleTask(taskId, btn, options = {}) {
+  const isRetry = options?.retry === true;
+  const originalText = btn?.textContent || (isRetry ? 'Retry' : 'Run');
+  if (btn) { btn.disabled = true; btn.textContent = isRetry ? 'Retrying...' : 'Running...'; }
   try {
     const run = await api('POST', `/admin/schedules/${taskId}/run`);
-    toast(run.status === 'success' ? 'Schedule run completed' : 'Schedule run failed', run.status === 'success' ? 'success' : 'error');
+    const successMessage = isRetry ? 'Schedule retry completed' : 'Schedule run completed';
+    const failureMessage = isRetry ? 'Schedule retry failed' : 'Schedule run failed';
+    toast(run.status === 'success' ? successMessage : failureMessage, run.status === 'success' ? 'success' : 'error');
     await loadSchedules();
   } catch (e) {
     toast(e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Run'; }
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
   }
+}
+
+async function retryScheduleTask(taskId, btn) {
+  await runScheduleTask(taskId, btn, { retry: true });
 }
 
 async function toggleScheduleTask(taskId, enabled) {
@@ -4548,15 +4599,15 @@ function filterProjects(q) {
     <tr>
       <td><button class="expand-btn" onclick="toggleTokens(${p.id},this)">${expanded ? '&#9660;' : '&#9654;'}</button></td>
       <td>
+        <strong style="color:${p.is_active ? 'var(--accent)' : 'var(--danger)'}">${esc(p.project_name)}</strong>
+      </td>
+      <td>
         <div class="project-id-cell">
           <span>${esc(p.project_id)}</span>
           <button type="button" class="copy-id-btn" onclick="copyProjectId(${jsArg(p.project_id)})" title="Copy project ID" aria-label="Copy project ID">
             <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="5" y="5" width="8" height="8" rx="1.5" stroke-width="1.5"></rect><path d="M3 10.5V3.5C3 3 3.5 2.5 4 2.5H10.5" stroke-width="1.5" stroke-linecap="round"></path></svg>
           </button>
         </div>
-      </td>
-      <td>
-        <strong style="color:${p.is_active ? 'var(--accent)' : 'var(--danger)'}">${esc(p.project_name)}</strong>
       </td>
       <td>
         <div class="index-status-panel">

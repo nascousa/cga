@@ -30,8 +30,24 @@ flowchart TD
     AuthAPI --> MSLogin[Microsoft device-code OAuth]
     MSLogin --> AuthDB
     AuthAPI -->|trigger index| JobProducer
+    AuthAPI --> RuntimeConfig[(runtime-config.json indexing repos root)]
+    RuntimeConfig -->|project fallback repo path| AuthAPI
     AuthAPI -->|queue snapshot and graph stats| JobConsumer
     AuthAPI -->|live graph stats| GraphLookup
+
+    Admin --> RuntimeConfigAPI[/api/admin/runtime-config/]
+    RuntimeConfigAPI --> RuntimeConfig
+    RuntimeConfig --> RuntimeConfigAPI
+    RuntimeConfigAPI --> Admin
+
+    Admin --> ScheduleAPI[/api/admin/schedules/]
+    ScheduleAPI --> ScheduleTables[(scheduled_tasks and scheduled_task_runs)]
+    ScheduleTables --> Scheduler[ScheduledTaskWorker]
+    Scheduler -->|POST /command with tabId context| BABridge[BrowserAgent bridge]
+    BABridge -->|GET /result/{id}| Scheduler
+    Scheduler -->|run status and compact artifacts| ScheduleTables
+    ScheduleTables --> ScheduleAPI
+    ScheduleAPI --> Admin
 
     Admin --> ReportAPI[/api/admin/work-briefing/]
     ReportAPI --> WorkStore[(PostgreSQL work_activities)]
