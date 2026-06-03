@@ -1,7 +1,7 @@
 import Graphology from 'graphology'
 import Sigma from 'sigma'
 
-const VIEWER_VERSION = '1.30.38'
+const VIEWER_VERSION = '1.30.43'
 const EDGE_STYLES = {
   CALLS: { label: 'Calls', color: '#4ae387', width: 1.7, priority: 6 },
   IMPORTS: { label: 'Imports', color: '#5badff', width: 1.45, priority: 5 },

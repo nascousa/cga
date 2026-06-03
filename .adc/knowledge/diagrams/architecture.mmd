@@ -36,6 +36,7 @@ flowchart TB
             TraceEvaluator[Trace Evaluator]
             AdoEnrichment[ADO Ticket Enrichment]
             ScheduledTaskWorker[Scheduled Task Worker]
+            BackupScheduler[Backup Service Scheduler]
         end
     end
 
@@ -45,7 +46,7 @@ flowchart TB
         JobStream[(Redis Streams: contextgraph:jobs)]
         TraceStream[(Redis Traces and Cache DB)]
         Falkor[(FalkorDB Project Graphs)]
-        RuntimeConfigFile[(Runtime Config JSON)]
+        RuntimeConfigFile[(Runtime Config JSON: indexing, modules, SMTP)]
     end
 
     Operator --> Browser
@@ -76,6 +77,9 @@ flowchart TB
     AuthAPI --> AuthDB
     AuthAPI --> RuntimeConfigFile
     RuntimeConfigAPI --> RuntimeConfigFile
+    RuntimeConfigAPI -->|start or stop modules| JobConsumer
+    RuntimeConfigAPI -->|start or stop modules| ScheduledTaskWorker
+    RuntimeConfigAPI -->|start or stop modules| BackupScheduler
     AuthAPI --> GitHub
     AuthAPI --> Microsoft
     WorkBriefingAPI --> WorkDB
@@ -83,6 +87,7 @@ flowchart TB
     ScheduleAPI --> AuthDB
     ScheduleAPI --> ScheduledTaskWorker
     ScheduledTaskWorker --> AuthDB
+    BackupScheduler --> AuthDB
     ScheduledTaskWorker -->|BrowserAgent sequential page-test commands| BrowserAgentBridge
     BrowserAgentBridge -->|queued command results| ScheduledTaskWorker
     AdoEnrichment --> AuthDB

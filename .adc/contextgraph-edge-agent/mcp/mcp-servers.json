@@ -12,10 +12,6 @@
         "CONTEXTGRAPH_PROJECT_ID": "${CONTEXTGRAPH_PROJECT_ID}"
       },
       "description": "CGA MCP Server endpoint profile for ADC projects (language-agnostic MCP wiring)"
-    },
-    "local-postgres": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-postgres", "postgresql://localhost/mydb"]
     }
   }
 }

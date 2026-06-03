@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="description" content="CGA, ContextGraphAgent, is an open-source graph context service for AI-assisted development." />
+  <meta name="description" content="CGA, ContextGraphAgent, is an open-source graph retrieval service that gives AI coding agents the right evidence before generation." />
   <meta name="theme-color" content="#05070d" />
   <meta property="og:title" content="CGA | ContextGraphAgent" />
-  <meta property="og:description" content="Open-source graph intelligence for AI-assisted engineering." />
+  <meta property="og:description" content="Evidence-first repository relationship retrieval for AI-assisted engineering." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://nascousa.github.io/cga/" />
   <meta name="twitter:card" content="summary_large_image" />
@@ -22,7 +22,7 @@
     "@type": "SoftwareSourceCode",
     "name": "CGA",
     "alternateName": "ContextGraphAgent",
-    "description": "A local-first graph context service for AI-assisted development.",
+    "description": "A local-first graph retrieval service that gives AI coding agents repository evidence before generation.",
     "codeRepository": "https://github.com/nascousa/cga",
     "programmingLanguage": ["Python", "JavaScript", "PowerShell"],
     "license": "https://www.apache.org/licenses/LICENSE-2.0"
@@ -35,16 +35,18 @@
     <header class="topbar" aria-label="Primary navigation">
       <a class="brand" href="#top" aria-label="CGA home">
         <span class="brand-mark">CGA</span>
-        <span class="brand-copy">ContextGraphAgent</span>
+        <span class="brand-copy">CONTEXT GRAPH AGENT</span>
       </a>
       <nav class="nav-links" aria-label="Site sections">
         <a href="#engine">Engine</a>
         <a href="#desktop">Desktop</a>
         <a href="#open-source">Open Source</a>
       </nav>
-      <a class="nav-action" href="https://github.com/nascousa/cga" target="_blank" rel="noreferrer">
-        <i data-lucide="code-2" aria-hidden="true"></i>
-        GitHub
+      <a class="nav-action" href="https://nate.ucia.us" target="_blank" rel="noopener noreferrer">
+        <svg class="linkedin-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false">
+          <path d="M20.45 20.45h-3.55v-5.57c0-1.33-.03-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.42v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13ZM7.12 20.45H3.56V9h3.56v11.45ZM22.23 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.46c.98 0 1.77-.77 1.77-1.73V1.73C24 .77 23.21 0 22.23 0Z" />
+        </svg>
+        LinkedIn
       </a>
     </header>
 
@@ -52,7 +54,7 @@
       <section class="hero" aria-labelledby="hero-title">
         <p class="eyebrow">Open source graph intelligence</p>
         <h1 id="hero-title">CGA</h1>
-        <p class="hero-subtitle">ContextGraphAgent gives AI coding agents a live, queryable map of repositories: symbols, calls, imports, dependencies, project work, and the evidence needed to ship with less guesswork.</p>
+        <p class="hero-subtitle">ContextGraphAgent retrieves the right evidence before generation, so AI coding agents query repository relationships, dependencies, files, and symbols instead of relying on keyword search alone.</p>
         <div class="hero-actions" aria-label="Primary actions">
           <a class="button primary" href="https://github.com/nascousa/cga" target="_blank" rel="noreferrer">
             <i data-lucide="star" aria-hidden="true"></i>
@@ -63,34 +65,40 @@
             Open Codespace
           </a>
         </div>
+        <div class="hero-proof-grid" aria-label="CGA retrieval highlights">
+          <div class="hero-proof"><strong>Evidence first</strong><span>Retrieve scoped facts before generation.</span></div>
+          <div class="hero-proof"><strong>Relationship queries</strong><span>Traverse calls, imports, definitions, and dependencies.</span></div>
+          <div class="hero-proof"><strong>Impact graph</strong><span>Impact graph -> optimized context -> minimal code.</span></div>
+          <div class="hero-proof"><strong>Precise targets</strong><span>Better file and symbol targeting with dependency awareness.</span></div>
+        </div>
       </section>
 
       <section id="engine" class="section band dark-band" aria-labelledby="engine-title">
         <div class="section-heading">
           <p class="eyebrow">Evidence first</p>
-          <h2 id="engine-title">A graph runtime for serious AI engineering</h2>
-          <p>CGA turns a codebase into an operational graph so agents can ask for the right context instead of flooding prompts with files.</p>
+          <h2 id="engine-title">A graph runtime for evidence-first generation</h2>
+          <p>CGA turns a codebase into an operational graph so models can ask relationship-aware questions and receive the smallest useful code context.</p>
         </div>
         <div class="feature-grid">
           <article class="feature-card">
+            <i data-lucide="search-check" aria-hidden="true"></i>
+            <h3>Evidence Before Generation</h3>
+            <p>Retrieves the relevant code, symbols, dependencies, and recent project facts before an agent starts writing.</p>
+          </article>
+          <article class="feature-card">
             <i data-lucide="network" aria-hidden="true"></i>
-            <h3>Repository Graph</h3>
-            <p>Indexes files, symbols, calls, imports, and dependency paths into FalkorDB.</p>
+            <h3>Repository Relationships</h3>
+            <p>Lets models query calls, imports, definitions, ownership, and dependency paths, not only keyword matches.</p>
           </article>
           <article class="feature-card">
-            <i data-lucide="plug" aria-hidden="true"></i>
-            <h3>MCP Native</h3>
-            <p>Exposes tools for indexing, retrieval, call graphs, dependency views, and work activity.</p>
+            <i data-lucide="route" aria-hidden="true"></i>
+            <h3>Optimized Retrieval Flow</h3>
+            <p>Moves from impact graph to optimized context to minimal code, keeping prompts focused on what can change.</p>
           </article>
           <article class="feature-card">
-            <i data-lucide="shield-check" aria-hidden="true"></i>
-            <h3>Local First</h3>
-            <p>Runs on Docker Desktop with local data, project-scoped tokens, audit trails, and backups.</p>
-          </article>
-          <article class="feature-card">
-            <i data-lucide="activity" aria-hidden="true"></i>
-            <h3>Work Briefing</h3>
-            <p>Records project activity and builds concise engineering status signals from one dashboard.</p>
+            <i data-lucide="crosshair" aria-hidden="true"></i>
+            <h3>Precise Targets</h3>
+            <p>Improves file and symbol targeting with dependency awareness, so edits land closer to the real implementation surface.</p>
           </article>
         </div>
       </section>
@@ -109,10 +117,10 @@ Double-click start-cga-desktop.cmd
 Open http://localhost:18001/admin</code></pre>
         </div>
         <div class="metric-row" aria-label="Project highlights">
-          <div><strong>Apache 2.0</strong><span>Open-source license</span></div>
-          <div><strong>FalkorDB</strong><span>Graph backend</span></div>
+          <div><strong>Impact Graph</strong><span>Change-aware traversal</span></div>
+          <div><strong>Optimized Context</strong><span>Budgeted evidence packs</span></div>
+          <div><strong>Minimal Code</strong><span>Small targeted excerpts</span></div>
           <div><strong>MCP SSE</strong><span>Agent interface</span></div>
-          <div><strong>Docker Desktop</strong><span>One-click package</span></div>
         </div>
       </section>
 

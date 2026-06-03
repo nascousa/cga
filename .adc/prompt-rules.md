@@ -15,7 +15,7 @@
 - Keep source logic in `src/`, scripts in `src/scripts/`, tests in `src/tests/`, and docs in `docs/`.
 - Do not commit secrets, tokens, or private keys.
 - Unless a target system explicitly requires another format, all tokens MUST default to cryptographically random 35-character strings using only `A-Za-z0-9`.
-- All Docker commands must use remote daemon `tcp://192.168.1.239:2375` via `DOCKER_HOST`.
+- All Docker commands must use the local Docker context by default; do not set `DOCKER_HOST` to an unauthenticated remote daemon.
 - Never commit directly to `main`; use a `dev/*` branch and merge through review.
 - If `.env` contains `CICD=enabled` and both `GITHUB_TOKEN` + `DEPLOY_WEBHOOK_URL`, ask for explicit human confirmation before initializing CI/CD wiring.
 

@@ -222,7 +222,7 @@ def test_viewer_entrypoint_is_served() -> None:
     assert "<title>CGA Viewer</title>" in response.text
     assert '"sigma"' in response.text
     assert '"graphology"' in response.text
-    assert 'src="./main.js?v=1.30.38"' in response.text
+    assert 'src="./main.js?v=1.30.43"' in response.text
     assert 'id="copy-falkor-url"' in response.text
     assert 'aria-label="Copy FalkorDB connection URL"' in response.text
     assert '<label for="chunk-limit">Display Nodes</label>' in response.text
@@ -382,7 +382,16 @@ def test_admin_embeds_versioned_graph_viewer() -> None:
     response = TestClient(app).get("/admin")
 
     assert response.status_code == 200
-    assert 'data-src="/viewer/?v=1.30.38"' in response.text
+    assert 'data-src="/viewer/?v=1.30.43"' in response.text
+    assert '<h1>CONTEXT GRAPH AGENT</h1>' in response.text
+    assert '<span class="logo-text">CONTEXT GRAPH AGENT</span>' in response.text
+    assert '<strong>Retrieve the right evidence before generation</strong>' in response.text
+    assert 'Repository relationships, not only keywords' in response.text
+    assert '<span class="cga-feature-step">Impact graph</span>' in response.text
+    assert '<span class="cga-feature-step">Optimized context</span>' in response.text
+    assert '<span class="cga-feature-step">Minimal code</span>' in response.text
+    assert 'File/symbol targeting' in response.text
+    assert 'Dependency awareness' in response.text
     assert 'id="wsr-save-btn" onclick="saveWorkReportEdit(\'this\')"' in response.text
     assert 'id="wsr-save-prev-btn" onclick="saveWorkReportEdit(\'prev\')"' in response.text
     assert 'id="wsr-preview" class="wsr-preview-editor"' in response.text
@@ -411,6 +420,7 @@ def test_admin_deep_links_are_served() -> None:
         response = client.get(path)
         assert response.status_code == 200
         assert "<title>CGA (ContextGraphAgent)</title>" in response.text
+        assert '<span class="logo-text">CONTEXT GRAPH AGENT</span>' in response.text
         assert "const ADMIN_TAB_ROUTES" in response.text
 
 

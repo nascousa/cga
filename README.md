@@ -1,11 +1,13 @@
 # CGA (ContextGraphAgent)
 
-**Version:** 1.30.40
+**Version:** 1.30.43
 **Status:** Published
 **Author:** Nate Scott
-**Date:** 2026-06-02 (Vanta background opacity set to 25%)
+**Date:** 2026-06-02 (CGA feature highlights update)
 
 CGA, aka ContextGraphAgent, is a local-first graph context service for AI-assisted development. It indexes repository structure, symbols, calls, imports, and lightweight data flow into FalkorDB, then exposes retrieval and analysis tools through an MCP-compatible API.
+
+CGA is designed for evidence-first generation: agents retrieve the right code evidence before writing, query repository relationships instead of only keywords, follow an impact graph -> optimized context -> minimal code flow, and target files/symbols with dependency awareness.
 
 It also hosts WA-compatible work briefing aggregation so progress signals from other repos can be recorded and summarized centrally inside CGA through the Admin Dashboard surface.
 

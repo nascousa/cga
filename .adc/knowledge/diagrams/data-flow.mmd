@@ -30,7 +30,7 @@ flowchart TD
     AuthAPI --> MSLogin[Microsoft device-code OAuth]
     MSLogin --> AuthDB
     AuthAPI -->|trigger index| JobProducer
-    AuthAPI --> RuntimeConfig[(runtime-config.json indexing repos root)]
+    AuthAPI --> RuntimeConfig[(runtime-config.json indexing, module states, SMTP)]
     RuntimeConfig -->|project fallback repo path| AuthAPI
     AuthAPI -->|queue snapshot and graph stats| JobConsumer
     AuthAPI -->|live graph stats| GraphLookup
@@ -38,6 +38,10 @@ flowchart TD
     Admin --> RuntimeConfigAPI[/api/admin/runtime-config/]
     RuntimeConfigAPI --> RuntimeConfig
     RuntimeConfig --> RuntimeConfigAPI
+    RuntimeConfigAPI -->|start or stop| JobConsumer
+    RuntimeConfigAPI -->|start or stop| Scheduler
+    RuntimeConfigAPI -->|start or stop| BackupScheduler[BackupService scheduler]
+    BackupScheduler --> AuthDB
     RuntimeConfigAPI --> Admin
 
     Admin --> ScheduleAPI[/api/admin/schedules/]
