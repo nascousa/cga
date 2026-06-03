@@ -9,6 +9,7 @@
   --blue: #60a5fa;
   --gold: #f5b956;
   --coral: #ff6f91;
+  --vanta-bg-opacity: 0.25;
   --shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
 }
 
@@ -34,13 +35,17 @@ a { color: inherit; text-decoration: none; }
   background-color: var(--bg);
 }
 
+#vanta-net canvas {
+  opacity: var(--vanta-bg-opacity);
+}
+
 #vanta-net::after {
   content: "";
   position: absolute;
   inset: 0;
   background-image: linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
   background-size: 44px 44px;
-  opacity: 0.4;
+  opacity: var(--vanta-bg-opacity);
 }
 
 .site-shell { position: relative; min-height: 100vh; overflow: hidden; }
