@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jose import jwt as jose_jwt
 
+from backend import runtime_config
 from backend.auth.database import get_db
 from backend.auth.dependencies import get_current_user, require_admin, get_consumer, get_registry
 from backend.auth import pgshim as aiosqlite  # type: ignore  # asyncpg shim providing aiosqlite-compatible API
@@ -97,12 +98,12 @@ def _repo_name_key(value: str) -> str:
 
 
 def _repo_search_roots() -> list[Path]:
-    return [
+    return runtime_config.get_indexing_repo_search_roots([
         _LOCAL_REPOS_ROOT,
         Path("/repos"),
         Path("D:/Repos"),
         Path("d:/repos"),
-    ]
+    ])
 
 
 def _candidate_repo_paths(project_name: str) -> list[str]:
@@ -122,14 +123,10 @@ def _candidate_repo_paths(project_name: str) -> list[str]:
         except Exception:
             pass
 
-    fallbacks = [
-        f"D:/Repos/{normalized}",
-        f"D:/Repos/{normalized.lower()}",
-        f"d:/repos/{normalized}",
-        f"d:/repos/{normalized.lower()}",
-        f"/repos/{normalized}",
-        f"/repos/{normalized.lower()}",
-    ]
+    fallbacks = []
+    for root in _repo_search_roots():
+        fallbacks.append(str(root / normalized))
+        fallbacks.append(str(root / normalized.lower()))
     seen = {c.lower() for c in candidates}
     for candidate in fallbacks:
         if candidate.lower() not in seen:
@@ -162,6 +159,25 @@ def _resolve_project_repo_path(project: dict) -> str | None:
         except Exception:
             pass
     return _resolve_repo_path(project["project_name"])
+
+
+def _project_repo_status_paths(project: dict) -> list[str]:
+    candidates: list[str] = []
+    seen: set[str] = set()
+
+    stored = (project.get("repo_path") or "").strip()
+    if stored:
+        candidates.append(stored)
+        seen.add(stored.lower())
+
+    for candidate in _candidate_repo_paths(project["project_name"]):
+        key = candidate.lower()
+        if key in seen:
+            continue
+        candidates.append(candidate)
+        seen.add(key)
+
+    return candidates
 
 
 def _github_oauth_enabled() -> bool:
@@ -1057,7 +1073,7 @@ async def list_projects_index_status(
 
     # Get all projects
     async with db.execute(
-        "SELECT id, project_name, project_id FROM projects WHERE is_active = 1 ORDER BY id"
+        "SELECT id, project_name, project_id, repo_path FROM projects WHERE is_active = 1 ORDER BY id"
     ) as cur:
         projects = await cur.fetchall()
 
@@ -1094,7 +1110,7 @@ async def list_projects_index_status(
         # Get latest job status for this project (if consumer available)
         if consumer:
             try:
-                repo_patterns = _candidate_repo_paths(proj_dict["project_name"])
+                repo_patterns = _project_repo_status_paths(proj_dict)
 
                 jobs: list[dict] = []
                 seen_job_ids: set[str] = set()
@@ -1215,7 +1231,7 @@ async def recover_project_stale_index_jobs(
             detail=f"Repository path not found for project_name '{project['project_name']}'",
         )
 
-    repo_paths = _candidate_repo_paths(project["project_name"])
+    repo_paths = _project_repo_status_paths(project)
     recovered = await consumer.recover_stale_jobs_by_repo(repo_paths, INDEX_STALE_AFTER_SEC)
     recovered_jobs = [_build_index_job_status(job, {}, 30, 0) for job in recovered]
     return ProjectIndexRecoveryOut(
