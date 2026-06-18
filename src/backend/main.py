@@ -44,6 +44,19 @@ from backend.auth.middleware import ProjectTokenMiddleware
 from backend.auth.pgshim import get_pool as get_auth_pool
 from backend.auth.router import router as auth_router
 from backend.auth.security import decode_access_token, hash_token
+from backend.ai_first.service import AiFirstEvidencePackNotFoundError
+from backend.ai_first.service import AiFirstPolicyProfileError
+from backend.ai_first.service import AiFirstProjectNotFoundError
+from backend.ai_first.service import AiFirstSignalError
+from backend.ai_first.service import build_evidence_pack
+from backend.ai_first.service import build_readiness_response
+from backend.ai_first.service import get_evidence_pack
+from backend.ai_first.service import list_policy_profiles
+from backend.ai_first.service import list_evidence_packs
+from backend.ai_first.service import list_signals
+from backend.ai_first.service import record_signal
+from backend.ai_first.service import save_evidence_pack
+from backend.ai_first.service import update_policy_profile
 from backend.backup import BackupError, BackupService
 from backend.graph.registry import GraphRegistry
 from backend.integrations.azure_devops import AzureDevOpsEnricher, AZURE_DEVOPS_RESOURCE_SCOPE
@@ -62,7 +75,7 @@ from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.83"
+APP_VERSION = "1.30.91"
 
 FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
 FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", "6379"))
@@ -687,6 +700,202 @@ async def api_admin_work_briefing_activities(
         "count": len(activities),
         "activities": [activity.to_dict() for activity in activities],
     }
+
+
+@app.get("/api/admin/ai-first/readiness")
+async def api_admin_ai_first_readiness(
+    project_id: str | None = Query(default=None),
+    _: dict = Depends(require_admin),
+) -> dict:
+    cleaned_project_id = project_id.strip() if isinstance(project_id, str) else None
+    async with get_auth_pool().acquire() as db:
+        return await build_readiness_response(
+            db=db,
+            registry=_registry,
+            consumer=_consumer,
+            work_briefing_service=_work_briefing_service,
+            project_id=cleaned_project_id or None,
+        )
+
+
+@app.get("/api/admin/ai-first/policy-profiles")
+async def api_admin_ai_first_policy_profile_list(
+    project_id: str | None = Query(default=None),
+    _: dict = Depends(require_admin),
+) -> dict:
+    cleaned_project_id = project_id.strip() if isinstance(project_id, str) else None
+    async with get_auth_pool().acquire() as db:
+        return await list_policy_profiles(db=db, project_id=cleaned_project_id or None)
+
+
+@app.patch("/api/admin/ai-first/policy-profiles")
+async def api_admin_ai_first_policy_profile_update(
+    payload: dict,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    body = dict(payload or {})
+    project_id = str(body.get("project_id") or "").strip()
+    profile_name = str(body.get("profile_name") or body.get("name") or "").strip()
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    if not profile_name:
+        raise HTTPException(status_code=400, detail="profile_name is required")
+    async with get_auth_pool().acquire() as db:
+        try:
+            profile = await update_policy_profile(
+                db=db,
+                project_id=project_id,
+                profile_name=profile_name,
+                notes=str(body.get("notes") or ""),
+                updated_by=str(admin.get("username") or admin.get("id") or "admin"),
+            )
+        except AiFirstPolicyProfileError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except AiFirstProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"profile": profile}
+
+
+@app.get("/api/admin/ai-first/signals")
+async def api_admin_ai_first_signal_list(
+    project_id: str | None = Query(default=None),
+    signal_type: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=200),
+    _: dict = Depends(require_admin),
+) -> dict:
+    cleaned_project_id = project_id.strip() if isinstance(project_id, str) else None
+    cleaned_signal_type = signal_type.strip() if isinstance(signal_type, str) else None
+    async with get_auth_pool().acquire() as db:
+        return await list_signals(
+            db=db,
+            project_id=cleaned_project_id or None,
+            signal_type=cleaned_signal_type or None,
+            limit=limit,
+        )
+
+
+@app.post("/api/admin/ai-first/signals", status_code=201)
+async def api_admin_ai_first_signal_record(
+    payload: dict,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    body = dict(payload or {})
+    project_id = str(body.get("project_id") or "").strip()
+    signal_type = str(body.get("signal_type") or body.get("type") or "").strip()
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    if not signal_type:
+        raise HTTPException(status_code=400, detail="signal_type is required")
+    async with get_auth_pool().acquire() as db:
+        try:
+            signal = await record_signal(
+                db=db,
+                project_id=project_id,
+                signal_type=signal_type,
+                name=str(body.get("name") or ""),
+                status=str(body.get("status") or "unknown"),
+                value=body.get("value"),
+                unit=str(body.get("unit") or ""),
+                source_url=str(body.get("source_url") or ""),
+                metadata=body.get("metadata") if isinstance(body.get("metadata"), dict) else None,
+                observed_at=body.get("observed_at") if isinstance(body.get("observed_at"), str) else None,
+                created_by=str(admin.get("username") or admin.get("id") or "admin"),
+            )
+        except AiFirstSignalError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except AiFirstProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"signal": signal}
+
+
+@app.get("/api/admin/ai-first/evidence")
+async def api_admin_ai_first_evidence(
+    project_id: str = Query(..., min_length=1),
+    limit: int = Query(default=25, ge=1, le=200),
+    task_id: str | None = Query(default=None),
+    issue_id: str | None = Query(default=None),
+    pr_id: str | None = Query(default=None),
+    activity_id: str | None = Query(default=None),
+    _: dict = Depends(require_admin),
+) -> dict:
+    cleaned_project_id = project_id.strip()
+    if not cleaned_project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    async with get_auth_pool().acquire() as db:
+        try:
+            return await build_evidence_pack(
+                db=db,
+                registry=_registry,
+                consumer=_consumer,
+                work_briefing_service=_work_briefing_service,
+                project_id=cleaned_project_id,
+                limit=limit,
+                task_id=task_id,
+                issue_id=issue_id,
+                pr_id=pr_id,
+                activity_id=activity_id,
+                trace_redis_url=CACHE_REDIS_URL,
+            )
+        except AiFirstProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.post("/api/admin/ai-first/evidence-packs", status_code=201)
+async def api_admin_ai_first_evidence_pack_save(
+    payload: dict,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    body = dict(payload or {})
+    project_id = str(body.get("project_id") or "").strip()
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    limit = int(body.get("limit") or 25)
+    async with get_auth_pool().acquire() as db:
+        try:
+            pack = await build_evidence_pack(
+                db=db,
+                registry=_registry,
+                consumer=_consumer,
+                work_briefing_service=_work_briefing_service,
+                project_id=project_id,
+                limit=max(1, min(limit, 200)),
+                task_id=body.get("task_id"),
+                issue_id=body.get("issue_id"),
+                pr_id=body.get("pr_id"),
+                activity_id=body.get("activity_id"),
+                trace_redis_url=CACHE_REDIS_URL,
+            )
+            saved = await save_evidence_pack(
+                db=db,
+                pack=pack,
+                created_by=str(admin.get("username") or admin.get("id") or "admin"),
+            )
+        except AiFirstProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"saved": saved, "evidence": pack}
+
+
+@app.get("/api/admin/ai-first/evidence-packs")
+async def api_admin_ai_first_evidence_pack_list(
+    project_id: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=200),
+    _: dict = Depends(require_admin),
+) -> dict:
+    cleaned_project_id = project_id.strip() if isinstance(project_id, str) else None
+    async with get_auth_pool().acquire() as db:
+        return await list_evidence_packs(db=db, project_id=cleaned_project_id or None, limit=limit)
+
+
+@app.get("/api/admin/ai-first/evidence-packs/{evidence_id}")
+async def api_admin_ai_first_evidence_pack_get(
+    evidence_id: str,
+    _: dict = Depends(require_admin),
+) -> dict:
+    async with get_auth_pool().acquire() as db:
+        try:
+            return await get_evidence_pack(db=db, evidence_id=evidence_id)
+        except AiFirstEvidencePackNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @app.post("/api/project/work-briefing/activity", status_code=201)

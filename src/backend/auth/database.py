@@ -215,6 +215,69 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DE
 CREATE INDEX IF NOT EXISTS idx_audit_logs_scope       ON audit_logs(scope);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_project_id  ON audit_logs(project_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_name  ON audit_logs(actor_name);
+
+CREATE TABLE IF NOT EXISTS ai_first_evidence_packs (
+    id                  BIGSERIAL PRIMARY KEY,
+    evidence_id         TEXT    UNIQUE NOT NULL,
+    project_id          BIGINT  REFERENCES projects(id) ON DELETE SET NULL,
+    project_external_id TEXT    NOT NULL DEFAULT '',
+    project_name        TEXT    NOT NULL DEFAULT '',
+    status              TEXT    NOT NULL DEFAULT 'generated',
+    correlation_json    TEXT    NOT NULL DEFAULT '{}',
+    evidence_json       TEXT    NOT NULL,
+    markdown            TEXT    NOT NULL DEFAULT '',
+    created_by          TEXT    NOT NULL DEFAULT '',
+    created_at          TEXT    NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_first_evidence_project_created
+    ON ai_first_evidence_packs(project_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_first_evidence_external_created
+    ON ai_first_evidence_packs(project_external_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_first_evidence_created
+    ON ai_first_evidence_packs(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS ai_first_policy_profiles (
+    id                  BIGSERIAL PRIMARY KEY,
+    project_id          BIGINT UNIQUE NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    profile_name        TEXT    NOT NULL DEFAULT 'observe-only',
+    enforcement_level   TEXT    NOT NULL DEFAULT 'L0',
+    tool_policy_json    TEXT    NOT NULL DEFAULT '{}',
+    notes               TEXT    NOT NULL DEFAULT '',
+    updated_by          TEXT    NOT NULL DEFAULT '',
+    created_at          TEXT    NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS'),
+    updated_at          TEXT    NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_first_policy_project
+    ON ai_first_policy_profiles(project_id);
+CREATE INDEX IF NOT EXISTS idx_ai_first_policy_profile
+    ON ai_first_policy_profiles(profile_name);
+
+CREATE TABLE IF NOT EXISTS ai_first_signals (
+    id                  BIGSERIAL PRIMARY KEY,
+    signal_id           TEXT    UNIQUE NOT NULL,
+    project_id          BIGINT  REFERENCES projects(id) ON DELETE SET NULL,
+    project_external_id TEXT    NOT NULL DEFAULT '',
+    project_name        TEXT    NOT NULL DEFAULT '',
+    signal_type         TEXT    NOT NULL,
+    name                TEXT    NOT NULL DEFAULT '',
+    status              TEXT    NOT NULL DEFAULT 'unknown',
+    value_text          TEXT    NOT NULL DEFAULT '',
+    unit                TEXT    NOT NULL DEFAULT '',
+    source_url          TEXT    NOT NULL DEFAULT '',
+    metadata_json       TEXT    NOT NULL DEFAULT '{}',
+    observed_at         TEXT    NOT NULL,
+    created_by          TEXT    NOT NULL DEFAULT '',
+    created_at          TEXT    NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_first_signals_project_type_observed
+    ON ai_first_signals(project_id, signal_type, observed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_first_signals_external_type_observed
+    ON ai_first_signals(project_external_id, signal_type, observed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ai_first_signals_observed
+    ON ai_first_signals(observed_at DESC);
 """
 
 

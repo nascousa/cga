@@ -1,5 +1,20 @@
 {
   "mcpServers": {
+    "cga-relay": {
+      "transport": "http",
+      "url": "http://localhost:18001/mcp/sse",
+      "headers": {
+        "Authorization": "Bearer ${CONTEXTGRAPH_MCP_TOKEN}",
+        "X-Project-ID": "${CONTEXTGRAPH_PROJECT_ID}"
+      },
+      "env": {
+        "CONTEXTGRAPH_MCP_TOKEN": "${CONTEXTGRAPH_MCP_TOKEN}",
+        "CONTEXTGRAPH_EDGE_AGENT_TOKEN": "${CONTEXTGRAPH_EDGE_AGENT_TOKEN}",
+        "CONTEXTGRAPH_PROJECT_ID": "${CONTEXTGRAPH_PROJECT_ID}",
+        "CONTEXTGRAPH_RELAY_URL": "${CONTEXTGRAPH_RELAY_URL}"
+      },
+      "description": "Mandatory Context Graph Agent (CGA) relay endpoint profile for ADC projects; required for all ContextGraph indexing and project change information aggregation, and attempted before cga-mcp-server for non-indexing MCP operations"
+    },
     "cga-mcp-server": {
       "transport": "http",
       "url": "http://localhost:18001/mcp/sse",
@@ -11,7 +26,7 @@
         "CONTEXTGRAPH_MCP_TOKEN": "${CONTEXTGRAPH_MCP_TOKEN}",
         "CONTEXTGRAPH_PROJECT_ID": "${CONTEXTGRAPH_PROJECT_ID}"
       },
-      "description": "CGA MCP Server endpoint profile for ADC projects (language-agnostic MCP wiring)"
+      "description": "Context Graph Agent (CGA) MCP Server fallback endpoint profile for ADC projects (language-agnostic MCP wiring)"
     }
   }
 }

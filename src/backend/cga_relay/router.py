@@ -167,6 +167,10 @@ async def dispatch_tool(tool: str, arguments: dict[str, Any], project_name: str)
         result = mcp_server.retrieve_context(
             query=str(query),
             limit=int(args.get("limit", 10)),
+            task_id=str(args.get("task_id")) if args.get("task_id") else None,
+            issue_id=str(args.get("issue_id")) if args.get("issue_id") else None,
+            pr_id=str(args.get("pr_id")) if args.get("pr_id") else None,
+            activity_id=str(args.get("activity_id")) if args.get("activity_id") else None,
         )
     elif tool == "health_check":
         backend_tool = "health_check"

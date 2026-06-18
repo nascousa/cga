@@ -18,12 +18,21 @@
 - **Single-Use and Expiry**: Password reset and one-time verification tokens MUST be single-use and MUST expire quickly.
 - **Storage and Logging**: Raw tokens MUST NOT be stored in plaintext where avoidable and MUST NEVER be written to logs.
 
+## Post-Quantum Communications Standard (PQC/CNSA 2.0)
+- **Mandatory Scope**: All project communication paths MUST use CNSA 2.0-aligned post-quantum cryptography, including public APIs, service-to-service calls, admin surfaces, database/cache/message-broker connections, MCP endpoints, webhooks, CI/CD callbacks, telemetry export, replication, backup transfer, and agent-to-service communication.
+- **Approved Key Establishment**: Key establishment MUST use ML-KEM (NIST FIPS 203 / CRYSTALS-Kyber lineage) or a CNSA 2.0-approved PQC successor at the required CNSA 2.0 strength level. When a stack exposes parameter sets, default to ML-KEM-1024 unless a project security profile explicitly approves another CNSA 2.0-compliant level.
+- **Approved Digital Signatures**: Digital signatures for certificates, software artifacts, protocol handshakes, webhook signing, release signing, and machine-to-machine trust MUST use ML-DSA (NIST FIPS 204 / CRYSTALS-Dilithium lineage) or a CNSA 2.0-approved PQC successor. When a stack exposes parameter sets, default to ML-DSA-87 unless a project security profile explicitly approves another CNSA 2.0-compliant level.
+- **Transport Requirement**: Use PQC-capable TLS, mTLS, SSH, VPN, message-bus encryption, or protocol-native protection that negotiates approved ML-KEM/ML-DSA or hybrid PQC suites. Legacy-only TLS, plaintext HTTP, unsigned webhooks, unauthenticated broker links, and non-PQC tunnels are forbidden for project communications.
+- **Hybrid Transition Rule**: If production infrastructure cannot yet negotiate pure PQC suites, use hybrid classical plus PQC negotiation, document the limitation, add a migration owner and expiry date, and keep the channel on the CNSA 2.0 transition path.
+- **Evidence Requirement**: PRs that add or change communication paths MUST include evidence of the negotiated KEM/signature suite, library or platform configuration, and any approved exception. Missing evidence blocks merge.
+- **Exception Policy**: Exceptions require explicit human approval through the constitutional amendment process, a named owner, compensating controls, and a time-bounded expiry date enforced in review.
+
 ## Common Security Strategies
 - **Least Privilege Access**: Grant users, services, and CI jobs only the minimum permissions required, and review privileges regularly.
 - **Defense in Depth**: Apply layered controls across application, infrastructure, and network boundaries so one control failure does not expose critical assets.
 - **Secure by Default Configuration**: Default new services to deny-all network posture, strict auth requirements, and disabled debug/admin surfaces.
 - **Strong Authentication and Authorization**: Enforce strong identity verification, short-lived credentials, and explicit authorization checks on every protected action.
-- **Encryption in Transit and at Rest**: Require TLS for all external and internal service communication and encrypt sensitive persisted data with managed keys.
+- **Encryption in Transit and at Rest**: Require CNSA 2.0-aligned PQC-capable protection for all external and internal service communication and encrypt sensitive persisted data with managed keys.
 - **Input Validation and Output Encoding**: Validate all untrusted input against strict schemas and encode output contexts to prevent injection vulnerabilities.
 - **Dependency and Supply Chain Security**: Pin dependencies, run vulnerability scans in CI, verify package integrity, and remove unused packages.
 - **Secret Lifecycle Management**: Store secrets in dedicated secret managers, rotate on schedule, and revoke immediately on exposure suspicion.

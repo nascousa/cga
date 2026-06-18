@@ -222,6 +222,31 @@ def test_retrieve_context():
     assert results[0]["callees"] == ["callee.one"]
 
 
+def test_retrieve_context_records_task_correlation_in_trace_args():
+    mcp_srv._graph = _mock_graph(
+        [["backend.indexer.parser.PythonParser.parse", "method", "src/backend/indexer/parser.py", 40, 70]]
+    )
+    recorder = MagicMock()
+    mcp_srv._recorder = recorder
+    with patch("backend.tools.server._read_symbol_snippet", return_value="def parse(...): ..."), patch(
+        "backend.tools.server._fetch_relation_summary",
+        return_value={
+            "callers": [],
+            "callees": [],
+            "callers_count": 0,
+            "callees_count": 0,
+        },
+    ):
+        results = mcp_srv.retrieve_context(query="parse", limit=5, task_id="TASK-123", pr_id="42")
+
+    assert results[0]["qualified_name"] == "backend.indexer.parser.PythonParser.parse"
+    recorder.record.assert_called_once()
+    _tool, args, _results, _latency = recorder.record.call_args.args
+    assert args["query"] == "parse"
+    assert args["task_id"] == "TASK-123"
+    assert args["pr_id"] == "42"
+
+
 @pytest.mark.asyncio
 async def test_index_full_queues_job():
     mcp_srv._producer = _mock_producer("5000-0")

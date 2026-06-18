@@ -13,7 +13,7 @@ project-root/
 │   │   ├── staging/         # Pre-production build output
 │   │   └── build/           # Intermediate build cache
 │   ├── contextgraph-mcp/              # CGA MCP Server implementation
-│   ├── cga-relay/                    # CGA-Relay implementation
+│   ├── contextgraph-edge-agent/       # ContextGraph Edge Agent implementation
 │   ├── scripts/             # Utility scripts for building, deploying, local dev
 │   └── ... (application modules)
 ├── docs/                    # User-facing and project documentation
@@ -86,7 +86,7 @@ All automated tests MUST be placed in `tests/` at project root, mirroring `src/`
 tests/
 ├── unit/
 │   ├── contextgraph-mcp/
-│   ├── cga-relay/
+│   ├── contextgraph-edge-agent/
 │   └── ... (mirrors src structure)
 ├── integration/
 ├── e2e/

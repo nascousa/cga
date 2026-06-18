@@ -248,7 +248,7 @@ async def _enrich_job_response(job_id: str, base_response: dict) -> dict:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _cached_read(tool: str, args: dict, fetch_fn):
+def _cached_read(tool: str, args: dict, fetch_fn, trace_args: dict | None = None):
     """Check cache → call fetch_fn → store → record trace → return."""
     if _cache:
         hit = _cache.get(tool, args)
@@ -260,8 +260,28 @@ def _cached_read(tool: str, args: dict, fetch_fn):
     if _cache:
         _cache.set(tool, args, result)
     if _recorder:
-        _recorder.record(tool, args, result, latency_ms)
+        _recorder.record(tool, trace_args or args, result, latency_ms)
     return result
+
+
+def _with_correlation_args(
+    args: dict,
+    *,
+    task_id: str | None = None,
+    issue_id: str | None = None,
+    pr_id: str | None = None,
+    activity_id: str | None = None,
+) -> dict:
+    correlated = dict(args)
+    for key, value in {
+        "task_id": task_id,
+        "issue_id": issue_id,
+        "pr_id": pr_id,
+        "activity_id": activity_id,
+    }.items():
+        if isinstance(value, str) and value.strip():
+            correlated[key] = value.strip()
+    return correlated
 
 
 def _read_symbol_snippet(file_path: str, line_start: int, line_end: int, context_lines: int = 2, max_chars: int = 900) -> str:
@@ -515,7 +535,14 @@ async def wait_for_index_ready(
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def find_symbol(name: str, limit: int = 20) -> list[dict]:
+def find_symbol(
+    name: str,
+    limit: int = 20,
+    task_id: str | None = None,
+    issue_id: str | None = None,
+    pr_id: str | None = None,
+    activity_id: str | None = None,
+) -> list[dict]:
     """Find symbols by name or qualified name fragment."""
     if not _graph:
         raise RuntimeError("MCP server not initialized")
@@ -533,7 +560,19 @@ def find_symbol(name: str, limit: int = 20) -> list[dict]:
             for row in result.result_set
         ]
 
-    return _cached_read("find_symbol", {"name": name, "limit": limit}, _fetch)
+    args = {"name": name, "limit": limit}
+    return _cached_read(
+        "find_symbol",
+        args,
+        _fetch,
+        trace_args=_with_correlation_args(
+            args,
+            task_id=task_id,
+            issue_id=issue_id,
+            pr_id=pr_id,
+            activity_id=activity_id,
+        ),
+    )
 
 
 @mcp.tool()
@@ -798,7 +837,14 @@ def explain_data_flow(scope_qname: str, limit: int = 20) -> dict:
 
 
 @mcp.tool()
-def retrieve_context(query: str, limit: int = 10) -> list[dict]:
+def retrieve_context(
+    query: str,
+    limit: int = 10,
+    task_id: str | None = None,
+    issue_id: str | None = None,
+    pr_id: str | None = None,
+    activity_id: str | None = None,
+) -> list[dict]:
     """Retrieve relevant code context for an agent query string."""
     if not _graph:
         raise RuntimeError("MCP server not initialized")
@@ -828,7 +874,19 @@ def retrieve_context(query: str, limit: int = 10) -> list[dict]:
             )
         return items
 
-    return _cached_read("retrieve_context", {"query": query, "limit": limit}, _fetch)
+    args = {"query": query, "limit": limit}
+    return _cached_read(
+        "retrieve_context",
+        args,
+        _fetch,
+        trace_args=_with_correlation_args(
+            args,
+            task_id=task_id,
+            issue_id=issue_id,
+            pr_id=pr_id,
+            activity_id=activity_id,
+        ),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -836,7 +894,14 @@ def retrieve_context(query: str, limit: int = 10) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def find_call_graph(qualified_name: str, depth: int = 2) -> dict:
+def find_call_graph(
+    qualified_name: str,
+    depth: int = 2,
+    task_id: str | None = None,
+    issue_id: str | None = None,
+    pr_id: str | None = None,
+    activity_id: str | None = None,
+) -> dict:
     """Return the full call graph (callers + callees) up to *depth* hops."""
     if not _graph:
         raise RuntimeError("MCP server not initialized")
@@ -854,8 +919,18 @@ def find_call_graph(qualified_name: str, depth: int = 2) -> dict:
             "callees": [row[0] for row in callees_result.result_set],
         }
 
+    args = {"qualified_name": qualified_name, "depth": depth}
     return _cached_read(
-        "find_call_graph", {"qualified_name": qualified_name, "depth": depth}, _fetch
+        "find_call_graph",
+        args,
+        _fetch,
+        trace_args=_with_correlation_args(
+            args,
+            task_id=task_id,
+            issue_id=issue_id,
+            pr_id=pr_id,
+            activity_id=activity_id,
+        ),
     )
 
 

@@ -126,3 +126,5 @@ config/
 
 # Generated root build output
 dist/
+
+.nasco
