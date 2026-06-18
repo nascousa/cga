@@ -1,6 +1,6 @@
 # AI-First Correlation Contract
 
-Version: 1.30.91
+Version: 1.30.93
 Date: 2026-06-18
 
 This contract defines how AI-first tasks should connect MCP tool calls, Work Briefing activity, evidence packs, PRs, and review/audit records.

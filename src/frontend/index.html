@@ -347,6 +347,61 @@
       font-weight: 600;
     }
     .settings-actions-indexing { justify-content: flex-start; }
+    .upgrade-hero {
+      display: grid;
+      grid-template-columns: minmax(220px, 0.8fr) minmax(320px, 1.2fr);
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .upgrade-score {
+      display: grid;
+      align-content: center;
+      gap: 8px;
+      min-height: 148px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .upgrade-score strong { font-size: 34px; line-height: 1; letter-spacing: 0; color: var(--accent); }
+    .upgrade-score span { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .upgrade-check-list { display: grid; gap: 8px; }
+    .upgrade-check {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 8px 10px;
+      align-items: start;
+      padding: 10px 12px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .upgrade-check strong { font-size: 12.5px; font-weight: 600; }
+    .upgrade-check span:last-child { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .upgrade-command-group { display: grid; gap: 8px; margin-top: 10px; }
+    .upgrade-command-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .upgrade-command-head { display:flex; justify-content:space-between; align-items:center; gap:8px; margin-bottom:8px; }
+    .upgrade-command-card pre {
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      color: var(--text);
+      background: #04060a;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    @media (max-width: 920px) {
+      .upgrade-hero { grid-template-columns: 1fr; }
+    }
     .settings-copy-value {
       display: inline-flex;
       align-items: center;
@@ -2596,9 +2651,14 @@
             <label>Source URL</label>
             <input id="ai-first-signal-source-url" placeholder="https://github.com/.../actions/runs/..." />
           </div>
+          <div class="form-group wide">
+            <label>GitHub Repo URL</label>
+            <input id="ai-first-github-repo-url" placeholder="https://github.com/nascousa/cga" />
+          </div>
         </div>
         <div class="settings-actions">
           <button class="btn btn-primary" onclick="recordAiFirstSignal()">Record Signal</button>
+          <button class="btn btn-accent" onclick="importAiFirstGithubSignals()">Import GitHub</button>
         </div>
         <div class="table-wrap" style="margin-top:12px">
           <table>
@@ -3187,6 +3247,7 @@
           <button class="subtab-btn"        data-subtab="integrations" onclick="switchSettingsSubtab('integrations',this)">Integrations</button>
           <button class="subtab-btn"        data-subtab="delegation"   onclick="switchSettingsSubtab('delegation',this)">Delegation</button>
           <button class="subtab-btn"        data-subtab="security"     onclick="switchSettingsSubtab('security',this)">Security</button>
+          <button class="subtab-btn"        data-subtab="upgrade"      onclick="switchSettingsSubtab('upgrade',this)">Upgrade</button>
           <button class="subtab-btn"        data-subtab="backup"       onclick="switchSettingsSubtab('backup',this)">Backup</button>
           <button class="subtab-btn"        data-subtab="report"       onclick="switchSettingsSubtab('report',this)">Report</button>
         </nav>
@@ -3296,6 +3357,55 @@
             <div class="settings-card">
               <div class="settings-row"><label>Authentication</label><span class="settings-value">JWT (local auth DB)</span></div>
               <div class="settings-row"><label>Admin-only Pages</label><span class="settings-value">Dashboard, User, Audit, Graph, Settings</span></div>
+            </div>
+          </section>
+
+          <section class="settings-section" id="settings-section-upgrade">
+            <h2>Upgrade Center</h2>
+            <p class="settings-hint">Review local upgrade readiness, compatibility signals, and the recommended execution path before replacing CGA runtime images.</p>
+
+            <div class="upgrade-hero">
+              <div class="upgrade-score">
+                <span>Upgrade Readiness</span>
+                <strong id="upgrade-readiness-score">…</strong>
+                <span id="upgrade-readiness-recommendation">Loading local upgrade status...</span>
+              </div>
+              <div class="settings-card">
+                <div class="settings-row"><label>Current Version</label><span id="upgrade-current-version" class="settings-value">…</span></div>
+                <div class="settings-row"><label>Install Flavor</label><span id="upgrade-install-flavor" class="settings-value">…</span></div>
+                <div class="settings-row"><label>Release Channel</label><span id="upgrade-release-channel" class="settings-value">…</span></div>
+                <div class="settings-row"><label>Latest Known</label><span id="upgrade-latest-known" class="settings-value">…</span></div>
+                <div class="settings-row"><label>Update Policy</label><span id="upgrade-update-policy" class="settings-value">…</span></div>
+              </div>
+            </div>
+
+            <div class="settings-card">
+              <div class="settings-row"><label>Latest Backup</label><span id="upgrade-latest-backup" class="settings-value mono">…</span></div>
+              <div class="settings-row"><label>Backup Folder</label><span id="upgrade-backup-folder" class="settings-value mono">…</span></div>
+              <div class="settings-row"><label>Schema Versions</label><span id="upgrade-schema-versions" class="settings-value">…</span></div>
+              <div class="settings-row"><label>Relay Compatibility</label><span id="upgrade-relay-compat" class="settings-value">…</span></div>
+              <div class="settings-row"><label>Rollback Mode</label><span id="upgrade-rollback-mode" class="settings-value">…</span></div>
+            </div>
+
+            <div class="settings-actions">
+              <button class="btn btn-primary" onclick="loadUpgradeStatus()">Refresh Status</button>
+              <button class="btn btn-ghost" onclick="switchSettingsSubtab('backup')">Open Backup</button>
+            </div>
+
+            <div class="settings-strategy-group">
+              <div class="settings-strategy-head">
+                <h3>Readiness Checks</h3>
+                <span id="upgrade-check-status" class="settings-strategy-status">Loading</span>
+              </div>
+              <div id="upgrade-check-list" class="upgrade-check-list"></div>
+            </div>
+
+            <div class="settings-strategy-group">
+              <div class="settings-strategy-head">
+                <h3>Execution Path</h3>
+                <span class="settings-strategy-status">Manual</span>
+              </div>
+              <div id="upgrade-command-list" class="upgrade-command-group"></div>
             </div>
           </section>
 
@@ -4450,9 +4560,88 @@ function switchSettingsSubtab(name, btn) {
   if (section) section.classList.add('active');
   const activeBtn = btn || document.querySelector(`#settings-subnav .subtab-btn[data-subtab="${name}"]`);
   if (activeBtn) activeBtn.classList.add('active');
+  if (name === 'upgrade') loadUpgradeStatus();
   if (name === 'backup') loadBackups();
   if (name === 'delegation') loadMicrosoftAdoStatus();
   if (name === 'report') initWsrTemplateEditor();
+}
+
+// ── Upgrade Center subtab ────────────────────────────────────────────────
+function upgradePill(status) {
+  const normalized = String(status || 'unknown').toLowerCase();
+  const cls = normalized === 'ok' || normalized === 'ready'
+    ? 'pill-green'
+    : normalized === 'warn' || normalized === 'attention'
+      ? 'pill-amber'
+      : normalized === 'error'
+        ? 'pill-red'
+        : 'pill-gray';
+  return `<span class="pill ${cls}">${esc(status || 'unknown')}</span>`;
+}
+
+function setUpgradeText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value || '—';
+}
+
+function formatUpgradeSnapshot(snapshot) {
+  if (!snapshot) return 'No snapshot found';
+  return `${snapshot.name} · ${_fmtIso(snapshot.created_at)} · ${_fmtBytes(snapshot.size_bytes)}`;
+}
+
+async function loadUpgradeStatus() {
+  const checkList = document.getElementById('upgrade-check-list');
+  const commandList = document.getElementById('upgrade-command-list');
+  if (checkList) checkList.textContent = 'Loading…';
+  if (commandList) commandList.textContent = 'Loading…';
+  try {
+    const data = await api('GET', '/admin/upgrade/status');
+    const readiness = data.readiness || {};
+    const backup = data.backup || {};
+    const schema = data.schema || {};
+    const compatibility = data.compatibility || {};
+    setUpgradeText('upgrade-readiness-score', `${readiness.score ?? '—'}%`);
+    setUpgradeText('upgrade-readiness-recommendation', readiness.recommendation || 'Review upgrade status before changing versions.');
+    setUpgradeText('upgrade-current-version', `v${data.app_version || '—'}`);
+    setUpgradeText('upgrade-install-flavor', data.install_flavor || 'unknown');
+    setUpgradeText('upgrade-release-channel', data.release_channel || 'manual');
+    setUpgradeText('upgrade-latest-known', data.latest_known_version ? `v${data.latest_known_version}` : 'current local version');
+    setUpgradeText('upgrade-update-policy', data.update_policy || 'manual');
+    setUpgradeText('upgrade-latest-backup', formatUpgradeSnapshot(backup.latest_snapshot));
+    setUpgradeText('upgrade-backup-folder', backup.backup_dir || '—');
+    setUpgradeText('upgrade-schema-versions', `auth ${schema.auth ?? '—'} · work ${schema.work_briefing ?? '—'} · graph ${schema.graph ?? '—'} · config ${schema.runtime_config ?? '—'}`);
+    setUpgradeText('upgrade-relay-compat', `min ${compatibility.min_relay_version || '—'} · recommended ${compatibility.recommended_relay_version || '—'}`);
+    setUpgradeText('upgrade-rollback-mode', compatibility.rollback_mode || 'restore-pre-upgrade-backup');
+    const statusEl = document.getElementById('upgrade-check-status');
+    if (statusEl) statusEl.textContent = readiness.status || 'attention';
+    if (checkList) {
+      checkList.innerHTML = (readiness.checks || []).map(check => `
+        <div class="upgrade-check">
+          <span>${upgradePill(check.status)}</span>
+          <div><strong>${esc(check.label)}</strong><span>${esc(check.detail)}</span></div>
+        </div>`).join('') || '<div class="settings-hint">No readiness checks returned.</div>';
+    }
+    if (commandList) {
+      commandList.innerHTML = (data.commands || []).map(group => {
+        const commandText = (group.commands || []).join('\n');
+        return `
+          <div class="upgrade-command-card">
+            <div class="upgrade-command-head">
+              <strong>${esc(group.label)}</strong>
+              <span style="display:flex;gap:6px;align-items:center">
+                ${group.recommended ? '<span class="pill pill-green">Recommended</span>' : ''}
+                <button class="btn btn-sm" onclick="copyText(${jsArg(commandText)}, '${esc(group.label)} upgrade commands')">Copy</button>
+              </span>
+            </div>
+            <pre>${esc(commandText)}</pre>
+          </div>`;
+      }).join('') || '<div class="settings-hint">No upgrade commands returned.</div>';
+    }
+  } catch (e) {
+    if (checkList) checkList.innerHTML = `<div style="color:var(--danger,#f66)">Failed to load upgrade status: ${esc(e.message)}</div>`;
+    if (commandList) commandList.textContent = '';
+    toast(e.message, 'error');
+  }
 }
 
 // ── Backup subtab ─────────────────────────────────────────────────────────
@@ -4862,6 +5051,8 @@ function renderAiFirstReadiness(payload = _aiFirstReadiness) {
     const collapsed = isAiFirstProjectCollapsed(projectKey);
     const dimensions = Array.isArray(snapshot.dimensions) ? snapshot.dimensions : [];
     const actions = Array.isArray(snapshot.recommended_next_actions) ? snapshot.recommended_next_actions : [];
+    const policyGates = snapshot.policy_gates || {};
+    const gates = Array.isArray(policyGates.gates) ? policyGates.gates : [];
     return `
       <div class="briefing-command-card briefing-command-card-full ai-first-project-card${collapsed ? ' is-collapsed' : ''}" data-ai-first-project="${esc(projectKey)}" style="margin-bottom:12px">
         <div class="briefing-section-head">
@@ -4898,6 +5089,26 @@ function renderAiFirstReadiness(payload = _aiFirstReadiness) {
                 `)).join('')}
               </tbody>
             </table>
+          </div>
+          <div style="margin-top:12px">
+            <span class="briefing-kicker">Policy Gates ${aiFirstStatusPill(policyGates.overall_status || 'ok')}</span>
+            ${gates.length ? `
+              <div class="table-wrap" style="margin-top:8px">
+                <table>
+                  <thead><tr><th>Gate</th><th>Status</th><th>Severity</th><th>Summary</th></tr></thead>
+                  <tbody>
+                    ${gates.map(gate => `
+                      <tr>
+                        <td>${esc(gate.label || gate.key)}</td>
+                        <td>${aiFirstStatusPill(gate.status)}</td>
+                        <td>${esc(gate.severity || '')}</td>
+                        <td>${esc(gate.summary || '')}</td>
+                      </tr>
+                    `).join('')}
+                  </tbody>
+                </table>
+              </div>
+            ` : `<p style="margin-top:8px;color:var(--muted)">No active gates for this profile.</p>`}
           </div>
           <div style="margin-top:12px">
             <span class="briefing-kicker">Next Actions</span>
@@ -5031,6 +5242,24 @@ async function recordAiFirstSignal() {
   try {
     await api('POST', '/admin/ai-first/signals', payload);
     toast('Signal recorded');
+    await loadAiFirstSignals();
+    await loadAiFirstReadiness();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function importAiFirstGithubSignals() {
+  const projectId = aiFirstSelectedProjectId();
+  if (!projectId) { toast('Project ID or name required for GitHub import', 'error'); return; }
+  const repoUrl = document.getElementById('ai-first-github-repo-url')?.value.trim() || '';
+  try {
+    const result = await api('POST', '/admin/ai-first/signals/import-github', {
+      project_id: projectId,
+      repo_url: repoUrl,
+      limit: 5,
+    });
+    toast(`Imported ${result.imported_count || 0} GitHub signal(s)`);
     await loadAiFirstSignals();
     await loadAiFirstReadiness();
   } catch (e) {

@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 import backend.main as main_module
 from backend.auth.dependencies import require_admin
+from backend.ai_first.service import import_github_signals
 from backend.main import app
 from backend.workbriefing.service import WorkBriefingService
 
@@ -205,6 +206,19 @@ async def test_ai_first_evidence_endpoint_filters_by_task_id(auth_pg_pool, pg_ac
     app.dependency_overrides[require_admin] = lambda: {"id": 1, "role": "admin", "username": "admin"}
     try:
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            signal_response = await client.post(
+                "/api/admin/ai-first/signals",
+                json={
+                    "project_id": "CGA123",
+                    "signal_type": "benchmark",
+                    "name": "Task HPS",
+                    "status": "ok",
+                    "value": "13.34",
+                    "unit": "%",
+                    "metadata": {"task_id": "TASK-123"},
+                },
+            )
+            assert signal_response.status_code == 201
             response = await client.get("/api/admin/ai-first/evidence?project_id=CGA123&task_id=TASK-123&limit=10")
     finally:
         app.dependency_overrides.clear()
@@ -215,8 +229,66 @@ async def test_ai_first_evidence_endpoint_filters_by_task_id(auth_pg_pool, pg_ac
     assert payload["correlation"]["filters"] == {"task_id": "TASK-123"}
     assert payload["activity_evidence"]["count"] == 1
     assert payload["activity_evidence"]["activities"][0]["source_item_id"] == "task-123-change"
+    assert payload["signal_evidence"]["count"] == 1
+    assert payload["signal_evidence"]["signals"][0]["name"] == "Task HPS"
     assert "Implemented task-bound evidence" in payload["markdown"]
+    assert "Task HPS" in payload["markdown"]
     assert "Reviewed unrelated work" not in payload["markdown"]
+
+
+@pytest.mark.asyncio
+async def test_import_github_signals_records_ci_and_pr(auth_pg_pool, tmp_path) -> None:
+    repo = _make_ready_repo(tmp_path)
+
+    async def fake_get_json(url: str, headers: dict) -> object:
+        assert headers["Accept"] == "application/vnd.github+json"
+        if "/actions/runs" in url:
+            return {
+                "workflow_runs": [
+                    {
+                        "id": 101,
+                        "workflow_id": 9,
+                        "name": "Policy CI",
+                        "run_number": 62,
+                        "status": "completed",
+                        "conclusion": "success",
+                        "html_url": "https://github.com/nascousa/cga/actions/runs/101",
+                        "updated_at": "2026-06-18T02:00:00Z",
+                        "head_branch": "dev/ai-first",
+                        "head_sha": "abc123",
+                        "event": "push",
+                    }
+                ]
+            }
+        if "/pulls" in url:
+            return [
+                {
+                    "number": 42,
+                    "title": "Add AI-first signals",
+                    "state": "closed",
+                    "merged_at": "2026-06-18T02:30:00Z",
+                    "html_url": "https://github.com/nascousa/cga/pull/42",
+                    "updated_at": "2026-06-18T02:31:00Z",
+                    "user": {"login": "nasco"},
+                }
+            ]
+        raise AssertionError(f"unexpected url: {url}")
+
+    async with auth_pg_pool.acquire() as db:
+        await _seed_project(db, repo_path=str(repo))
+        result = await import_github_signals(
+            db=db,
+            project_id="CGA123",
+            repo_url="https://github.com/nascousa/cga",
+            http_get_json=fake_get_json,
+            created_by="admin",
+        )
+
+    assert result["repository"] == "nascousa/cga"
+    assert result["imported_count"] == 2
+    assert [signal["signal_type"] for signal in result["signals"]] == ["ci", "pr"]
+    assert result["signals"][0]["status"] == "ok"
+    assert result["signals"][1]["status"] == "merged"
 
 
 @pytest.mark.asyncio
@@ -385,3 +457,77 @@ async def test_ai_first_signals_feed_readiness_dimensions(auth_pg_pool, pg_activ
     assert next(item for item in verification["signals"] if item["key"] == "ci_signal")["status"] == "ok"
     assert next(item for item in workflow["signals"] if item["key"] == "pr_signal")["status"] == "ok"
     assert next(item for item in roi["signals"] if item["key"] == "context_efficiency")["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_ai_first_policy_gates_warn_for_missing_team_default_evidence(auth_pg_pool, pg_activity_store, tmp_path, monkeypatch) -> None:
+    repo = _make_ready_repo(tmp_path)
+    service = WorkBriefingService(store=pg_activity_store)
+    consumer = AsyncMock()
+    consumer.get_jobs_by_repo.return_value = []
+    registry = FakeRegistry(FakeGraph({"repositories": 1, "files": 3, "symbols": 9}))
+
+    async with auth_pg_pool.acquire() as db:
+        await _seed_project(db, repo_path=str(repo))
+
+    monkeypatch.setattr(main_module, "_work_briefing_service", service)
+    monkeypatch.setattr(main_module, "_consumer", consumer)
+    monkeypatch.setattr(main_module, "_registry", registry)
+    app.dependency_overrides[require_admin] = lambda: {"id": 1, "role": "admin", "username": "admin"}
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            update_response = await client.patch(
+                "/api/admin/ai-first/policy-profiles",
+                json={"project_id": "CGA123", "profile_name": "team-default"},
+            )
+            readiness_response = await client.get("/api/admin/ai-first/readiness?project_id=CGA123")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert update_response.status_code == 200
+    payload = readiness_response.json()["projects"][0]
+    gates = payload["policy_gates"]
+    assert gates["profile_name"] == "team-default"
+    assert gates["overall_status"] == "warn"
+    gate_by_key = {gate["key"]: gate for gate in gates["gates"]}
+    assert gate_by_key["saved_evidence_pack"]["status"] == "warn"
+    assert gate_by_key["ci_signal"]["status"] == "warn"
+    assert gate_by_key["pr_signal"]["status"] == "warn"
+
+
+@pytest.mark.asyncio
+async def test_ai_first_policy_gates_fail_on_failed_ci_signal(auth_pg_pool, pg_activity_store, tmp_path, monkeypatch) -> None:
+    repo = _make_ready_repo(tmp_path)
+    service = WorkBriefingService(store=pg_activity_store)
+    consumer = AsyncMock()
+    consumer.get_jobs_by_repo.return_value = []
+    registry = FakeRegistry(FakeGraph({"repositories": 1, "files": 3, "symbols": 9}))
+
+    async with auth_pg_pool.acquire() as db:
+        await _seed_project(db, repo_path=str(repo))
+
+    monkeypatch.setattr(main_module, "_work_briefing_service", service)
+    monkeypatch.setattr(main_module, "_consumer", consumer)
+    monkeypatch.setattr(main_module, "_registry", registry)
+    app.dependency_overrides[require_admin] = lambda: {"id": 1, "role": "admin", "username": "admin"}
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            await client.patch(
+                "/api/admin/ai-first/policy-profiles",
+                json={"project_id": "CGA123", "profile_name": "regulated"},
+            )
+            signal_response = await client.post(
+                "/api/admin/ai-first/signals",
+                json={"project_id": "CGA123", "signal_type": "ci", "name": "policy-ci", "status": "failed"},
+            )
+            readiness_response = await client.get("/api/admin/ai-first/readiness?project_id=CGA123")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert signal_response.status_code == 201
+    gates = readiness_response.json()["projects"][0]["policy_gates"]
+    assert gates["profile_name"] == "regulated"
+    assert gates["overall_status"] == "fail"
+    gate_by_key = {gate["key"]: gate for gate in gates["gates"]}
+    assert gate_by_key["ci_signal"]["status"] == "fail"
+    assert gate_by_key["ci_signal"]["severity"] == "required"

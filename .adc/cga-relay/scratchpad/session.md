@@ -9,6 +9,13 @@ This ensures the NEXT agent handling this repository knows exactly where you lef
 - **Failing Tests / Errors:** 
 - **Next Steps:** 
 
+## 2026-06-18 Upgrade Center And AI-First Policy Gates
+
+- **Current Task:** Add Admin UI upgrade readiness plus GitHub import, signal evidence, and policy-derived AI-first gates.
+- **Last Action Taken:** Added `/api/admin/upgrade/status`, Upgrade Center UI, GitHub Actions/PR import into `ai_first_signals`, signal matching inside `build_evidence_pack`, Admin UI controls for GitHub import, `signal_evidence` Markdown output, readiness/evidence `policy_gates`, Admin policy gate rendering, and bumped README/backend metadata to `1.30.93`.
+- **Failing Tests / Errors:** Focused tests passed: `python -m pytest src/tests/test_ai_first_api.py src/tests/test_mcp_tools.py src/tests/test_cga_relay_router.py -q`. `python -m compileall src/backend/ai_first src/backend/main.py`, Admin inline script syntax check, and `git diff --check` passed. Local `cga-relay sync` could not complete because the local CGA API returned `401 Not authenticated` for `/api/auth/me/groups`.
+- **Next Steps:** Consider automatic Azure DevOps PR/build imports, PR template evidence links, and promoting warning gates into review gates for lighthouse repos.
+
 ## 2026-06-18 AI-First Project Collapse State
 
 - **Current Task:** Make each project card on `/admin/ai-first` collapsible and remember the last collapsed state.

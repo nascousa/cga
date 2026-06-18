@@ -1,6 +1,6 @@
 # AI-First Readiness And Evidence MVP
 
-Version: 1.30.91
+Version: 1.30.93
 Date: 2026-06-18
 
 This MVP starts the CGA AI-first control-plane work with two admin-only APIs. The first measures whether a project has the basic engineering conditions for AI-first work. The second exports an observe-only evidence pack for review, team planning, or retrospectives.
@@ -56,6 +56,7 @@ The evidence pack includes:
 - `project`: project identity and repository path.
 - `readiness`: readiness summary, dimensions, and next actions.
 - `activity_evidence`: sanitized recent Work Briefing activities.
+- `signal_evidence`: sanitized matching PR, CI, and benchmark signals.
 - `trace_evidence`: sanitized matching MCP trace summaries when tools carry matching correlation fields.
 - `markdown`: a copy-ready Markdown rendering for planning notes, PRs, or retrospectives.
 
@@ -133,6 +134,35 @@ Built-in profiles:
 
 Readiness snapshots and evidence packs both include the active project policy profile.
 
+## Policy Gates V0
+
+Readiness snapshots and evidence packs include `policy_gates` derived from the active profile.
+
+- `observe-only` and `local-dev` remain L0 observe mode with no active gates.
+- `team-default` enables warning gates for saved evidence packs, CI signals, PR/review signals, benchmark signals, and Work Briefing activity.
+- `regulated`, `sovereign`, and `offline-isolated` mark core evidence gates as `required`; v0 reports gate status but does not block actions.
+- Failed CI/PR/benchmark signals set the relevant gate to `fail`.
+
+Gate output shape:
+
+```json
+{
+	"profile_name": "team-default",
+	"enforcement_level": "L1",
+	"overall_status": "warn",
+	"mode": "warning_gates",
+	"gates": [
+		{
+			"key": "ci_signal",
+			"label": "CI signal",
+			"status": "ok",
+			"severity": "warning",
+			"summary": "policy-ci: ok at 2026-06-18T02:00:00Z"
+		}
+	]
+}
+```
+
 ## Signals V0
 
 AI-first signals are project-level PR, CI, and benchmark facts that feed readiness scoring.
@@ -163,6 +193,24 @@ List signals:
 GET /api/admin/ai-first/signals?project_id=<project_id_or_name>&signal_type=ci&limit=25
 ```
 
+Import GitHub Actions and PR signals:
+
+```text
+POST /api/admin/ai-first/signals/import-github
+```
+
+Body:
+
+```json
+{
+	"project_id": "CGA123",
+	"repo_url": "https://github.com/nascousa/cga",
+	"limit": 5
+}
+```
+
+If `repo_url` is omitted, CGA tries the project `upstream_url`, then the repository path's `.git/config` remote URL. Public GitHub repositories can be imported without a token; private repositories may use `GITHUB_TOKEN` or `GH_TOKEN` from the CGA process environment.
+
 Supported `signal_type` values:
 
 - `ci`: CI or local validation result. Feeds Verification Readiness.
@@ -180,7 +228,7 @@ Status values are normalized into readiness states. `ok`, `pass`, `success`, `me
 
 ## Suggested Next Steps
 
-1. Connect PR review latency, CI lane status, rework rate, and context-quality benchmark runs automatically from GitHub/Azure DevOps.
+1. Connect Azure DevOps PR/build imports for teams that do not use GitHub.
 2. Add evidence-pack links into PR templates and Work Briefing activity detail views.
-3. Promote task-bound evidence packs from observe-only to warning gates for lighthouse repos.
+3. Promote warning gates into review gates for lighthouse repos.
 4. Add approval-gate workflow support for regulated and sovereign profiles.
