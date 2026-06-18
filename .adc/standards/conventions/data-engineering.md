@@ -2,6 +2,7 @@
 
 ## PostgreSQL Vector Policy (`pgvector`)
 - **Standard Vector Store**: For production semantic search, PostgreSQL with `pgvector` is the default vector persistence layer.
+- **Default Web App Store**: Web application projects SHOULD default to PostgreSQL plus `pgvector` when they need relational data and vector retrieval in the same product surface.
 - **Model Consistency**: Each embedding column MUST be tied to a single embedding model/version and fixed vector dimension.
 - **Index Strategy**: Use `HNSW` or `IVFFlat` indexes for vector columns based on latency/recall requirements. Brute-force scans are not allowed for production-scale datasets.
 - **Query Constraints**: All vector queries MUST enforce explicit `top_k` limits and include metadata filters when available.

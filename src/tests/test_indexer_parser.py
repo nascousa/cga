@@ -12,6 +12,7 @@ from backend.indexer.parser import (
     PythonParser,
     SourceParser,
     TypeScriptJavaScriptParser,
+    PowerShellParser,
     GoParser,
     RustParser,
     JavaParser,
@@ -106,6 +107,7 @@ def test_parse_syntax_error(tmp_py):
 def test_discover_files(tmp_path):
     (tmp_path / "a.py").write_text("x = 1")
     (tmp_path / "a.ts").write_text("export function x() {}")
+    (tmp_path / "script.ps1").write_text("function Invoke-Thing { }")
     (tmp_path / "b.txt").write_text("skip")
     sub = tmp_path / "pkg"
     sub.mkdir()
@@ -119,10 +121,43 @@ def test_discover_files(tmp_path):
     paths = [os.path.basename(p) for p in found]
     assert "a.py" in paths
     assert "a.ts" in paths
+    assert "script.ps1" in paths
     assert "c.py" in paths
     assert "d.jsx" in paths
     assert "b.txt" not in paths
     assert "e.py" not in paths  # inside __pycache__
+
+
+def test_parse_powershell_symbols(tmp_path):
+    path = tmp_path / "QuickSearch.Index.ps1"
+    path.write_text(
+        textwrap.dedent(
+            """\
+            function Invoke-QuickSearchIndex {
+                param([string]$Path)
+                return $Path
+            }
+
+            class QuickSearchIndexState {
+            }
+            """
+        ),
+        encoding="utf-8",
+    )
+    result = PowerShellParser().parse(str(path))
+    assert result.parse_error is None
+    assert result.language == "powershell"
+    types = {symbol.name: symbol.symbol_type for symbol in result.symbols}
+    assert types["Invoke-QuickSearchIndex"] == "function"
+    assert types["QuickSearchIndexState"] == "class"
+
+
+def test_source_parser_dispatches_powershell(tmp_path):
+    path = tmp_path / "QuickSearch.Support.ps1"
+    path.write_text("function Show-QuickSearchAbout { }", encoding="utf-8")
+    result = SourceParser().parse(str(path))
+    assert result.language == "powershell"
+    assert [symbol.name for symbol in result.symbols] == ["Show-QuickSearchAbout"]
 
 
 def test_parse_typescript_symbols_and_imports(tmp_path):
@@ -441,6 +476,9 @@ def test_supported_extensions_include_new_languages():
     assert ".go" in SUPPORTED_EXTENSIONS
     assert ".rs" in SUPPORTED_EXTENSIONS
     assert ".java" in SUPPORTED_EXTENSIONS
+    assert ".ps1" in SUPPORTED_EXTENSIONS
+    assert ".psm1" in SUPPORTED_EXTENSIONS
+    assert ".psd1" in SUPPORTED_EXTENSIONS
     assert ".py" in SUPPORTED_EXTENSIONS
     assert ".ts" in SUPPORTED_EXTENSIONS
 

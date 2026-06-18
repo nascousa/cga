@@ -1,0 +1,186 @@
+# AI-First Readiness And Evidence MVP
+
+Version: 1.30.91
+Date: 2026-06-18
+
+This MVP starts the CGA AI-first control-plane work with two admin-only APIs. The first measures whether a project has the basic engineering conditions for AI-first work. The second exports an observe-only evidence pack for review, team planning, or retrospectives.
+
+Admin UI:
+
+```text
+http://localhost:18001/admin/ai-first
+```
+
+## Readiness Snapshot
+
+Endpoint:
+
+```text
+GET /api/admin/ai-first/readiness?project_id=<project_id_or_name>
+```
+
+If `project_id` is omitted, the response includes all active projects visible to the admin database query.
+
+The snapshot currently scores five dimensions:
+
+- Context Readiness: repository path, ADC core files, graph counts, and latest index job.
+- Verification Readiness: local test surface and CI workflow files.
+- Workflow Readiness: Work Briefing activity and Learn / Prepare / Execute evidence placeholders.
+- Governance Readiness: active MCP token and observe-only policy profile.
+- ROI & Outcome Readiness: graph availability for token/HPS benchmarking and placeholder outcome metrics.
+
+Signals are explainable and may be `ok`, `warn`, `fail`, or `unknown`. Unknown data is not treated as fake precision; it means CGA does not yet have that evidence.
+
+## Evidence Pack V0
+
+Endpoint:
+
+```text
+GET /api/admin/ai-first/evidence?project_id=<project_id_or_name>&limit=25
+```
+
+Optional task-bound correlation filters:
+
+```text
+task_id=<task-or-story-id>
+issue_id=<issue-or-pbi-id>
+pr_id=<pull-request-id>
+activity_id=<work-briefing-activity-id>
+```
+
+The evidence pack includes:
+
+- `schema_version`: currently `ai-first-evidence-pack.v0`.
+- `policy_profile`: observe-only / L0 record-only defaults.
+- `correlation`: project-level or task-bound mode plus filters and match counts.
+- `project`: project identity and repository path.
+- `readiness`: readiness summary, dimensions, and next actions.
+- `activity_evidence`: sanitized recent Work Briefing activities.
+- `trace_evidence`: sanitized matching MCP trace summaries when tools carry matching correlation fields.
+- `markdown`: a copy-ready Markdown rendering for planning notes, PRs, or retrospectives.
+
+Activity export is summary-only. Raw metadata values are not exported; only metadata keys are included so evidence packs do not leak token-like fields. Trace export is also summary-only: evidence packs include argument keys, explicit correlation values, result counts, and short result previews rather than raw trace payloads.
+
+## Persisted Evidence Packs
+
+Save a generated evidence pack:
+
+```text
+POST /api/admin/ai-first/evidence-packs
+```
+
+Body:
+
+```json
+{
+	"project_id": "CGA123",
+	"task_id": "TASK-123",
+	"issue_id": "PBI-456",
+	"pr_id": "789",
+	"activity_id": "optional-work-activity-id",
+	"limit": 25
+}
+```
+
+List saved packs:
+
+```text
+GET /api/admin/ai-first/evidence-packs?project_id=<project_id_or_name>&limit=25
+```
+
+Load one saved pack:
+
+```text
+GET /api/admin/ai-first/evidence-packs/<evidence_id>
+```
+
+Persisted packs store the sanitized JSON evidence and Markdown snapshot in the auth database under `ai_first_evidence_packs`.
+
+## Policy Profile V0
+
+Policy profiles are project-level configuration stored in `ai_first_policy_profiles`. They are observe/warn metadata today and do not block workflows yet.
+
+List profiles and definitions:
+
+```text
+GET /api/admin/ai-first/policy-profiles?project_id=<project_id_or_name>
+```
+
+Update a project profile:
+
+```text
+PATCH /api/admin/ai-first/policy-profiles
+```
+
+Body:
+
+```json
+{
+	"project_id": "CGA123",
+	"profile_name": "team-default",
+	"notes": "Lighthouse pilot"
+}
+```
+
+Built-in profiles:
+
+- `observe-only`: L0 record-only default.
+- `local-dev`: L0 high-trust local development.
+- `team-default`: L1 warn-on-missing-evidence team workflow.
+- `regulated`: L3 approval-gate profile.
+- `sovereign`: L4 strict sovereign-boundary profile.
+- `offline-isolated`: L4 local-only isolated profile.
+
+Readiness snapshots and evidence packs both include the active project policy profile.
+
+## Signals V0
+
+AI-first signals are project-level PR, CI, and benchmark facts that feed readiness scoring.
+
+Record a signal:
+
+```text
+POST /api/admin/ai-first/signals
+```
+
+Body:
+
+```json
+{
+	"project_id": "CGA123",
+	"signal_type": "ci",
+	"name": "policy-ci",
+	"status": "ok",
+	"value": "62",
+	"unit": "tests",
+	"source_url": "https://github.com/nascousa/cga/actions/runs/..."
+}
+```
+
+List signals:
+
+```text
+GET /api/admin/ai-first/signals?project_id=<project_id_or_name>&signal_type=ci&limit=25
+```
+
+Supported `signal_type` values:
+
+- `ci`: CI or local validation result. Feeds Verification Readiness.
+- `pr`: PR/review/merge/review-latency result. Feeds Workflow Readiness.
+- `benchmark`: token/HPS/quality/cost benchmark result. Feeds ROI & Outcome Readiness.
+
+Status values are normalized into readiness states. `ok`, `pass`, `success`, `merged`, and `approved` count as ready; `fail`, `error`, `blocked`, and `rejected` count as failing; pending/open/review values count as warning.
+
+## First Implementation Boundaries
+
+- No database migration is required.
+- No enforcement is active yet; this is observe-only.
+- CI and PR outcome metrics are placeholders until external metadata is connected.
+- Project policy profiles are represented as defaults, not yet stored per project.
+
+## Suggested Next Steps
+
+1. Connect PR review latency, CI lane status, rework rate, and context-quality benchmark runs automatically from GitHub/Azure DevOps.
+2. Add evidence-pack links into PR templates and Work Briefing activity detail views.
+3. Promote task-bound evidence packs from observe-only to warning gates for lighthouse repos.
+4. Add approval-gate workflow support for regulated and sovereign profiles.

@@ -82,7 +82,7 @@ def path_to_module(file_path: str) -> str:
         rel = p
     parts = [part for part in rel.parts if part not in ("src",)]
     module = ".".join(parts)
-    for suffix in (".py", ".ts", ".tsx", ".js", ".jsx"):
+    for suffix in (".py", ".ts", ".tsx", ".js", ".jsx", ".ps1", ".psm1", ".psd1"):
         if module.endswith(suffix):
             module = module[: -len(suffix)]
             break
@@ -698,6 +698,56 @@ class TypeScriptJavaScriptParser:
         return "javascript"
 
 
+class PowerShellParser:
+    """Parse PowerShell scripts for repository-wide file and symbol indexing."""
+
+    _FUNCTION_RE = re.compile(r"^\s*function\s+(?:(?:global|script|local|private):)?([A-Za-z_][A-Za-z0-9_-]*)\b", re.IGNORECASE)
+    _CLASS_RE = re.compile(r"^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\b", re.IGNORECASE)
+
+    def parse(self, file_path: str) -> ParsedFile:
+        path = Path(file_path)
+        try:
+            source = path.read_text(encoding="utf-8-sig", errors="replace")
+            lines = source.splitlines()
+        except OSError as exc:
+            return ParsedFile(path=file_path, language="powershell", parse_error=str(exc))
+
+        module_qname = path_to_module(file_path)
+        result = ParsedFile(path=file_path, language="powershell")
+        self._append_matches(result, lines, module_qname, self._FUNCTION_RE, "function")
+        self._append_matches(result, lines, module_qname, self._CLASS_RE, "class")
+        return result
+
+    def _append_matches(
+        self,
+        result: ParsedFile,
+        lines: list[str],
+        module_qname: str,
+        pattern: re.Pattern[str],
+        symbol_type: str,
+    ) -> None:
+        seen: set[tuple[str, int]] = set()
+        for lineno, line in enumerate(lines, start=1):
+            match = pattern.search(line)
+            if not match:
+                continue
+            name = match.group(1)
+            key = (name, lineno)
+            if key in seen:
+                continue
+            seen.add(key)
+            result.symbols.append(
+                ParsedSymbol(
+                    name=name,
+                    qualified_name=f"{module_qname}.{name}",
+                    symbol_type=symbol_type,
+                    file_path=result.path,
+                    line_start=lineno,
+                    line_end=lineno,
+                )
+            )
+
+
 class GoParser:
     """Parse Go source files."""
 
@@ -1253,6 +1303,7 @@ class SourceParser:
     def __init__(self) -> None:
         self._python = PythonParser()
         self._ts_js = TypeScriptJavaScriptParser()
+        self._powershell = PowerShellParser()
         self._go = GoParser()
         self._rust = RustParser()
         self._java = JavaParser()
@@ -1263,6 +1314,8 @@ class SourceParser:
             return self._python.parse(file_path)
         if suffix in {".ts", ".tsx", ".js", ".jsx"}:
             return self._ts_js.parse(file_path)
+        if suffix in {".ps1", ".psm1", ".psd1"}:
+            return self._powershell.parse(file_path)
         if suffix == ".go":
             return self._go.parse(file_path)
         if suffix == ".rs":
@@ -1272,7 +1325,7 @@ class SourceParser:
         return ParsedFile(path=file_path, language="unknown", parse_error="unsupported extension")
 
 
-SUPPORTED_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java"}
+SUPPORTED_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".ps1", ".psm1", ".psd1"}
 
 
 def discover_files(repo_path: str) -> Iterator[str]:

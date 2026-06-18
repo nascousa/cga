@@ -1,11 +1,13 @@
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.83
+- **Version:** 1.30.91
 - **Status:** Published
 - **Author:** Nate Scott
-- **Date:** 2026-06-10 (briefing quick start, indexing settings summary, lean release bundles, and dist ignore)
+- **Date:** 2026-06-18 (AI-First PR/CI/benchmark signals v0)
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
+
+CGA is dedicated to AI-FIRST engineering teams that want local, evidence-backed context for agentic development workflows.
 
 In the current live multi-project benchmark, CGA reduced prompt tokens by **90.44%** on average while lowering Hallucination Pressure Score by **13.34%** across **102 real-code cases**.
 
@@ -71,6 +73,7 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 - **MCP-compatible API:** agent-facing retrieval tools for symbols, files, dependencies, imports, variable flow, and architecture queries.
 - **CGA-Relay:** one developer-machine `cga-relay` with stdio MCP gateway, local scan/sync, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
 - **Work Briefing Aggregation:** WA-compatible activity capture and briefing summaries inside CGA.
+- **AI-First Readiness And Evidence:** Admin APIs for project readiness snapshots and observe-only evidence packs that combine graph, indexing, ADC, verification, governance, and work activity signals.
 - **Schedule Automation:** admin-defined recurring jobs for BrowserAgent page tests, agent activation calls, and generic HTTP tasks.
 - **Runtime Backup:** PostgreSQL and FalkorDB snapshots for local-first persistence and recovery.
 
@@ -110,6 +113,8 @@ The run is intentionally reported with nuance: one project's HPS increased under
 
 - [Docker Desktop bundle](deploy/docker-desktop/README.md) - one-click local distribution and release zip behavior.
 - [Runtime operations](docs/runtime-operations.md) - work briefing, schedules, persistence, backup, and default local runtimes.
+- [AI-first readiness](docs/ai-first-readiness.md) - readiness snapshots and observe-only evidence packs for AI-first team planning.
+- [AI-first correlation contract](docs/ai-first-correlation-contract.md) - standard task, issue, PR, and activity ids for evidence packs and traces.
 - [MCP query quickstart](docs/mcp-agent-query-quickstart.md) - endpoint discovery, query clients, batch mode, and CG-first strategy.
 - [Benchmark guide](docs/benchmarks/README.md) - deterministic context-quality benchmark model and commands.
 - [Live benchmark report](docs/benchmarks/live-context-quality.md) - current live multi-project benchmark summary.

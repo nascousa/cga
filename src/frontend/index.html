@@ -1409,6 +1409,22 @@
     [data-briefing-section].is-collapsed [data-briefing-section-content] {
       display: none;
     }
+    .ai-first-project-card .briefing-section-head {
+      padding: 0 0 10px;
+    }
+    .ai-first-project-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+    [data-ai-first-project].is-collapsed .briefing-section-head {
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+    [data-ai-first-project].is-collapsed [data-ai-first-project-content] {
+      display: none;
+    }
     .briefing-section {
       min-width: 0;
       margin-bottom: 8px;
@@ -2410,6 +2426,7 @@
     <div class="topbar-nav">
       <button class="tab-btn" id="tab-briefing-btn" style="display:none" onclick="switchTab('briefing',this)">Dashboard</button>
       <button class="tab-btn" id="tab-report-btn" style="display:none" onclick="switchTab('report',this)">Report</button>
+      <button class="tab-btn" id="tab-ai-first-btn" style="display:none" onclick="switchTab('ai-first',this)">AI-First</button>
       <button class="tab-btn active" id="tab-projects-btn" onclick="switchTab('projects',this)">Project</button>
       <button class="tab-btn" id="tab-schedule-btn" style="display:none" onclick="switchTab('schedule',this)">Schedule</button>
       <button class="tab-btn" id="tab-users-btn" onclick="switchTab('users',this)">User</button>
@@ -2506,6 +2523,99 @@
         <div class="schedule-summary-cell"><span>Due Soon</span><strong id="schedule-due-count">0</strong></div>
         <div class="schedule-summary-cell"><span>Last Status</span><strong id="schedule-last-status">—</strong></div>
       </div>
+
+      <section class="briefing-section">
+        <div class="briefing-section-head">
+          <div>
+            <span class="briefing-kicker">Policy Profile</span>
+            <h3 id="ai-first-policy-title">Project policy</h3>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="loadAiFirstPolicyProfiles()">Refresh</button>
+        </div>
+        <div class="settings-card">
+          <div class="settings-row settings-form-row">
+            <label for="ai-first-policy-profile">Profile</label>
+            <span class="settings-control">
+              <select id="ai-first-policy-profile"></select>
+              <span id="ai-first-policy-summary" class="settings-status">Select a project to load policy.</span>
+            </span>
+          </div>
+          <div class="settings-row settings-form-row">
+            <label for="ai-first-policy-notes">Notes</label>
+            <span class="settings-control">
+              <input id="ai-first-policy-notes" placeholder="Optional policy note" />
+            </span>
+          </div>
+          <div class="settings-actions">
+            <button class="btn btn-primary" onclick="saveAiFirstPolicyProfile()">Save Policy</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="briefing-section">
+        <div class="briefing-section-head">
+          <div>
+            <span class="briefing-kicker">Signals</span>
+            <h3>PR / CI / Benchmark evidence</h3>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="loadAiFirstSignals()">Refresh</button>
+        </div>
+        <div class="schedule-editor-grid">
+          <div class="form-group">
+            <label>Type</label>
+            <select id="ai-first-signal-type">
+              <option value="ci">CI</option>
+              <option value="pr">PR</option>
+              <option value="benchmark">Benchmark</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select id="ai-first-signal-status">
+              <option value="ok">ok</option>
+              <option value="warn">warn</option>
+              <option value="fail">fail</option>
+              <option value="pending">pending</option>
+              <option value="merged">merged</option>
+              <option value="blocked">blocked</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Name</label>
+            <input id="ai-first-signal-name" placeholder="CI run, PR review, HPS benchmark" />
+          </div>
+          <div class="form-group">
+            <label>Value</label>
+            <input id="ai-first-signal-value" placeholder="90.44" />
+          </div>
+          <div class="form-group">
+            <label>Unit</label>
+            <input id="ai-first-signal-unit" placeholder="%, ms, count" />
+          </div>
+          <div class="form-group wide">
+            <label>Source URL</label>
+            <input id="ai-first-signal-source-url" placeholder="https://github.com/.../actions/runs/..." />
+          </div>
+        </div>
+        <div class="settings-actions">
+          <button class="btn btn-primary" onclick="recordAiFirstSignal()">Record Signal</button>
+        </div>
+        <div class="table-wrap" style="margin-top:12px">
+          <table>
+            <thead><tr>
+              <th>Signal</th>
+              <th class="center-col-header">Project</th>
+              <th class="center-col-header">Type</th>
+              <th class="center-col-header">Status</th>
+              <th class="center-col-header">Value</th>
+              <th class="center-col-header">Observed</th>
+            </tr></thead>
+            <tbody id="ai-first-signals-body">
+              <tr><td colspan="6"><div class="empty-state">No signals loaded.</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
 
       <section class="briefing-section">
         <div class="briefing-section-head">
@@ -2886,6 +2996,77 @@
         </div>
         <div class="pagination-wrap" id="briefing-activities-pagination" style="justify-content:center;padding:8px 0 0" data-briefing-section-content>
           <button class="btn btn-sm" id="briefing-load-more-btn" onclick="loadMoreWorkBriefing()" hidden>Load 25 more</button>
+        </div>
+      </section>
+    </div>
+
+    <!-- AI-FIRST (admin only) -->
+    <div class="pane" id="pane-ai-first">
+      <div class="section-header">
+        <h2>AI-First Readiness</h2>
+        <div class="briefing-toolbar">
+          <input
+            id="ai-first-project-id"
+            list="briefing-project-options"
+            placeholder="Project ID or name"
+            onkeydown="if (event.key === 'Enter') { event.preventDefault(); loadAiFirstReadiness(); }"
+          />
+          <input id="ai-first-task-id" placeholder="Task ID" title="Optional task correlation filter" />
+          <input id="ai-first-issue-id" placeholder="Issue/PBI" title="Optional issue or PBI correlation filter" />
+          <input id="ai-first-pr-id" placeholder="PR" title="Optional pull request correlation filter" />
+          <input id="ai-first-activity-id" placeholder="Activity ID" title="Optional Work Briefing activity filter" />
+          <button class="btn btn-sm" onclick="loadAiFirstReadiness()">Refresh</button>
+          <button class="btn btn-accent btn-sm" onclick="loadAiFirstEvidence()">Generate Evidence</button>
+          <button class="btn btn-primary btn-sm" onclick="saveAiFirstEvidencePack()">Save Evidence</button>
+        </div>
+      </div>
+
+      <section class="briefing-section">
+        <div class="briefing-section-head">
+          <div>
+            <span class="briefing-kicker">Readiness</span>
+            <h3 id="ai-first-readiness-title">Project snapshot</h3>
+          </div>
+          <span class="pill pill-gray" id="ai-first-generated-at">Not loaded</span>
+        </div>
+        <div id="ai-first-readiness-root">
+          <div class="empty-state">Select a project or refresh all active projects.</div>
+        </div>
+      </section>
+
+      <section class="briefing-section">
+        <div class="briefing-section-head">
+          <div>
+            <span class="briefing-kicker">Evidence Pack</span>
+            <h3>Observe-only export</h3>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="copyAiFirstEvidenceMarkdown()">Copy Markdown</button>
+        </div>
+        <textarea id="ai-first-evidence-markdown" class="wsr-preview-editor" spellcheck="false" aria-label="AI-first evidence pack Markdown">Generate an evidence pack to preview Markdown here.</textarea>
+      </section>
+
+      <section class="briefing-section">
+        <div class="briefing-section-head">
+          <div>
+            <span class="briefing-kicker">History</span>
+            <h3>Saved evidence packs</h3>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="loadAiFirstEvidenceHistory()">Refresh</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Evidence</th>
+              <th class="center-col-header">Project</th>
+              <th class="center-col-header">Mode</th>
+              <th>Correlation</th>
+              <th class="center-col-header">Created</th>
+              <th class="actions-col-header">Actions</th>
+            </tr></thead>
+            <tbody id="ai-first-evidence-history-body">
+              <tr><td colspan="6"><div class="empty-state">No saved evidence loaded.</div></td></tr>
+            </tbody>
+          </table>
         </div>
       </section>
     </div>
@@ -3408,6 +3589,8 @@ const WORK_BRIEFING_COLLATOR = new Intl.Collator(undefined, { numeric: true, sen
 
 const BRIEFING_COLLAPSE_STORAGE_KEY = 'cga_work_dashboard_collapsed_sections';
 let _briefingCollapsedSections = loadBriefingCollapsedSections();
+const AI_FIRST_PROJECT_COLLAPSE_STORAGE_KEY = 'cga_ai_first_collapsed_projects';
+let _aiFirstCollapsedProjects = loadAiFirstCollapsedProjects();
 const LOGIN_REMEMBER_USERNAME_KEY = 'cga_login_remember_username';
 const LOGIN_USERNAME_KEY = 'cga_login_username';
 const INDEXING_INTELLIGENCE_STRATEGY_OPTIONS = Object.freeze([
@@ -3478,6 +3661,7 @@ const ADMIN_TAB_ROUTES = Object.freeze({
   schedule: '/admin/schedule',
   users: '/admin/users',
   audit: '/admin/audit',
+  'ai-first': '/admin/ai-first',
   briefing: '/admin/briefing',
   report: '/admin/report',
   viewer: '/admin/graph',
@@ -3492,6 +3676,8 @@ const ADMIN_PATH_TABS = Object.freeze({
   '/admin/users': 'users',
   '/admin/user': 'users',
   '/admin/audit': 'audit',
+  '/admin/ai-first': 'ai-first',
+  '/admin/aifirst': 'ai-first',
   '/admin/briefing': 'briefing',
   '/admin/report': 'report',
   '/admin/graph': 'viewer',
@@ -3501,6 +3687,7 @@ const ADMIN_PATH_TABS = Object.freeze({
 
 function normalizedAdminPath(pathname) {
   const normalized = String(pathname || '/admin').replace(/\/+$/, '');
+  document.getElementById('tab-ai-first-btn').style.display = '';
   return normalized || '/admin';
 }
 
@@ -3769,6 +3956,87 @@ function bindBriefingCollapseButtons(root = document) {
       }
       saveBriefingCollapsedSections();
       applyBriefingSectionCollapse(sectionKey);
+    });
+  });
+}
+
+function loadAiFirstCollapsedProjects() {
+  try {
+    const raw = localStorage.getItem(AI_FIRST_PROJECT_COLLAPSE_STORAGE_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveAiFirstCollapsedProjects() {
+  try {
+    localStorage.setItem(AI_FIRST_PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify([..._aiFirstCollapsedProjects]));
+  } catch {}
+}
+
+function aiFirstProjectKey(snapshot, index) {
+  const project = snapshot?.project || {};
+  return String(project.project_id || project.id || project.project_name || `project-${index}`);
+}
+
+function isAiFirstProjectCollapsed(projectKey) {
+  return _aiFirstCollapsedProjects.has(String(projectKey || ''));
+}
+
+function aiFirstProjectBodyId(projectKey) {
+  return `ai-first-project-${String(projectKey || '').replace(/[^a-z0-9_-]/gi, '-')}-body`;
+}
+
+function renderAiFirstProjectCollapseButton(projectKey, label) {
+  const collapsed = isAiFirstProjectCollapsed(projectKey);
+  const safeKey = esc(projectKey);
+  const safeLabel = esc(label || 'project');
+  const action = collapsed ? 'Expand' : 'Collapse';
+  return `<button type="button" class="briefing-collapse-btn" data-ai-first-collapse="${safeKey}" data-ai-first-collapse-label="${safeLabel}" aria-label="${action} ${safeLabel}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-controls="${esc(aiFirstProjectBodyId(projectKey))}" title="${action} project">${collapsed ? '&#9654;' : '&#9660;'}</button>`;
+}
+
+function findAiFirstProjectCard(projectKey, root = document) {
+  return [...root.querySelectorAll('[data-ai-first-project]')]
+    .find(card => card.getAttribute('data-ai-first-project') === String(projectKey || ''));
+}
+
+function applyAiFirstProjectCollapse(projectKey, root = document) {
+  const card = findAiFirstProjectCard(projectKey, root);
+  if (!card) return;
+  const collapsed = isAiFirstProjectCollapsed(projectKey);
+  card.classList.toggle('is-collapsed', collapsed);
+  const button = [...card.querySelectorAll('[data-ai-first-collapse]')]
+    .find(candidate => candidate.getAttribute('data-ai-first-collapse') === String(projectKey || ''));
+  if (!button) return;
+  const label = button.getAttribute('data-ai-first-collapse-label') || 'project';
+  button.innerHTML = collapsed ? '&#9654;' : '&#9660;';
+  button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  button.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${label}`);
+  button.setAttribute('title', `${collapsed ? 'Expand' : 'Collapse'} project`);
+}
+
+function applyAllAiFirstProjectCollapse(root = document) {
+  root.querySelectorAll('[data-ai-first-project]').forEach(card => {
+    applyAiFirstProjectCollapse(card.getAttribute('data-ai-first-project'), root);
+  });
+}
+
+function bindAiFirstProjectCollapseButtons(root = document) {
+  root.querySelectorAll('[data-ai-first-collapse]').forEach(button => {
+    if (button.dataset.aiFirstCollapseBound === '1') return;
+    button.dataset.aiFirstCollapseBound = '1';
+    button.addEventListener('click', () => {
+      const projectKey = button.getAttribute('data-ai-first-collapse');
+      if (!projectKey) return;
+      if (isAiFirstProjectCollapsed(projectKey)) {
+        _aiFirstCollapsedProjects.delete(projectKey);
+      } else {
+        _aiFirstCollapsedProjects.add(projectKey);
+      }
+      saveAiFirstCollapsedProjects();
+      applyAiFirstProjectCollapse(projectKey, root);
     });
   });
 }
@@ -4391,6 +4659,12 @@ function switchTab(name, btn, options = {}) {
   }
   if (nextName === 'viewer') loadGraphViewerFrame();
   if (nextName === 'users') loadUsers();
+  if (nextName === 'ai-first') {
+    loadAiFirstReadiness();
+    loadAiFirstPolicyProfiles();
+    loadAiFirstSignals();
+    loadAiFirstEvidenceHistory();
+  }
   if (nextName === 'schedule') {
     loadSchedules();
     _schedulePollInterval = setInterval(() => {
@@ -4444,6 +4718,11 @@ let _editingUserGroupsUserId = null;
 let _editingUserGroupId = null;
 let _editingGroupProjectsGroupId = null;
 let _editingGroupUsersGroupId = null;
+let _aiFirstReadiness = null;
+let _aiFirstEvidence = null;
+let _aiFirstEvidenceHistory = null;
+let _aiFirstPolicyProfiles = null;
+let _aiFirstSignals = null;
 
 function mergeIndexStatusCache(statuses) {
   const nextCache = {};
@@ -4533,6 +4812,320 @@ function renderAuditRows() {
       <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.details_display || '')}">${esc(r.details_display || '')}</td>
     </tr>
   `;}).join('');
+}
+
+function aiFirstSelectedProjectId() {
+  const raw = document.getElementById('ai-first-project-id')?.value.trim() || '';
+  return _projectIdByName[raw] || raw;
+}
+
+function aiFirstEvidenceRequestBody() {
+  const projectId = aiFirstSelectedProjectId();
+  const body = { project_id: projectId, limit: 25 };
+  const taskId = document.getElementById('ai-first-task-id')?.value.trim() || '';
+  const issueId = document.getElementById('ai-first-issue-id')?.value.trim() || '';
+  const prId = document.getElementById('ai-first-pr-id')?.value.trim() || '';
+  const activityId = document.getElementById('ai-first-activity-id')?.value.trim() || '';
+  if (taskId) body.task_id = taskId;
+  if (issueId) body.issue_id = issueId;
+  if (prId) body.pr_id = prId;
+  if (activityId) body.activity_id = activityId;
+  return body;
+}
+
+function aiFirstStatusPill(status) {
+  const normalized = String(status || 'unknown').toLowerCase();
+  const cls = normalized === 'ok' ? 'pill-green' : normalized === 'warn' ? 'pill-amber' : normalized === 'fail' ? 'pill-red' : 'pill-gray';
+  return `<span class="pill ${cls}">${esc(normalized)}</span>`;
+}
+
+function aiFirstScoreLabel(score) {
+  return score === null || score === undefined ? 'unknown' : String(score);
+}
+
+function renderAiFirstReadiness(payload = _aiFirstReadiness) {
+  const root = document.getElementById('ai-first-readiness-root');
+  if (!root) return;
+  const title = document.getElementById('ai-first-readiness-title');
+  const generated = document.getElementById('ai-first-generated-at');
+  const projects = Array.isArray(payload?.projects) ? payload.projects : [];
+  if (title) title.textContent = projects.length === 1 ? `${projects[0].project.project_name} readiness` : 'Project snapshots';
+  if (generated) generated.textContent = payload?.generated_at ? `Generated ${new Date(payload.generated_at).toLocaleString()}` : 'Not loaded';
+  if (!projects.length) {
+    root.innerHTML = `<div class="empty-state">No readiness snapshots loaded.</div>`;
+    return;
+  }
+  root.innerHTML = projects.map((snapshot, index) => {
+    const project = snapshot.project || {};
+    const projectKey = aiFirstProjectKey(snapshot, index);
+    const projectLabel = project.project_name || project.project_id || 'Project';
+    const collapsed = isAiFirstProjectCollapsed(projectKey);
+    const dimensions = Array.isArray(snapshot.dimensions) ? snapshot.dimensions : [];
+    const actions = Array.isArray(snapshot.recommended_next_actions) ? snapshot.recommended_next_actions : [];
+    return `
+      <div class="briefing-command-card briefing-command-card-full ai-first-project-card${collapsed ? ' is-collapsed' : ''}" data-ai-first-project="${esc(projectKey)}" style="margin-bottom:12px">
+        <div class="briefing-section-head">
+          <div>
+            <span class="briefing-kicker">${esc(project.project_id || '')}</span>
+            <h3>${esc(project.project_name || 'Project')} ${aiFirstStatusPill(snapshot.overall_status)}</h3>
+          </div>
+          <div class="ai-first-project-actions">
+            <strong style="font-size:24px;color:var(--text)">${esc(aiFirstScoreLabel(snapshot.overall_score))}</strong>
+            ${renderAiFirstProjectCollapseButton(projectKey, projectLabel)}
+          </div>
+        </div>
+        <div id="${esc(aiFirstProjectBodyId(projectKey))}" data-ai-first-project-content>
+          <div class="kpi-strip">
+            ${dimensions.map(dimension => `
+              <div class="kpi">
+                <span class="kpi-label">${esc(dimension.label || dimension.key)}</span>
+                <span class="kpi-value">${esc(aiFirstScoreLabel(dimension.score))}</span>
+                <span class="kpi-delta">${aiFirstStatusPill(dimension.status)}</span>
+              </div>
+            `).join('')}
+          </div>
+          <div class="table-wrap" style="margin-top:12px">
+            <table>
+              <thead><tr><th>Dimension</th><th>Signal</th><th>Status</th><th>Summary</th></tr></thead>
+              <tbody>
+                ${dimensions.flatMap(dimension => (dimension.signals || []).map(signal => `
+                  <tr>
+                    <td>${esc(dimension.label || dimension.key)}</td>
+                    <td>${esc(signal.label || signal.key)}</td>
+                    <td>${aiFirstStatusPill(signal.status)}</td>
+                    <td>${esc(signal.summary || '')}</td>
+                  </tr>
+                `)).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div style="margin-top:12px">
+            <span class="briefing-kicker">Next Actions</span>
+            <ul style="margin:6px 0 0 18px;color:var(--muted);line-height:1.6">
+              ${(actions.length ? actions : ['No next actions returned.']).map(action => `<li>${esc(action)}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+  bindAiFirstProjectCollapseButtons(root);
+  applyAllAiFirstProjectCollapse(root);
+}
+
+async function loadAiFirstReadiness() {
+  const root = document.getElementById('ai-first-readiness-root');
+  if (root) root.innerHTML = `<div class="empty-state">Loading readiness...</div>`;
+  try {
+    const projectId = aiFirstSelectedProjectId();
+    const params = new URLSearchParams();
+    if (projectId) params.set('project_id', projectId);
+    _aiFirstReadiness = await api('GET', '/admin/ai-first/readiness' + (params.toString() ? '?' + params.toString() : ''));
+    renderAiFirstReadiness(_aiFirstReadiness);
+    loadAiFirstPolicyProfiles();
+  } catch (e) {
+    toast(e.message, 'error');
+    if (root) root.innerHTML = `<div class="empty-state">${esc(e.message)}</div>`;
+  }
+}
+
+function renderAiFirstPolicyProfiles(payload = _aiFirstPolicyProfiles) {
+  const select = document.getElementById('ai-first-policy-profile');
+  const summary = document.getElementById('ai-first-policy-summary');
+  const notes = document.getElementById('ai-first-policy-notes');
+  const title = document.getElementById('ai-first-policy-title');
+  if (!select) return;
+  const definitions = Array.isArray(payload?.definitions) ? payload.definitions : [];
+  const profiles = Array.isArray(payload?.profiles) ? payload.profiles : [];
+  select.innerHTML = definitions.map(definition => `<option value="${esc(definition.name)}">${esc(definition.label)} (${esc(definition.enforcement_level)})</option>`).join('');
+  const active = profiles.length === 1 ? profiles[0] : null;
+  select.disabled = !active;
+  if (active) {
+    select.value = active.name;
+    if (summary) summary.textContent = `${active.label} - ${active.description}`;
+    if (notes) notes.value = active.notes || '';
+    if (title) title.textContent = `${active.project?.project_name || 'Project'} policy`;
+  } else {
+    if (summary) summary.textContent = 'Enter one project ID or name before editing policy.';
+    if (notes) notes.value = '';
+    if (title) title.textContent = 'Project policy';
+  }
+}
+
+async function loadAiFirstPolicyProfiles() {
+  const projectId = aiFirstSelectedProjectId();
+  const params = new URLSearchParams();
+  if (projectId) params.set('project_id', projectId);
+  try {
+    _aiFirstPolicyProfiles = await api('GET', '/admin/ai-first/policy-profiles' + (params.toString() ? '?' + params.toString() : ''));
+    renderAiFirstPolicyProfiles(_aiFirstPolicyProfiles);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function saveAiFirstPolicyProfile() {
+  const projectId = aiFirstSelectedProjectId();
+  if (!projectId) { toast('Project ID or name required for policy profile', 'error'); return; }
+  const profileName = document.getElementById('ai-first-policy-profile')?.value || '';
+  if (!profileName) { toast('Policy profile required', 'error'); return; }
+  const notes = document.getElementById('ai-first-policy-notes')?.value || '';
+  try {
+    await api('PATCH', '/admin/ai-first/policy-profiles', { project_id: projectId, profile_name: profileName, notes });
+    toast('Policy profile saved');
+    await loadAiFirstPolicyProfiles();
+    await loadAiFirstReadiness();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+function renderAiFirstSignals(payload = _aiFirstSignals) {
+  const tbody = document.getElementById('ai-first-signals-body');
+  if (!tbody) return;
+  const signals = Array.isArray(payload?.signals) ? payload.signals : [];
+  if (!signals.length) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state">No AI-first signals found.</div></td></tr>`;
+    return;
+  }
+  tbody.innerHTML = signals.map(signal => {
+    const value = signal.value ? `${signal.value}${signal.unit ? ' ' + signal.unit : ''}` : '—';
+    const source = signal.source_url ? ` <a href="${esc(signal.source_url)}" target="_blank" rel="noopener noreferrer">source</a>` : '';
+    return `
+      <tr>
+        <td><strong>${esc(signal.name || signal.signal_id)}</strong>${source}<div class="muted-text mono">${esc(signal.signal_id || '')}</div></td>
+        <td style="text-align:center">${renderProjectIdWithCopy(signal.project_id || '')}</td>
+        <td style="text-align:center"><span class="pill pill-blue">${esc(signal.signal_type || '')}</span></td>
+        <td style="text-align:center">${aiFirstStatusPill(signal.status)}</td>
+        <td class="mono" style="text-align:center">${esc(value)}</td>
+        <td class="mono" style="text-align:center">${esc(signal.observed_at || '')}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function loadAiFirstSignals() {
+  const projectId = aiFirstSelectedProjectId();
+  const params = new URLSearchParams({ limit: '25' });
+  if (projectId) params.set('project_id', projectId);
+  try {
+    _aiFirstSignals = await api('GET', '/admin/ai-first/signals?' + params.toString());
+    renderAiFirstSignals(_aiFirstSignals);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function recordAiFirstSignal() {
+  const projectId = aiFirstSelectedProjectId();
+  if (!projectId) { toast('Project ID or name required for signal', 'error'); return; }
+  const payload = {
+    project_id: projectId,
+    signal_type: document.getElementById('ai-first-signal-type')?.value || 'ci',
+    status: document.getElementById('ai-first-signal-status')?.value || 'unknown',
+    name: document.getElementById('ai-first-signal-name')?.value.trim() || '',
+    value: document.getElementById('ai-first-signal-value')?.value.trim() || '',
+    unit: document.getElementById('ai-first-signal-unit')?.value.trim() || '',
+    source_url: document.getElementById('ai-first-signal-source-url')?.value.trim() || '',
+  };
+  try {
+    await api('POST', '/admin/ai-first/signals', payload);
+    toast('Signal recorded');
+    await loadAiFirstSignals();
+    await loadAiFirstReadiness();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function loadAiFirstEvidence() {
+  const body = aiFirstEvidenceRequestBody();
+  const projectId = body.project_id;
+  if (!projectId) { toast('Project ID or name required for evidence pack', 'error'); return; }
+  const target = document.getElementById('ai-first-evidence-markdown');
+  if (target) target.value = 'Generating evidence pack...';
+  try {
+    const params = new URLSearchParams({ project_id: projectId, limit: '25' });
+    ['task_id', 'issue_id', 'pr_id', 'activity_id'].forEach(key => { if (body[key]) params.set(key, body[key]); });
+    _aiFirstEvidence = await api('GET', '/admin/ai-first/evidence?' + params.toString());
+    if (target) target.value = _aiFirstEvidence.markdown || JSON.stringify(_aiFirstEvidence, null, 2);
+  } catch (e) {
+    toast(e.message, 'error');
+    if (target) target.value = e.message;
+  }
+}
+
+async function saveAiFirstEvidencePack() {
+  const body = aiFirstEvidenceRequestBody();
+  if (!body.project_id) { toast('Project ID or name required for evidence pack', 'error'); return; }
+  const target = document.getElementById('ai-first-evidence-markdown');
+  if (target) target.value = 'Saving evidence pack...';
+  try {
+    const payload = await api('POST', '/admin/ai-first/evidence-packs', body);
+    _aiFirstEvidence = payload.evidence;
+    if (target) target.value = payload.evidence?.markdown || JSON.stringify(payload.evidence, null, 2);
+    toast(`Evidence saved: ${payload.saved?.evidence_id || 'created'}`);
+    await loadAiFirstEvidenceHistory();
+  } catch (e) {
+    toast(e.message, 'error');
+    if (target) target.value = e.message;
+  }
+}
+
+function renderAiFirstEvidenceHistory(payload = _aiFirstEvidenceHistory) {
+  const body = document.getElementById('ai-first-evidence-history-body');
+  if (!body) return;
+  const packs = Array.isArray(payload?.evidence_packs) ? payload.evidence_packs : [];
+  if (!packs.length) {
+    body.innerHTML = `<tr><td colspan="6"><div class="empty-state">No saved evidence packs found.</div></td></tr>`;
+    return;
+  }
+  body.innerHTML = packs.map(pack => {
+    const correlation = pack.correlation || {};
+    const filters = correlation.filters || {};
+    const filterText = Object.entries(filters).map(([key, value]) => `${key}: ${value}`).join(', ') || 'project recent';
+    return `
+      <tr>
+        <td class="mono">${esc(pack.evidence_id || '')}</td>
+        <td style="text-align:center">${renderProjectIdWithCopy(pack.project_id || '')}</td>
+        <td style="text-align:center">${aiFirstStatusPill(correlation.mode || 'project_recent')}</td>
+        <td>${esc(filterText)}</td>
+        <td class="mono" style="text-align:center">${esc(pack.created_at || '')}</td>
+        <td style="text-align:right"><button class="btn btn-sm" onclick="loadAiFirstEvidencePack(${jsArg(pack.evidence_id)})">Open</button></td>
+      </tr>
+    `;
+  }).join('');
+}
+
+async function loadAiFirstEvidenceHistory() {
+  const projectId = aiFirstSelectedProjectId();
+  const params = new URLSearchParams({ limit: '25' });
+  if (projectId) params.set('project_id', projectId);
+  try {
+    _aiFirstEvidenceHistory = await api('GET', '/admin/ai-first/evidence-packs?' + params.toString());
+    renderAiFirstEvidenceHistory(_aiFirstEvidenceHistory);
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
+async function loadAiFirstEvidencePack(evidenceId) {
+  const target = document.getElementById('ai-first-evidence-markdown');
+  if (target) target.value = 'Loading saved evidence pack...';
+  try {
+    const payload = await api('GET', `/admin/ai-first/evidence-packs/${encodeURIComponent(evidenceId)}`);
+    _aiFirstEvidence = payload.evidence;
+    if (target) target.value = payload.markdown || payload.evidence?.markdown || JSON.stringify(payload.evidence, null, 2);
+    toast(`Evidence loaded: ${evidenceId}`);
+  } catch (e) {
+    toast(e.message, 'error');
+    if (target) target.value = e.message;
+  }
+}
+
+function copyAiFirstEvidenceMarkdown() {
+  const value = document.getElementById('ai-first-evidence-markdown')?.value || '';
+  copyText(value, 'Evidence pack Markdown');
 }
 
 async function loadProjects() {
