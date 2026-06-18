@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 
 import backend.main as main_module
 from backend.auth.dependencies import require_admin
+from backend.ai_first.service import import_azure_devops_signals
 from backend.ai_first.service import import_github_signals
 from backend.main import app
 from backend.workbriefing.service import WorkBriefingService
@@ -292,6 +293,63 @@ async def test_import_github_signals_records_ci_and_pr(auth_pg_pool, tmp_path) -
 
 
 @pytest.mark.asyncio
+async def test_import_azure_devops_signals_records_ci_and_pr(auth_pg_pool, tmp_path) -> None:
+    repo = _make_ready_repo(tmp_path)
+
+    async def fake_get_json(url: str, headers: dict) -> object:
+        assert headers["Accept"] == "application/json"
+        if "/_apis/build/builds" in url:
+            return {
+                "value": [
+                    {
+                        "id": 501,
+                        "buildNumber": "20260618.1",
+                        "status": "completed",
+                        "result": "succeeded",
+                        "finishTime": "2026-06-18T03:00:00Z",
+                        "sourceBranch": "refs/heads/dev/ai-first",
+                        "sourceVersion": "abc123",
+                        "definition": {"name": "policy-ci"},
+                        "_links": {"web": {"href": "https://dev.azure.com/contoso/Proj/_build/results?buildId=501"}},
+                    }
+                ]
+            }
+        if "/pullrequests" in url:
+            return {
+                "value": [
+                    {
+                        "pullRequestId": 42,
+                        "codeReviewId": 4200,
+                        "title": "Add AI-first signals",
+                        "status": "completed",
+                        "closedDate": "2026-06-18T03:30:00Z",
+                        "createdBy": {"displayName": "Nate"},
+                        "_links": {"web": {"href": "https://dev.azure.com/contoso/Proj/_git/cga/pullrequest/42"}},
+                    }
+                ]
+            }
+        raise AssertionError(f"unexpected url: {url}")
+
+    async with auth_pg_pool.acquire() as db:
+        await _seed_project(db, repo_path=str(repo))
+        result = await import_azure_devops_signals(
+            db=db,
+            project_id="CGA123",
+            organization="contoso",
+            ado_project="Proj",
+            repository="cga",
+            http_get_json=fake_get_json,
+            created_by="admin",
+        )
+
+    assert result["repository"] == "contoso/Proj/cga"
+    assert result["imported_count"] == 2
+    assert [signal["signal_type"] for signal in result["signals"]] == ["ci", "pr"]
+    assert result["signals"][0]["status"] == "ok"
+    assert result["signals"][1]["status"] == "merged"
+
+
+@pytest.mark.asyncio
 async def test_ai_first_evidence_pack_can_be_saved_listed_and_loaded(auth_pg_pool, pg_activity_store, tmp_path, monkeypatch) -> None:
     repo = _make_ready_repo(tmp_path)
     service = WorkBriefingService(store=pg_activity_store)
@@ -327,6 +385,7 @@ async def test_ai_first_evidence_pack_can_be_saved_listed_and_loaded(auth_pg_poo
 
             list_response = await client.get("/api/admin/ai-first/evidence-packs?project_id=CGA123&limit=10")
             get_response = await client.get(f"/api/admin/ai-first/evidence-packs/{evidence_id}")
+            pr_template_response = await client.get(f"/api/admin/ai-first/evidence-packs/{evidence_id}/pr-template")
     finally:
         app.dependency_overrides.clear()
 
@@ -345,6 +404,12 @@ async def test_ai_first_evidence_pack_can_be_saved_listed_and_loaded(auth_pg_poo
     assert loaded["evidence_id"] == evidence_id
     assert loaded["markdown"] == saved_payload["evidence"]["markdown"]
     assert loaded["evidence"]["correlation"]["mode"] == "task_bound"
+
+    assert pr_template_response.status_code == 200
+    pr_template = pr_template_response.json()["markdown"]
+    assert evidence_id in pr_template
+    assert "AI-First Evidence" in pr_template
+    assert "TASK-777" in pr_template
 
 
 @pytest.mark.asyncio

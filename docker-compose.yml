@@ -32,7 +32,7 @@ services:
       - '16379:6379'
       - '13000:3000'
     volumes:
-      - 'falkordb_dev_data:/data'
+      - 'falkordb_dev_data:/var/lib/falkordb/data'
     deploy:
       resources:
         limits:
@@ -314,7 +314,7 @@ services:
       - '16379:6379'
       - '13000:3000'
     volumes:
-      - 'falkordb_data:/data'
+      - 'falkordb_data:/var/lib/falkordb/data'
     networks:
       - your-app-network
     deploy:

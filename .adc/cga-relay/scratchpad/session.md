@@ -9,12 +9,12 @@ This ensures the NEXT agent handling this repository knows exactly where you lef
 - **Failing Tests / Errors:** 
 - **Next Steps:** 
 
-## 2026-06-18 Upgrade Center And AI-First Policy Gates
+## 2026-06-18 Upgrade Center, AI-First Evidence, And FalkorDB Persistence
 
-- **Current Task:** Add Admin UI upgrade readiness plus GitHub import, signal evidence, and policy-derived AI-first gates.
-- **Last Action Taken:** Added `/api/admin/upgrade/status`, Upgrade Center UI, GitHub Actions/PR import into `ai_first_signals`, signal matching inside `build_evidence_pack`, Admin UI controls for GitHub import, `signal_evidence` Markdown output, readiness/evidence `policy_gates`, Admin policy gate rendering, and bumped README/backend metadata to `1.30.93`.
-- **Failing Tests / Errors:** Focused tests passed: `python -m pytest src/tests/test_ai_first_api.py src/tests/test_mcp_tools.py src/tests/test_cga_relay_router.py -q`. `python -m compileall src/backend/ai_first src/backend/main.py`, Admin inline script syntax check, and `git diff --check` passed. Local `cga-relay sync` could not complete because the local CGA API returned `401 Not authenticated` for `/api/auth/me/groups`.
-- **Next Steps:** Consider automatic Azure DevOps PR/build imports, PR template evidence links, and promoting warning gates into review gates for lighthouse repos.
+- **Current Task:** Add Admin UI upgrade readiness, CI/PR signal imports, PR evidence links, policy-derived AI-first gates, and persistent FalkorDB volume mounts.
+- **Last Action Taken:** Added `/api/admin/upgrade/status`, Upgrade Center UI, GitHub and Azure DevOps import into `ai_first_signals`, signal matching inside `build_evidence_pack`, Admin UI controls for imports, saved evidence PR-template export, `signal_evidence` Markdown output, readiness/evidence `policy_gates`, Admin policy gate rendering, FalkorDB compose volume fixes, and bumped README/backend/docs metadata to `1.30.95`.
+- **Failing Tests / Errors:** Pending final verification after the `1.30.95` increment. Earlier focused tests passed: `python -m pytest src/tests/test_ai_first_api.py src/tests/test_mcp_tools.py src/tests/test_cga_relay_router.py -q`; `python -m compileall src/backend/ai_first src/backend/main.py`, Admin inline script syntax check, and `git diff --check` passed. Local `cga-relay sync` first failed with local CGA API `401 Not authenticated`, then scanning runtime data was too broad until local relay excludes were narrowed.
+- **Next Steps:** Run focused tests for AI-first API, health, and template quality; then commit, push, and retry local `cga-relay sync --project-tag ContextGraphAgent`.
 
 ## 2026-06-18 AI-First Project Collapse State
 

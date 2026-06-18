@@ -1,6 +1,6 @@
 # AI-First Readiness And Evidence MVP
 
-Version: 1.30.93
+Version: 1.30.95
 Date: 2026-06-18
 
 This MVP starts the CGA AI-first control-plane work with two admin-only APIs. The first measures whether a project has the basic engineering conditions for AI-first work. The second exports an observe-only evidence pack for review, team planning, or retrospectives.
@@ -211,6 +211,37 @@ Body:
 
 If `repo_url` is omitted, CGA tries the project `upstream_url`, then the repository path's `.git/config` remote URL. Public GitHub repositories can be imported without a token; private repositories may use `GITHUB_TOKEN` or `GH_TOKEN` from the CGA process environment.
 
+Import Azure DevOps builds and PR signals:
+
+```text
+POST /api/admin/ai-first/signals/import-azure-devops
+```
+
+Body:
+
+```json
+{
+	"project_id": "CGA123",
+	"organization": "contoso",
+	"ado_project": "Project",
+	"repository": "cga",
+	"repo_url": "https://dev.azure.com/contoso/Project/_git/cga",
+	"limit": 5
+}
+```
+
+If `repo_url` is omitted, CGA tries the project `upstream_url`, then the repository path's `.git/config` remote URL. Private Azure DevOps organizations may use `AZURE_DEVOPS_PAT`, `ADO_PAT`, or `AZURE_DEVOPS_EXT_PAT` from the CGA process environment.
+
+## PR Evidence Template
+
+Saved evidence packs expose a PR-ready Markdown block:
+
+```text
+GET /api/admin/ai-first/evidence-packs/<evidence_id>/pr-template
+```
+
+The Admin AI-First History table also has a `PR` copy action for each saved evidence pack.
+
 Supported `signal_type` values:
 
 - `ci`: CI or local validation result. Feeds Verification Readiness.
@@ -228,7 +259,7 @@ Status values are normalized into readiness states. `ok`, `pass`, `success`, `me
 
 ## Suggested Next Steps
 
-1. Connect Azure DevOps PR/build imports for teams that do not use GitHub.
-2. Add evidence-pack links into PR templates and Work Briefing activity detail views.
-3. Promote warning gates into review gates for lighthouse repos.
-4. Add approval-gate workflow support for regulated and sovereign profiles.
+1. Add evidence-pack links into Work Briefing activity detail views.
+2. Promote warning gates into review gates for lighthouse repos.
+3. Add approval-gate workflow support for regulated and sovereign profiles.
+4. Add scheduled signal imports for selected projects.

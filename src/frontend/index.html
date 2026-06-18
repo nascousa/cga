@@ -2655,10 +2655,27 @@
             <label>GitHub Repo URL</label>
             <input id="ai-first-github-repo-url" placeholder="https://github.com/nascousa/cga" />
           </div>
+          <div class="form-group">
+            <label>ADO Org</label>
+            <input id="ai-first-ado-org" placeholder="contoso" />
+          </div>
+          <div class="form-group">
+            <label>ADO Project</label>
+            <input id="ai-first-ado-project" placeholder="Project" />
+          </div>
+          <div class="form-group">
+            <label>ADO Repo</label>
+            <input id="ai-first-ado-repo" placeholder="cga" />
+          </div>
+          <div class="form-group wide">
+            <label>ADO Repo URL</label>
+            <input id="ai-first-ado-repo-url" placeholder="https://dev.azure.com/org/project/_git/repo" />
+          </div>
         </div>
         <div class="settings-actions">
           <button class="btn btn-primary" onclick="recordAiFirstSignal()">Record Signal</button>
           <button class="btn btn-accent" onclick="importAiFirstGithubSignals()">Import GitHub</button>
+          <button class="btn btn-accent" onclick="importAiFirstAzureDevOpsSignals()">Import ADO</button>
         </div>
         <div class="table-wrap" style="margin-top:12px">
           <table>
@@ -5267,6 +5284,26 @@ async function importAiFirstGithubSignals() {
   }
 }
 
+async function importAiFirstAzureDevOpsSignals() {
+  const projectId = aiFirstSelectedProjectId();
+  if (!projectId) { toast('Project ID or name required for Azure DevOps import', 'error'); return; }
+  try {
+    const result = await api('POST', '/admin/ai-first/signals/import-azure-devops', {
+      project_id: projectId,
+      repo_url: document.getElementById('ai-first-ado-repo-url')?.value.trim() || '',
+      organization: document.getElementById('ai-first-ado-org')?.value.trim() || '',
+      ado_project: document.getElementById('ai-first-ado-project')?.value.trim() || '',
+      repository: document.getElementById('ai-first-ado-repo')?.value.trim() || '',
+      limit: 5,
+    });
+    toast(`Imported ${result.imported_count || 0} Azure DevOps signal(s)`);
+    await loadAiFirstSignals();
+    await loadAiFirstReadiness();
+  } catch (e) {
+    toast(e.message, 'error');
+  }
+}
+
 async function loadAiFirstEvidence() {
   const body = aiFirstEvidenceRequestBody();
   const projectId = body.project_id;
@@ -5320,7 +5357,10 @@ function renderAiFirstEvidenceHistory(payload = _aiFirstEvidenceHistory) {
         <td style="text-align:center">${aiFirstStatusPill(correlation.mode || 'project_recent')}</td>
         <td>${esc(filterText)}</td>
         <td class="mono" style="text-align:center">${esc(pack.created_at || '')}</td>
-        <td style="text-align:right"><button class="btn btn-sm" onclick="loadAiFirstEvidencePack(${jsArg(pack.evidence_id)})">Open</button></td>
+        <td style="text-align:right">
+          <button class="btn btn-sm" onclick="loadAiFirstEvidencePack(${jsArg(pack.evidence_id)})">Open</button>
+          <button class="btn btn-sm btn-ghost" onclick="copyAiFirstPrTemplate(${jsArg(pack.evidence_id)})">PR</button>
+        </td>
       </tr>
     `;
   }).join('');
@@ -5349,6 +5389,15 @@ async function loadAiFirstEvidencePack(evidenceId) {
   } catch (e) {
     toast(e.message, 'error');
     if (target) target.value = e.message;
+  }
+}
+
+async function copyAiFirstPrTemplate(evidenceId) {
+  try {
+    const payload = await api('GET', `/admin/ai-first/evidence-packs/${encodeURIComponent(evidenceId)}/pr-template`);
+    await copyText(payload.markdown || '', 'PR evidence template');
+  } catch (e) {
+    toast(e.message, 'error');
   }
 }
 

@@ -53,11 +53,13 @@ from backend.ai_first.service import AiFirstSignalImportError
 from backend.ai_first.service import build_evidence_pack
 from backend.ai_first.service import build_readiness_response
 from backend.ai_first.service import get_evidence_pack
+from backend.ai_first.service import import_azure_devops_signals
 from backend.ai_first.service import import_github_signals
 from backend.ai_first.service import list_policy_profiles
 from backend.ai_first.service import list_evidence_packs
 from backend.ai_first.service import list_signals
 from backend.ai_first.service import record_signal
+from backend.ai_first.service import render_pr_evidence_template
 from backend.ai_first.service import save_evidence_pack
 from backend.ai_first.service import update_policy_profile
 from backend.backup import BackupError, BackupService
@@ -78,7 +80,7 @@ from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.93"
+APP_VERSION = "1.30.95"
 AUTH_SCHEMA_VERSION = 1
 GRAPH_SCHEMA_VERSION = 1
 RUNTIME_CONFIG_VERSION = 1
@@ -1008,6 +1010,33 @@ async def api_admin_ai_first_signal_import_github(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.post("/api/admin/ai-first/signals/import-azure-devops", status_code=201)
+async def api_admin_ai_first_signal_import_azure_devops(
+    payload: dict,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    body = dict(payload or {})
+    project_id = str(body.get("project_id") or "").strip()
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    async with get_auth_pool().acquire() as db:
+        try:
+            return await import_azure_devops_signals(
+                db=db,
+                project_id=project_id,
+                repo_url=str(body.get("repo_url") or "") or None,
+                organization=str(body.get("organization") or "") or None,
+                ado_project=str(body.get("ado_project") or body.get("project") or "") or None,
+                repository=str(body.get("repository") or "") or None,
+                limit=max(1, min(int(body.get("limit") or 5), 20)),
+                created_by=str(admin.get("username") or admin.get("id") or "admin"),
+            )
+        except AiFirstProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except AiFirstSignalImportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/admin/ai-first/evidence")
 async def api_admin_ai_first_evidence(
     project_id: str = Query(..., min_length=1),
@@ -1096,6 +1125,20 @@ async def api_admin_ai_first_evidence_pack_get(
             return await get_evidence_pack(db=db, evidence_id=evidence_id)
         except AiFirstEvidencePackNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/admin/ai-first/evidence-packs/{evidence_id}/pr-template")
+async def api_admin_ai_first_evidence_pack_pr_template(
+    evidence_id: str,
+    request: Request,
+    _: dict = Depends(require_admin),
+) -> dict:
+    async with get_auth_pool().acquire() as db:
+        try:
+            saved = await get_evidence_pack(db=db, evidence_id=evidence_id)
+        except AiFirstEvidencePackNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return render_pr_evidence_template(saved, base_url=str(request.base_url).rstrip("/"))
 
 
 @app.post("/api/project/work-briefing/activity", status_code=201)

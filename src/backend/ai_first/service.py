@@ -11,9 +11,11 @@ import json
 import os
 import re
 import uuid
+from base64 import b64encode
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote
 
 from backend.auth import pgshim as aiosqlite
 from backend.workbriefing.models import WorkActivity
@@ -800,6 +802,108 @@ async def import_github_signals(
     }
 
 
+async def import_azure_devops_signals(
+    *,
+    db: aiosqlite.Connection,
+    project_id: str,
+    organization: str | None = None,
+    ado_project: str | None = None,
+    repository: str | None = None,
+    repo_url: str | None = None,
+    limit: int = 5,
+    created_by: str = "",
+    ado_token: str | None = None,
+    http_get_json: Any = None,
+) -> dict[str, Any]:
+    projects = await _load_projects(db, project_id=project_id)
+    if not projects:
+        raise AiFirstProjectNotFoundError(f"Project not found: {project_id}")
+    project = projects[0]
+    resolved = _resolve_azure_devops_repo(project, repo_url=repo_url, organization=organization, ado_project=ado_project, repository=repository)
+    if not resolved:
+        raise AiFirstSignalImportError("Azure DevOps repository could not be resolved for this project")
+    org, ado_proj, repo = resolved
+    safe_limit = max(1, min(int(limit or 5), 20))
+    headers = {"Accept": "application/json", "User-Agent": "cga-ai-first-signals"}
+    token = ado_token or os.getenv("AZURE_DEVOPS_PAT") or os.getenv("ADO_PAT") or os.getenv("AZURE_DEVOPS_EXT_PAT")
+    if token:
+        encoded = b64encode(f":{token}".encode("utf-8")).decode("ascii")
+        headers["Authorization"] = f"Basic {encoded}"
+
+    encoded_project = quote(ado_proj, safe="")
+    encoded_repo = quote(repo, safe="")
+    builds_url = (
+        f"https://dev.azure.com/{quote(org, safe='')}/{encoded_project}"
+        f"/_apis/build/builds?repositoryId={encoded_repo}&repositoryType=TfsGit&$top={safe_limit}"
+        "&queryOrder=finishTimeDescending&api-version=7.1"
+    )
+    prs_url = (
+        f"https://dev.azure.com/{quote(org, safe='')}/{encoded_project}"
+        f"/_apis/git/repositories/{encoded_repo}/pullrequests?searchCriteria.status=all&$top={safe_limit}&api-version=7.1"
+    )
+    builds_payload = await _ado_get_json(builds_url, headers=headers, http_get_json=http_get_json)
+    prs_payload = await _ado_get_json(prs_url, headers=headers, http_get_json=http_get_json)
+
+    imported: list[dict[str, Any]] = []
+    for build in (builds_payload.get("value") or [])[:safe_limit]:
+        imported.append(
+            await record_signal(
+                db=db,
+                project_id=str(project["project_id"]),
+                signal_type="ci",
+                name=f"Azure DevOps Build: {(build.get('definition') or {}).get('name') or build.get('buildNumber') or 'build'}",
+                status=_ado_build_status(build),
+                value=build.get("buildNumber") or build.get("id") or "",
+                unit="build",
+                source_url=_ado_web_href(build),
+                observed_at=str(build.get("finishTime") or build.get("queueTime") or build.get("startTime") or ""),
+                created_by=created_by,
+                metadata={
+                    "provider": "azure_devops",
+                    "build_id": build.get("id"),
+                    "definition": (build.get("definition") or {}).get("name") if isinstance(build.get("definition"), dict) else None,
+                    "source_branch": build.get("sourceBranch"),
+                    "source_version": build.get("sourceVersion"),
+                    "organization": org,
+                    "project": ado_proj,
+                    "repository": repo,
+                },
+            )
+        )
+    for pr in (prs_payload.get("value") if isinstance(prs_payload, dict) else [])[:safe_limit]:
+        pr_id = pr.get("pullRequestId") or pr.get("codeReviewId")
+        imported.append(
+            await record_signal(
+                db=db,
+                project_id=str(project["project_id"]),
+                signal_type="pr",
+                name=f"Azure DevOps PR #{pr_id}: {pr.get('title') or ''}".strip(),
+                status=_ado_pr_status(pr),
+                value=pr_id or "",
+                unit="pr",
+                source_url=_ado_web_href(pr),
+                observed_at=str(pr.get("closedDate") or pr.get("creationDate") or ""),
+                created_by=created_by,
+                metadata={
+                    "provider": "azure_devops",
+                    "pr_id": str(pr_id or ""),
+                    "issue_id": str(pr_id or ""),
+                    "status": pr.get("status"),
+                    "author": (pr.get("createdBy") or {}).get("displayName") if isinstance(pr.get("createdBy"), dict) else None,
+                    "organization": org,
+                    "project": ado_proj,
+                    "repository": repo,
+                },
+            )
+        )
+    return {
+        "project_id": project["project_id"],
+        "repository": f"{org}/{ado_proj}/{repo}",
+        "imported_count": len(imported),
+        "signals": imported,
+    }
+
+
 async def save_evidence_pack(
     *,
     db: aiosqlite.Connection,
@@ -916,6 +1020,35 @@ async def get_evidence_pack(
         "evidence": pack,
         "markdown": data.get("markdown") or pack.get("markdown") or "",
     }
+
+
+def render_pr_evidence_template(saved_pack: dict[str, Any], *, base_url: str = "") -> dict[str, Any]:
+    evidence = saved_pack.get("evidence") or {}
+    project = evidence.get("project") or {}
+    correlation = evidence.get("correlation") or {}
+    policy_gates = evidence.get("policy_gates") or {}
+    readiness = evidence.get("readiness") or {}
+    evidence_id = saved_pack.get("evidence_id") or evidence.get("evidence_id") or ""
+    link = _evidence_admin_link(base_url, evidence_id)
+    filters = correlation.get("filters") or {}
+    filter_text = ", ".join(f"{key}={value}" for key, value in filters.items()) or "project_recent"
+    markdown = "\n".join(
+        [
+            "## AI-First Evidence",
+            "",
+            f"- Evidence Pack: {evidence_id}",
+            f"- CGA Link: {link}",
+            f"- Project: {project.get('project_name') or saved_pack.get('project_name')} ({project.get('project_id') or saved_pack.get('project_id')})",
+            f"- Correlation: {filter_text}",
+            f"- Readiness: {readiness.get('overall_status', 'unknown')} ({readiness.get('overall_score', 'unknown')})",
+            f"- Policy Gates: {policy_gates.get('overall_status', 'unknown')} ({policy_gates.get('enforcement_level', 'L0')})",
+            f"- Signal Evidence: {(evidence.get('signal_evidence') or {}).get('count', 0)} signal(s)",
+            f"- Trace Evidence: {(evidence.get('trace_evidence') or {}).get('count', 0)} trace(s)",
+            "",
+            "Reviewer note: verify the linked CGA evidence pack before approving AI-assisted changes.",
+        ]
+    )
+    return {"evidence_id": evidence_id, "markdown": markdown, "link": link}
 
 
 async def _latest_evidence_pack_for_project(db: aiosqlite.Connection, project: dict[str, Any]) -> dict[str, Any] | None:
@@ -1412,6 +1545,43 @@ def _resolve_github_slug(project: dict[str, Any], repo_url: str | None) -> tuple
     return None
 
 
+def _resolve_azure_devops_repo(
+    project: dict[str, Any],
+    *,
+    repo_url: str | None = None,
+    organization: str | None = None,
+    ado_project: str | None = None,
+    repository: str | None = None,
+) -> tuple[str, str, str] | None:
+    if organization and ado_project and repository:
+        return organization.strip(), ado_project.strip(), repository.strip()
+    for candidate in [repo_url, project.get("upstream_url"), _git_remote_url(project.get("repo_path"))]:
+        parsed = _parse_azure_devops_repo(candidate)
+        if parsed:
+            org, parsed_project, parsed_repo = parsed
+            return (
+                (organization or org).strip(),
+                (ado_project or parsed_project).strip(),
+                (repository or parsed_repo).strip(),
+            )
+    return None
+
+
+def _parse_azure_devops_repo(value: Any) -> tuple[str, str, str] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    patterns = [
+        r"https?://dev\.azure\.com/(?P<org>[^/]+)/(?P<project>[^/]+)/_git/(?P<repo>[^/?#]+)",
+        r"https?://(?P<org>[^/.]+)\.visualstudio\.com/(?P<project>[^/]+)/_git/(?P<repo>[^/?#]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return unquote(match.group("org")), unquote(match.group("project")), unquote(match.group("repo"))
+    return None
+
+
 def _git_remote_url(repo_path: Any) -> str | None:
     if not repo_path:
         return None
@@ -1455,6 +1625,20 @@ async def _github_get_json(url: str, *, headers: dict[str, str], http_get_json: 
     return response.json()
 
 
+async def _ado_get_json(url: str, *, headers: dict[str, str], http_get_json: Any = None) -> Any:
+    if http_get_json:
+        return await http_get_json(url, headers)
+    try:
+        import httpx
+    except Exception as exc:  # pragma: no cover - dependency should exist in runtime
+        raise AiFirstSignalImportError("httpx is unavailable for Azure DevOps import") from exc
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        response = await client.get(url, headers=headers)
+    if response.status_code >= 400:
+        raise AiFirstSignalImportError(f"Azure DevOps import failed with HTTP {response.status_code}")
+    return response.json()
+
+
 def _github_run_status(run: dict[str, Any]) -> str:
     conclusion = str(run.get("conclusion") or "").lower()
     status = str(run.get("status") or "").lower()
@@ -1476,6 +1660,42 @@ def _github_pr_status(pr: dict[str, Any]) -> str:
     if state == "open":
         return "open"
     return state or "unknown"
+
+
+def _ado_build_status(build: dict[str, Any]) -> str:
+    result = str(build.get("result") or "").lower()
+    status = str(build.get("status") or "").lower()
+    if result in {"succeeded", "success"}:
+        return "ok"
+    if result in {"failed", "canceled", "cancelled"}:
+        return "fail"
+    if result in {"partiallysucceeded"}:
+        return "warn"
+    if status in {"inprogress", "notstarted", "postponed", "cancelling"}:
+        return "pending"
+    return result or status or "unknown"
+
+
+def _ado_pr_status(pr: dict[str, Any]) -> str:
+    status = str(pr.get("status") or "unknown").lower()
+    if status == "completed":
+        return "merged"
+    if status == "abandoned":
+        return "rejected"
+    if status == "active":
+        return "open"
+    return status or "unknown"
+
+
+def _ado_web_href(item: dict[str, Any]) -> str:
+    links = item.get("_links") if isinstance(item.get("_links"), dict) else {}
+    web = links.get("web") if isinstance(links.get("web"), dict) else {}
+    return str(web.get("href") or item.get("url") or "")
+
+
+def _evidence_admin_link(base_url: str, evidence_id: str) -> str:
+    base = str(base_url or "").rstrip("/") or "http://localhost:18001"
+    return f"{base}/admin/ai-first?evidence_id={evidence_id}"
 
 
 def _readiness_status_from_signal(signal: dict[str, Any] | None) -> str:
