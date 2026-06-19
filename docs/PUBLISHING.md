@@ -46,7 +46,7 @@ Pushing the tag runs `.github/workflows/release.yml`, which builds and publishes
 After the workflow succeeds, upload the locally built Docker Desktop zip and checksum to the same release:
 
 ```powershell
-$version = "1.30.98"
+$version = "1.30.99"
 $zip = "deploy/docker-desktop/dist/releases/CGA-Docker-Desktop-$version.zip"
 $checksum = "$zip.sha256"
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash

@@ -9,11 +9,18 @@ This ensures the NEXT agent handling this repository knows exactly where you lef
 - **Failing Tests / Errors:** 
 - **Next Steps:** 
 
+## 2026-06-19 Release Documentation Inclusion
+
+- **Current Task:** Move the documentation alignment and relay `.nasco` exclusion cleanup into a new formal patch release so published source bundles include the updated docs.
+- **Last Action Taken:** Bumped CGA app, README, AI-first docs, issue template, publishing example, and CGA-Relay version metadata to `1.30.99`.
+- **Failing Tests / Errors:** Verification passed so far: `python -m compileall src/backend/main.py`, `python -m pytest src/tests/test_health.py -q --no-cov`, `cargo fmt`, `cargo test`, `cargo build --release`, editor diagnostics, `git diff --check`, and fixed-string stale-reference scans for public docs/version metadata.
+- **Next Steps:** Relay-sync, commit, push, package, tag, release, and upload Docker Desktop assets for `v1.30.99`.
+
 ## 2026-06-19 Documentation Release Alignment
 
 - **Current Task:** Ensure documentation reflects the `1.30.98` AI-first default-collapse change and GitHub Release assets.
 - **Last Action Taken:** Updated AI-first readiness/correlation docs to `1.30.98`, documented default-collapsed AI-first project cards, updated publishing guidance for Docker Desktop zip plus `.sha256` release assets, updated Docker Desktop bundle checksum guidance, and refreshed the bug report version placeholder.
-- **Failing Tests / Errors:** Verification passed: stale-version/doc checks found no outdated `1.30.97`, `1.30.95`, or `1.30.44` user-facing references; editor diagnostics and `git diff --check` passed; `cargo fmt`, `cargo test`, and `cargo build --release` passed for CGA-Relay. Relay dry-run confirmed `.nasco` no longer appears in `changed_paths` and will submit 4 tombstones for previously synced ignored local notes.
+- **Failing Tests / Errors:** Verification passed: stale-version/doc checks found no outdated public user-facing release references; editor diagnostics and `git diff --check` passed; `cargo fmt`, `cargo test`, and `cargo build --release` passed for CGA-Relay. Relay dry-run confirmed `.nasco` no longer appears in `changed_paths` and will submit 4 tombstones for previously synced ignored local notes.
 - **Next Steps:** Completed relay cleanup sync: CGA accepted 4 snapshots and 4 tombstones for ignored `.nasco` local notes. Commit and push the documentation alignment plus relay `.nasco` exclude/tombstone fix.
 
 ## 2026-06-19 AI-First Default Collapsed Projects
