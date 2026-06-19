@@ -9,6 +9,13 @@ This ensures the NEXT agent handling this repository knows exactly where you lef
 - **Failing Tests / Errors:** 
 - **Next Steps:** 
 
+## 2026-06-18 CGA-Relay Secret-Safe Scan Excludes
+
+- **Current Task:** Make CGA-Relay skip generated and secret-like paths before recursive scans so sync stays small and safe.
+- **Last Action Taken:** Updated relay version metadata to `1.30.96`, added built-in excludes for dependency/build/cache directories and secret-like files, updated relay config example, rebuilt `src/cga-relay/target/release/cga-relay.exe`, and successfully submitted `account/ContextGraphAgent` via relay sync (`accepted: true`, `snapshot_count: 353`).
+- **Failing Tests / Errors:** Verification passed: `cargo fmt --check`, `cargo test`, `cargo build --release`, `python -m compileall src/backend/main.py`, `python -m pytest src/tests/test_health.py -q --no-cov`, and `git diff --check`.
+- **Next Steps:** Commit and push the `1.30.96` relay scan-exclude fix.
+
 ## 2026-06-18 Upgrade Center, AI-First Evidence, And FalkorDB Persistence
 
 - **Current Task:** Add Admin UI upgrade readiness, CI/PR signal imports, PR evidence links, policy-derived AI-first gates, and persistent FalkorDB volume mounts.

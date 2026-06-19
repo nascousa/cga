@@ -8,7 +8,7 @@ use std::process;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const VERSION: &str = "1.30.79";
+const VERSION: &str = "1.30.96";
 const SERVER_NAME: &str = "cga-relay";
 const TRAY_ICON_LOGGED_IN_RESOURCE_ID: u16 = 1;
 const TRAY_ICON_LOGGED_OUT_RESOURCE_ID: u16 = 4;
@@ -1525,7 +1525,7 @@ fn scan_project(
         state: BTreeMap::new(),
     };
     let mut files = Vec::new();
-    collect_files(root, &mut files)?;
+    collect_files(config, root, root, &mut files)?;
     files.sort_by(|left, right| {
         normalized_relative(root, left).cmp(&normalized_relative(root, right))
     });
@@ -1587,21 +1587,30 @@ fn scan_project(
     Ok(result)
 }
 
-fn collect_files(root: &Path, files: &mut Vec<PathBuf>) -> AgentResult<()> {
-    if !root.exists() {
+fn collect_files(
+    config: &AgentConfig,
+    scan_root: &Path,
+    current_dir: &Path,
+    files: &mut Vec<PathBuf>,
+) -> AgentResult<()> {
+    if !current_dir.exists() {
         return Err(AgentError(format!(
             "project root does not exist: {}",
-            root.display()
+            current_dir.display()
         )));
     }
-    for entry in fs::read_dir(root)
-        .map_err(|err| AgentError(format!("cannot read dir {}: {err}", root.display())))?
+    for entry in fs::read_dir(current_dir)
+        .map_err(|err| AgentError(format!("cannot read dir {}: {err}", current_dir.display())))?
     {
         let entry =
             entry.map_err(|err| AgentError(format!("cannot read directory entry: {err}")))?;
         let path = entry.path();
         if path.is_dir() {
-            collect_files(&path, files)?;
+            let rel_path = normalized_relative(scan_root, &path);
+            if excluded(config, scan_root, &rel_path) {
+                continue;
+            }
+            collect_files(config, scan_root, &path, files)?;
         } else if path.is_file() {
             files.push(path);
         }
@@ -1625,10 +1634,50 @@ fn included(config: &AgentConfig, rel_path: &str) -> bool {
 }
 
 fn excluded(config: &AgentConfig, root: &Path, rel_path: &str) -> bool {
+    if always_excluded(rel_path) {
+        return true;
+    }
     config.exclude_globs.iter().any(|pattern| {
         let pattern = agent_state_pattern(config, root, pattern);
         glob_match(&pattern, rel_path)
     })
+}
+
+fn always_excluded(rel_path: &str) -> bool {
+    let normalized = rel_path.replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    let segments: Vec<&str> = lower.split('/').filter(|part| !part.is_empty()).collect();
+    if segments.iter().any(|part| {
+        matches!(
+            *part,
+            ".git"
+                | "node_modules"
+                | ".venv"
+                | "__pycache__"
+                | "target"
+                | "dist"
+                | "build"
+                | ".pytest_cache"
+                | ".ruff_cache"
+                | ".deploy-keys"
+        )
+    }) {
+        return true;
+    }
+    let file_name = segments.last().copied().unwrap_or("");
+    if file_name == ".env" {
+        return true;
+    }
+    if file_name.starts_with(".env.") && file_name != ".env.example" {
+        return true;
+    }
+    if matches!(file_name, "id_rsa" | "id_dsa" | "id_ecdsa" | "id_ed25519") {
+        return true;
+    }
+    lower.ends_with(".pem")
+        || lower.ends_with(".pfx")
+        || lower.ends_with(".p12")
+        || lower.ends_with(".key")
 }
 
 fn agent_state_pattern(config: &AgentConfig, root: &Path, pattern: &str) -> String {
@@ -1667,6 +1716,41 @@ fn glob_match_chars(pattern: &[u8], value: &[u8]) -> bool {
         }
         b'?' => !value.is_empty() && glob_match_chars(&pattern[1..], &value[1..]),
         ch => !value.is_empty() && ch == value[0] && glob_match_chars(&pattern[1..], &value[1..]),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_excludes_secret_like_files() {
+        assert!(always_excluded(".env"));
+        assert!(always_excluded(".env.local"));
+        assert!(always_excluded(".deploy-keys/deploy_key"));
+        assert!(always_excluded("certs/service.pem"));
+        assert!(always_excluded(
+            "src/cga-relay/target/release/cga-relay.exe"
+        ));
+        assert!(!always_excluded(".env.example"));
+        assert!(!always_excluded("docs/deploy_key.md"));
+    }
+
+    #[test]
+    fn directory_globs_match_nested_paths() {
+        assert!(glob_match(
+            "src/cga-relay/target/**",
+            "src/cga-relay/target"
+        ));
+        assert!(glob_match(
+            "src/cga-relay/target/**",
+            "src/cga-relay/target/debug/object.o"
+        ));
+        assert!(glob_match("target/**", "target/release/app"));
+        assert!(!glob_match(
+            "target/**",
+            "src/cga-relay/target/debug/object.o"
+        ));
     }
 }
 

@@ -371,8 +371,8 @@ fn scan_dry_run_reports_counts_and_does_not_write_state() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
     for expected in [
-        "\"candidate\":4",
-        "\"excluded\":1",
+        "\"candidate\":3",
+        "\"excluded\":0",
         "\"scanned\":1",
         "\"changed\":1",
         "\"unchanged\":0",
@@ -433,7 +433,7 @@ fn scanner_skips_excluded_oversized_binary_and_reports_tombstones() {
     ]);
     assert!(second.status.success(), "stderr: {}", stderr(&second));
     let out = stdout(&second);
-    assert!(out.contains("\"excluded\":1"));
+    assert!(out.contains("\"excluded\":0"));
     assert!(out.contains("\"oversized\":1"));
     assert!(out.contains("\"skipped_binary\":1"));
     assert!(out.contains("\"tombstone\":1"));
