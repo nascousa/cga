@@ -3716,8 +3716,8 @@ const WORK_BRIEFING_COLLATOR = new Intl.Collator(undefined, { numeric: true, sen
 
 const BRIEFING_COLLAPSE_STORAGE_KEY = 'cga_work_dashboard_collapsed_sections';
 let _briefingCollapsedSections = loadBriefingCollapsedSections();
-const AI_FIRST_PROJECT_COLLAPSE_STORAGE_KEY = 'cga_ai_first_collapsed_projects';
-let _aiFirstCollapsedProjects = loadAiFirstCollapsedProjects();
+const AI_FIRST_PROJECT_EXPANDED_STORAGE_KEY = 'cga_ai_first_expanded_projects';
+let _aiFirstExpandedProjects = loadAiFirstExpandedProjects();
 const LOGIN_REMEMBER_USERNAME_KEY = 'cga_login_remember_username';
 const LOGIN_USERNAME_KEY = 'cga_login_username';
 const INDEXING_INTELLIGENCE_STRATEGY_OPTIONS = Object.freeze([
@@ -4087,9 +4087,9 @@ function bindBriefingCollapseButtons(root = document) {
   });
 }
 
-function loadAiFirstCollapsedProjects() {
+function loadAiFirstExpandedProjects() {
   try {
-    const raw = localStorage.getItem(AI_FIRST_PROJECT_COLLAPSE_STORAGE_KEY);
+    const raw = localStorage.getItem(AI_FIRST_PROJECT_EXPANDED_STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
   } catch {
@@ -4097,9 +4097,9 @@ function loadAiFirstCollapsedProjects() {
   }
 }
 
-function saveAiFirstCollapsedProjects() {
+function saveAiFirstExpandedProjects() {
   try {
-    localStorage.setItem(AI_FIRST_PROJECT_COLLAPSE_STORAGE_KEY, JSON.stringify([..._aiFirstCollapsedProjects]));
+    localStorage.setItem(AI_FIRST_PROJECT_EXPANDED_STORAGE_KEY, JSON.stringify([..._aiFirstExpandedProjects]));
   } catch {}
 }
 
@@ -4109,7 +4109,7 @@ function aiFirstProjectKey(snapshot, index) {
 }
 
 function isAiFirstProjectCollapsed(projectKey) {
-  return _aiFirstCollapsedProjects.has(String(projectKey || ''));
+  return !_aiFirstExpandedProjects.has(String(projectKey || ''));
 }
 
 function aiFirstProjectBodyId(projectKey) {
@@ -4158,11 +4158,11 @@ function bindAiFirstProjectCollapseButtons(root = document) {
       const projectKey = button.getAttribute('data-ai-first-collapse');
       if (!projectKey) return;
       if (isAiFirstProjectCollapsed(projectKey)) {
-        _aiFirstCollapsedProjects.delete(projectKey);
+        _aiFirstExpandedProjects.add(projectKey);
       } else {
-        _aiFirstCollapsedProjects.add(projectKey);
+        _aiFirstExpandedProjects.delete(projectKey);
       }
-      saveAiFirstCollapsedProjects();
+      saveAiFirstExpandedProjects();
       applyAiFirstProjectCollapse(projectKey, root);
     });
   });

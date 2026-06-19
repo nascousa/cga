@@ -9,6 +9,13 @@ This ensures the NEXT agent handling this repository knows exactly where you lef
 - **Failing Tests / Errors:** 
 - **Next Steps:** 
 
+## 2026-06-19 AI-First Default Collapsed Projects
+
+- **Current Task:** Make `/admin/ai-first` render all project readiness cards collapsed by default.
+- **Last Action Taken:** Switched the Admin UI preference model from stored collapsed project ids to stored expanded project ids, so fresh project cards default to collapsed while explicit user expansions persist.
+- **Failing Tests / Errors:** Verification passed: `python -m compileall src/backend/main.py`, `python -m pytest src/tests/test_health.py -q --no-cov`, Admin inline script syntax check, `git diff --check`, editor diagnostics, local `/health` (`1.30.98`), and shared browser DOM snapshot showing all AI-first project cards collapsed by default. Browser credential re-entry was intentionally skipped to avoid exposing local secrets after the session expired during reload.
+- **Next Steps:** Relay-sync the source changes, commit, push, and build the `1.30.98` Docker Desktop release bundle.
+
 ## 2026-06-18 CGA-Relay Secret-Safe Scan Excludes
 
 - **Current Task:** Make CGA-Relay skip generated and secret-like paths before recursive scans so sync stays small and safe.
