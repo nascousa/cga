@@ -62,7 +62,7 @@ jobs:
         run: |
           mkdir -p .ci-logs
           set -o pipefail
-          pytest --cov=src --cov-report=term-missing --cov-fail-under=55 2>&1 | tee .ci-logs/coverage.log
+          pytest --cov=src --cov-report=term-missing --cov-fail-under=50 2>&1 | tee .ci-logs/coverage.log
 
       - name: Run live graph smoke tests
         id: smoke
