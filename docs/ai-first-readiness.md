@@ -1,7 +1,7 @@
 # AI-First Readiness And Evidence MVP
 
-Version: 1.30.95
-Date: 2026-06-18
+Version: 1.30.98
+Date: 2026-06-19
 
 This MVP starts the CGA AI-first control-plane work with two admin-only APIs. The first measures whether a project has the basic engineering conditions for AI-first work. The second exports an observe-only evidence pack for review, team planning, or retrospectives.
 
@@ -10,6 +10,8 @@ Admin UI:
 ```text
 http://localhost:18001/admin/ai-first
 ```
+
+The cross-project readiness view renders project cards collapsed by default so the page stays scan-friendly when many projects are active. Expanding a project is remembered per browser session as an explicit expanded-project preference.
 
 ## Readiness Snapshot
 
@@ -253,9 +255,9 @@ Status values are normalized into readiness states. `ok`, `pass`, `success`, `me
 ## First Implementation Boundaries
 
 - No database migration is required.
-- No enforcement is active yet; this is observe-only.
-- CI and PR outcome metrics are placeholders until external metadata is connected.
-- Project policy profiles are represented as defaults, not yet stored per project.
+- No blocking enforcement is active yet; policy gates are reported as observe/warn/fail evidence.
+- GitHub and Azure DevOps PR/CI imports are v0 signal ingestion paths; private repositories require process-level credentials.
+- Project policy profiles are stored per project in the auth database.
 
 ## Suggested Next Steps
 

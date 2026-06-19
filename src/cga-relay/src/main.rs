@@ -1578,7 +1578,11 @@ fn scan_project(
     }
 
     for rel_path in previous.keys() {
-        if !current.contains_key(rel_path) && !root.join(rel_path).exists() {
+        if !current.contains_key(rel_path)
+            && (!root.join(rel_path).exists()
+                || !included(config, rel_path)
+                || excluded(config, root, rel_path))
+        {
             result.tombstones.push(rel_path.clone());
         }
     }
@@ -1660,6 +1664,7 @@ fn always_excluded(rel_path: &str) -> bool {
                 | ".pytest_cache"
                 | ".ruff_cache"
                 | ".deploy-keys"
+                | ".nasco"
         )
     }) {
         return true;
@@ -1729,6 +1734,7 @@ mod tests {
         assert!(always_excluded(".env.local"));
         assert!(always_excluded(".deploy-keys/deploy_key"));
         assert!(always_excluded("certs/service.pem"));
+        assert!(always_excluded(".nasco/local-notes.md"));
         assert!(always_excluded(
             "src/cga-relay/target/release/cga-relay.exe"
         ));
