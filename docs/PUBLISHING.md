@@ -6,7 +6,7 @@ This guide covers the public GitHub release path for CGA, aka Context Graph Agen
 
 - Source download: GitHub automatically provides zip/tarball downloads for every release tag.
 - Runtime bundle: the release workflow attaches `cga-<version>.tar.gz`, `docker-compose.release.yml`, and `SHA256SUMS.txt`.
-- One-click Docker Desktop zip: `deploy/docker-desktop/build-release-bundle.ps1` creates `CGA-Docker-Desktop-<version>.zip` with Windows launchers and `cga-desktop-api-image.tar` for fast local startup.
+- One-click Docker Desktop zip: `deploy/docker-desktop/build-release-bundle.ps1` creates `CGA-Docker-Desktop-<version>.zip` with Windows launchers and `cga-desktop-api-image.tar` for fast local startup. Attach the zip and a matching `.zip.sha256` file to the GitHub Release after the tag workflow completes.
 - Container image: tag pushes publish the API/runtime image to GitHub Container Registry:
   - `ghcr.io/nascousa/cga-api:<tag>`
 
@@ -43,6 +43,17 @@ git push origin v1.29.85
 
 Pushing the tag runs `.github/workflows/release.yml`, which builds and publishes GHCR images and creates a GitHub Release.
 
+After the workflow succeeds, upload the locally built Docker Desktop zip and checksum to the same release:
+
+```powershell
+$version = "1.30.99"
+$zip = "deploy/docker-desktop/dist/releases/CGA-Docker-Desktop-$version.zip"
+$checksum = "$zip.sha256"
+$hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+"$hash  CGA-Docker-Desktop-$version.zip" | Set-Content -Path $checksum -Encoding ASCII
+gh release upload "v$version" $zip $checksum --repo nascousa/cga --clobber
+```
+
 ## User Install From Source
 
 ```bash
@@ -59,7 +70,7 @@ Open:
 
 ## User Install From One-Click Docker Desktop Zip
 
-For non-technical Windows users, publish or send the generated `CGA-Docker-Desktop-<version>.zip` artifact:
+For non-technical Windows users, publish or send the generated `CGA-Docker-Desktop-<version>.zip` artifact. When downloading from GitHub Releases, verify the matching `CGA-Docker-Desktop-<version>.zip.sha256` file when possible.
 
 1. Install Docker Desktop.
 2. Unzip `CGA-Docker-Desktop-<version>.zip`.

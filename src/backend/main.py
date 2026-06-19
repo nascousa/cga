@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -48,13 +49,17 @@ from backend.ai_first.service import AiFirstEvidencePackNotFoundError
 from backend.ai_first.service import AiFirstPolicyProfileError
 from backend.ai_first.service import AiFirstProjectNotFoundError
 from backend.ai_first.service import AiFirstSignalError
+from backend.ai_first.service import AiFirstSignalImportError
 from backend.ai_first.service import build_evidence_pack
 from backend.ai_first.service import build_readiness_response
 from backend.ai_first.service import get_evidence_pack
+from backend.ai_first.service import import_azure_devops_signals
+from backend.ai_first.service import import_github_signals
 from backend.ai_first.service import list_policy_profiles
 from backend.ai_first.service import list_evidence_packs
 from backend.ai_first.service import list_signals
 from backend.ai_first.service import record_signal
+from backend.ai_first.service import render_pr_evidence_template
 from backend.ai_first.service import save_evidence_pack
 from backend.ai_first.service import update_policy_profile
 from backend.backup import BackupError, BackupService
@@ -75,7 +80,13 @@ from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.91"
+APP_VERSION = "1.30.99"
+AUTH_SCHEMA_VERSION = 1
+GRAPH_SCHEMA_VERSION = 1
+RUNTIME_CONFIG_VERSION = 1
+WORK_BRIEFING_SCHEMA_VERSION = 1
+MIN_RELAY_VERSION = "1.30.83"
+RECOMMENDED_RELAY_VERSION = os.getenv("CGA_RECOMMENDED_RELAY_VERSION", MIN_RELAY_VERSION)
 
 FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
 FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", "6379"))
@@ -134,6 +145,168 @@ def _redact_dsn(dsn: str) -> str:
     except Exception:
         pass
     return dsn
+
+
+def _infer_install_flavor() -> str:
+    configured = os.getenv("CGA_INSTALL_FLAVOR", "").strip()
+    if configured:
+        return configured
+    backup_dir = BACKUP_DIR.lower()
+    if "cga-desktop" in backup_dir:
+        return "desktop-bundle"
+    if os.getenv("CGA_VERSION"):
+        return "release-compose"
+    if (REPO_ROOT / ".git").exists():
+        return "source-dev"
+    if Path("/app").exists():
+        return "container-runtime"
+    return "unknown"
+
+
+def _disk_status(path: str) -> dict:
+    try:
+        usage = shutil.disk_usage(path)
+    except OSError:
+        return {"status": "unknown", "detail": "backup path is not available"}
+    free_gb = usage.free / (1024**3)
+    return {
+        "status": "ok" if free_gb >= 2 else "warn",
+        "detail": f"{free_gb:.1f} GB free where backups are stored",
+        "free_bytes": usage.free,
+        "total_bytes": usage.total,
+    }
+
+
+def _upgrade_commands(install_flavor: str) -> list[dict]:
+    return [
+        {
+            "id": "desktop-bundle",
+            "label": "Docker Desktop bundle",
+            "recommended": install_flavor in {"desktop-bundle", "unknown"},
+            "commands": [
+                ".\\upgrade-cga-desktop.cmd",
+                ".\\start-cga-desktop.cmd",
+            ],
+        },
+        {
+            "id": "release-compose",
+            "label": "Release compose",
+            "recommended": install_flavor == "release-compose",
+            "commands": [
+                f"# Set CGA_VERSION=v{APP_VERSION} in .env first",
+                "docker compose -f docker-compose.release.yml pull",
+                "docker compose -f docker-compose.release.yml up -d",
+            ],
+        },
+        {
+            "id": "source-dev",
+            "label": "Source checkout",
+            "recommended": install_flavor == "source-dev",
+            "commands": [
+                "git pull",
+                "docker compose --profile dev up --build",
+            ],
+        },
+    ]
+
+
+def _upgrade_status_payload() -> dict:
+    backup_status = _backup_service.status()
+    snapshots = _backup_service.list_snapshots()
+    latest_snapshot = snapshots[0] if snapshots else None
+    backup_cfg = backup_status.get("config", {})
+    backup_dir = backup_status.get("backup_dir") or BACKUP_DIR
+    install_flavor = _infer_install_flavor()
+    release_channel = os.getenv("CGA_RELEASE_CHANNEL", os.getenv("CGA_UPDATE_CHANNEL", "manual")).strip() or "manual"
+    latest_known_version = os.getenv("CGA_LATEST_VERSION", APP_VERSION).strip() or APP_VERSION
+    pinned_version = os.getenv("CGA_PINNED_VERSION", "").strip() or None
+    disk = _disk_status(backup_dir)
+
+    checks = [
+        {
+            "id": "backup",
+            "label": "Pre-upgrade backup",
+            "status": "ok" if latest_snapshot else "warn",
+            "detail": latest_snapshot["name"] if latest_snapshot else "create a manual backup before upgrading",
+        },
+        {
+            "id": "backup-scheduler",
+            "label": "Backup scheduler",
+            "status": "ok" if backup_status.get("scheduler_running") else "warn",
+            "detail": "running" if backup_status.get("scheduler_running") else "not running in this process",
+        },
+        {
+            "id": "disk-space",
+            "label": "Backup disk space",
+            "status": disk["status"],
+            "detail": disk["detail"],
+        },
+        {
+            "id": "database-schema",
+            "label": "Database schema",
+            "status": "ok",
+            "detail": f"auth v{AUTH_SCHEMA_VERSION}, work briefing v{WORK_BRIEFING_SCHEMA_VERSION}",
+        },
+        {
+            "id": "graph-schema",
+            "label": "Graph index compatibility",
+            "status": "ok",
+            "detail": f"graph schema v{GRAPH_SCHEMA_VERSION}; reindex not required for this version",
+        },
+        {
+            "id": "relay",
+            "label": "CGA-Relay compatibility",
+            "status": "ok",
+            "detail": f"minimum {MIN_RELAY_VERSION}; recommended {RECOMMENDED_RELAY_VERSION}",
+        },
+    ]
+    score = round(sum(1 for check in checks if check["status"] == "ok") / len(checks) * 100)
+    recommendation = (
+        "Ready for a backup-first upgrade."
+        if score == 100
+        else "Create or verify a fresh backup, then upgrade when ready."
+    )
+
+    return {
+        "ok": True,
+        "app_version": APP_VERSION,
+        "install_flavor": install_flavor,
+        "release_channel": release_channel,
+        "latest_known_version": latest_known_version,
+        "pinned_version": pinned_version,
+        "update_policy": os.getenv("CGA_UPDATE_POLICY", "manual"),
+        "manifest_url": os.getenv("CGA_UPDATE_MANIFEST_URL", ""),
+        "backup": {
+            "backup_dir": backup_dir,
+            "scheduler_running": bool(backup_status.get("scheduler_running")),
+            "auto_enabled": bool(backup_cfg.get("enabled")),
+            "last_run_at": backup_status.get("last_run_at"),
+            "last_run_status": backup_status.get("last_run_status"),
+            "latest_snapshot": latest_snapshot,
+            "snapshot_count": len(snapshots),
+        },
+        "schema": {
+            "auth": AUTH_SCHEMA_VERSION,
+            "work_briefing": WORK_BRIEFING_SCHEMA_VERSION,
+            "graph": GRAPH_SCHEMA_VERSION,
+            "runtime_config": RUNTIME_CONFIG_VERSION,
+        },
+        "compatibility": {
+            "min_relay_version": MIN_RELAY_VERSION,
+            "recommended_relay_version": RECOMMENDED_RELAY_VERSION,
+            "requires_database_migration": False,
+            "requires_graph_reindex": False,
+            "recommended_graph_reindex": False,
+            "rollback_mode": "restore-pre-upgrade-backup",
+        },
+        "readiness": {
+            "score": score,
+            "status": "ready" if score == 100 else "attention",
+            "recommendation": recommendation,
+            "checks": checks,
+        },
+        "commands": _upgrade_commands(install_flavor),
+    }
 
 
 @asynccontextmanager
@@ -591,6 +764,11 @@ async def api_admin_runtime_config(_: dict = Depends(require_admin)) -> dict:
     }
 
 
+@app.get("/api/admin/upgrade/status")
+async def api_admin_upgrade_status(_: dict = Depends(require_admin)) -> dict:
+    return _upgrade_status_payload()
+
+
 @app.get("/api/indexing/settings")
 async def api_indexing_settings(_: dict = Depends(get_current_user)) -> dict:
     return {"indexing": runtime_config.get_runtime_config()["indexing"]}
@@ -808,6 +986,57 @@ async def api_admin_ai_first_signal_record(
     return {"signal": signal}
 
 
+@app.post("/api/admin/ai-first/signals/import-github", status_code=201)
+async def api_admin_ai_first_signal_import_github(
+    payload: dict,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    body = dict(payload or {})
+    project_id = str(body.get("project_id") or "").strip()
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    async with get_auth_pool().acquire() as db:
+        try:
+            return await import_github_signals(
+                db=db,
+                project_id=project_id,
+                repo_url=str(body.get("repo_url") or "") or None,
+                limit=max(1, min(int(body.get("limit") or 5), 20)),
+                created_by=str(admin.get("username") or admin.get("id") or "admin"),
+            )
+        except AiFirstProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except AiFirstSignalImportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/admin/ai-first/signals/import-azure-devops", status_code=201)
+async def api_admin_ai_first_signal_import_azure_devops(
+    payload: dict,
+    admin: dict = Depends(require_admin),
+) -> dict:
+    body = dict(payload or {})
+    project_id = str(body.get("project_id") or "").strip()
+    if not project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+    async with get_auth_pool().acquire() as db:
+        try:
+            return await import_azure_devops_signals(
+                db=db,
+                project_id=project_id,
+                repo_url=str(body.get("repo_url") or "") or None,
+                organization=str(body.get("organization") or "") or None,
+                ado_project=str(body.get("ado_project") or body.get("project") or "") or None,
+                repository=str(body.get("repository") or "") or None,
+                limit=max(1, min(int(body.get("limit") or 5), 20)),
+                created_by=str(admin.get("username") or admin.get("id") or "admin"),
+            )
+        except AiFirstProjectNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except AiFirstSignalImportError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/admin/ai-first/evidence")
 async def api_admin_ai_first_evidence(
     project_id: str = Query(..., min_length=1),
@@ -896,6 +1125,20 @@ async def api_admin_ai_first_evidence_pack_get(
             return await get_evidence_pack(db=db, evidence_id=evidence_id)
         except AiFirstEvidencePackNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@app.get("/api/admin/ai-first/evidence-packs/{evidence_id}/pr-template")
+async def api_admin_ai_first_evidence_pack_pr_template(
+    evidence_id: str,
+    request: Request,
+    _: dict = Depends(require_admin),
+) -> dict:
+    async with get_auth_pool().acquire() as db:
+        try:
+            saved = await get_evidence_pack(db=db, evidence_id=evidence_id)
+        except AiFirstEvidencePackNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return render_pr_evidence_template(saved, base_url=str(request.base_url).rstrip("/"))
 
 
 @app.post("/api/project/work-briefing/activity", status_code=201)

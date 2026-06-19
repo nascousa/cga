@@ -44,7 +44,10 @@ def test_release_bundle_builds_prebuilt_api_image_tar() -> None:
 def test_portable_builder_copies_src_contents_at_image_expected_path() -> None:
     script = _read(DESKTOP / "build-portable-bundle.ps1")
 
-    assert "src\\*" in script
+    assert "Copy-SourceTreeExcludingGenerated" in script
+    assert "'target'" in script
+    assert "'node_modules'" in script
+    assert "'dist'" in script
     assert "src\\scripts\\init_auth_db.py" in script
 
 

@@ -56,7 +56,7 @@ services:
       - "${CGA_DESKTOP_FALKORDB_PORT:-16381}:6379"
       - "${CGA_DESKTOP_BROWSER_PORT:-13001}:3000"
     volumes:
-      - falkordb_data:/data
+      - falkordb_data:/var/lib/falkordb/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s

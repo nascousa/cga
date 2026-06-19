@@ -13,7 +13,7 @@ body:
     attributes:
       label: CGA version
       description: Use the version from the README, release artifact, or Admin UI when available.
-      placeholder: "1.30.44"
+      placeholder: "1.30.99"
     validations:
       required: false
 

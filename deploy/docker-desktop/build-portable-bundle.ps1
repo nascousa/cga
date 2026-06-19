@@ -41,7 +41,52 @@ foreach ($item in $filesToCopy) {
     Copy-Item -Path $item.Source -Destination $item.Target -Force
 }
 
-Copy-Item -Path (Join-Path $repoRoot 'src\*') -Destination (Join-Path $portableRoot 'src') -Recurse -Force
+$excludedSourceDirectoryNames = @(
+  'target',
+  'node_modules',
+  'dist',
+  '__pycache__',
+  '.pytest_cache',
+  '.ruff_cache'
+)
+$excludedSourceFilePatterns = @(
+  '*.pyc',
+  '*.pyo',
+  '.coverage',
+  '*.log'
+)
+
+function Copy-SourceTreeExcludingGenerated {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Source,
+
+    [Parameter(Mandatory = $true)]
+    [string]$Destination
+  )
+
+  Get-ChildItem -LiteralPath $Source -Force | ForEach-Object {
+    if ($_.PSIsContainer) {
+      if ($excludedSourceDirectoryNames -contains $_.Name) {
+        return
+      }
+      $targetDirectory = Join-Path $Destination $_.Name
+      New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
+      Copy-SourceTreeExcludingGenerated -Source $_.FullName -Destination $targetDirectory
+      return
+    }
+
+    foreach ($pattern in $excludedSourceFilePatterns) {
+      if ($_.Name -like $pattern) {
+        return
+      }
+    }
+
+    Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Destination $_.Name) -Force
+  }
+}
+
+Copy-SourceTreeExcludingGenerated -Source (Join-Path $repoRoot 'src') -Destination (Join-Path $portableRoot 'src')
 
 $generatedSourcePaths = @(
   'src\cga-relay\target',

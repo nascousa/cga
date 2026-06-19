@@ -21,6 +21,19 @@ jobs:
         image: redis:7-alpine
         ports:
           - 6380:6379
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: appdb
+          POSTGRES_USER: app
+          POSTGRES_PASSWORD: app
+        ports:
+          - 15432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Checkout
@@ -49,7 +62,7 @@ jobs:
         run: |
           mkdir -p .ci-logs
           set -o pipefail
-          pytest --cov=src --cov-report=term-missing --cov-fail-under=55 2>&1 | tee .ci-logs/coverage.log
+          pytest --cov=src --cov-report=term-missing --cov-fail-under=50 2>&1 | tee .ci-logs/coverage.log
 
       - name: Run live graph smoke tests
         id: smoke

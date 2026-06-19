@@ -111,3 +111,17 @@ def test_devops_convention_has_required_compose_healthcheck_block() -> None:
         assert entry in content
 
 
+def test_falkordb_compose_volumes_mount_persistent_data_dir() -> None:
+    compose_files = [
+        "docker-compose.yml",
+        "docker-compose.desktop.yml",
+        "docker-compose.release.yml",
+    ]
+
+    for rel_path in compose_files:
+        content = _read(rel_path)
+        assert "falkordb_data:/data" not in content
+        assert "falkordb_dev_data:/data" not in content
+        assert ":/var/lib/falkordb/data" in content
+
+

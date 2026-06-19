@@ -8,10 +8,14 @@ turns them into explainable readiness signals for team planning.
 from __future__ import annotations
 
 import json
+import os
+import re
 import uuid
+from base64 import b64encode
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote, unquote
 
 from backend.auth import pgshim as aiosqlite
 from backend.workbriefing.models import WorkActivity
@@ -32,6 +36,10 @@ class AiFirstPolicyProfileError(ValueError):
 
 class AiFirstSignalError(ValueError):
     """Raised when AI-first signal input is invalid."""
+
+
+class AiFirstSignalImportError(ValueError):
+    """Raised when external signal import cannot proceed."""
 
 
 REQUIRED_ADC_FILES = (
@@ -246,6 +254,7 @@ async def build_project_readiness_snapshot(
     ci_signal = await _latest_signal_for_project(db, project, "ci")
     pr_signal = await _latest_signal_for_project(db, project, "pr")
     benchmark_signal = await _latest_signal_for_project(db, project, "benchmark")
+    latest_evidence_pack = await _latest_evidence_pack_for_project(db, project)
 
     dimensions = [
         _dimension(
@@ -392,6 +401,14 @@ async def build_project_readiness_snapshot(
     ]
 
     overall_score = _average_known_scores([dimension["score"] for dimension in dimensions])
+    policy_gates = _evaluate_policy_gates(
+        policy_profile=policy_profile,
+        latest_evidence_pack=latest_evidence_pack,
+        ci_signal=ci_signal,
+        pr_signal=pr_signal,
+        benchmark_signal=benchmark_signal,
+        activity_count=activity_count,
+    )
     return {
         "project": {
             "id": int(project["id"]),
@@ -405,6 +422,7 @@ async def build_project_readiness_snapshot(
         "overall_status": _status_from_score(overall_score),
         "dimensions": dimensions,
         "policy_profile": policy_profile,
+        "policy_gates": policy_gates,
         "signals": {
             "ci": ci_signal,
             "pr": pr_signal,
@@ -453,6 +471,8 @@ async def build_evidence_pack(
     matched_activities = _filter_activities_by_correlation(activities, correlation_filters)[:limit]
     sanitized_activities = [_sanitize_activity(activity) for activity in activities]
     sanitized_matched_activities = [_sanitize_activity(activity) for activity in matched_activities]
+    signals = await _recent_signals_for_project(db, project, _activity_fetch_limit(limit, correlation_filters))
+    matched_signals = _filter_signals_by_correlation(signals, correlation_filters)[:limit]
     trace_evidence = _safe_trace_evidence(
         trace_redis_url=trace_redis_url,
         correlation_filters=correlation_filters,
@@ -484,11 +504,18 @@ async def build_evidence_pack(
             ],
             "recommended_next_actions": readiness["recommended_next_actions"],
         },
+        "policy_gates": readiness.get("policy_gates") or {},
         "activity_evidence": {
             "count": len(sanitized_matched_activities),
             "total_recent_scanned": len(sanitized_activities),
             "limit": limit,
             "activities": sanitized_matched_activities,
+        },
+        "signal_evidence": {
+            "count": len(matched_signals),
+            "total_recent_scanned": len(signals),
+            "limit": limit,
+            "signals": [_sanitize_signal_for_evidence(signal) for signal in matched_signals],
         },
         "trace_evidence": {
             **trace_evidence,
@@ -685,6 +712,198 @@ async def list_signals(
     }
 
 
+async def import_github_signals(
+    *,
+    db: aiosqlite.Connection,
+    project_id: str,
+    repo_url: str | None = None,
+    limit: int = 5,
+    created_by: str = "",
+    github_token: str | None = None,
+    http_get_json: Any = None,
+) -> dict[str, Any]:
+    projects = await _load_projects(db, project_id=project_id)
+    if not projects:
+        raise AiFirstProjectNotFoundError(f"Project not found: {project_id}")
+    project = projects[0]
+    slug = _resolve_github_slug(project, repo_url)
+    if not slug:
+        raise AiFirstSignalImportError("GitHub repository URL could not be resolved for this project")
+    owner, repo = slug
+    safe_limit = max(1, min(int(limit or 5), 20))
+    token = github_token or os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "cga-ai-first-signals",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    runs_url = f"https://api.github.com/repos/{owner}/{repo}/actions/runs?per_page={safe_limit}"
+    prs_url = f"https://api.github.com/repos/{owner}/{repo}/pulls?state=all&sort=updated&direction=desc&per_page={safe_limit}"
+    runs_payload = await _github_get_json(runs_url, headers=headers, http_get_json=http_get_json)
+    prs_payload = await _github_get_json(prs_url, headers=headers, http_get_json=http_get_json)
+
+    imported: list[dict[str, Any]] = []
+    for run in (runs_payload.get("workflow_runs") or [])[:safe_limit]:
+        signal_status = _github_run_status(run)
+        imported.append(
+            await record_signal(
+                db=db,
+                project_id=str(project["project_id"]),
+                signal_type="ci",
+                name=f"GitHub Actions: {run.get('name') or run.get('display_title') or 'workflow'}",
+                status=signal_status,
+                value=run.get("run_number") or run.get("id") or "",
+                unit="run",
+                source_url=str(run.get("html_url") or ""),
+                observed_at=str(run.get("updated_at") or run.get("run_started_at") or run.get("created_at") or ""),
+                created_by=created_by,
+                metadata={
+                    "provider": "github",
+                    "github_id": run.get("id"),
+                    "workflow_id": run.get("workflow_id"),
+                    "head_branch": run.get("head_branch"),
+                    "head_sha": run.get("head_sha"),
+                    "event": run.get("event"),
+                },
+            )
+        )
+    for pr in (prs_payload if isinstance(prs_payload, list) else [])[:safe_limit]:
+        number = pr.get("number")
+        imported.append(
+            await record_signal(
+                db=db,
+                project_id=str(project["project_id"]),
+                signal_type="pr",
+                name=f"GitHub PR #{number}: {pr.get('title') or ''}".strip(),
+                status=_github_pr_status(pr),
+                value=number or "",
+                unit="pr",
+                source_url=str(pr.get("html_url") or ""),
+                observed_at=str(pr.get("updated_at") or pr.get("created_at") or ""),
+                created_by=created_by,
+                metadata={
+                    "provider": "github",
+                    "pr_id": str(number or ""),
+                    "issue_id": str(number or ""),
+                    "merged_at": pr.get("merged_at"),
+                    "state": pr.get("state"),
+                    "author": (pr.get("user") or {}).get("login") if isinstance(pr.get("user"), dict) else None,
+                },
+            )
+        )
+    return {
+        "project_id": project["project_id"],
+        "repository": f"{owner}/{repo}",
+        "imported_count": len(imported),
+        "signals": imported,
+    }
+
+
+async def import_azure_devops_signals(
+    *,
+    db: aiosqlite.Connection,
+    project_id: str,
+    organization: str | None = None,
+    ado_project: str | None = None,
+    repository: str | None = None,
+    repo_url: str | None = None,
+    limit: int = 5,
+    created_by: str = "",
+    ado_token: str | None = None,
+    http_get_json: Any = None,
+) -> dict[str, Any]:
+    projects = await _load_projects(db, project_id=project_id)
+    if not projects:
+        raise AiFirstProjectNotFoundError(f"Project not found: {project_id}")
+    project = projects[0]
+    resolved = _resolve_azure_devops_repo(project, repo_url=repo_url, organization=organization, ado_project=ado_project, repository=repository)
+    if not resolved:
+        raise AiFirstSignalImportError("Azure DevOps repository could not be resolved for this project")
+    org, ado_proj, repo = resolved
+    safe_limit = max(1, min(int(limit or 5), 20))
+    headers = {"Accept": "application/json", "User-Agent": "cga-ai-first-signals"}
+    token = ado_token or os.getenv("AZURE_DEVOPS_PAT") or os.getenv("ADO_PAT") or os.getenv("AZURE_DEVOPS_EXT_PAT")
+    if token:
+        encoded = b64encode(f":{token}".encode("utf-8")).decode("ascii")
+        headers["Authorization"] = f"Basic {encoded}"
+
+    encoded_project = quote(ado_proj, safe="")
+    encoded_repo = quote(repo, safe="")
+    builds_url = (
+        f"https://dev.azure.com/{quote(org, safe='')}/{encoded_project}"
+        f"/_apis/build/builds?repositoryId={encoded_repo}&repositoryType=TfsGit&$top={safe_limit}"
+        "&queryOrder=finishTimeDescending&api-version=7.1"
+    )
+    prs_url = (
+        f"https://dev.azure.com/{quote(org, safe='')}/{encoded_project}"
+        f"/_apis/git/repositories/{encoded_repo}/pullrequests?searchCriteria.status=all&$top={safe_limit}&api-version=7.1"
+    )
+    builds_payload = await _ado_get_json(builds_url, headers=headers, http_get_json=http_get_json)
+    prs_payload = await _ado_get_json(prs_url, headers=headers, http_get_json=http_get_json)
+
+    imported: list[dict[str, Any]] = []
+    for build in (builds_payload.get("value") or [])[:safe_limit]:
+        imported.append(
+            await record_signal(
+                db=db,
+                project_id=str(project["project_id"]),
+                signal_type="ci",
+                name=f"Azure DevOps Build: {(build.get('definition') or {}).get('name') or build.get('buildNumber') or 'build'}",
+                status=_ado_build_status(build),
+                value=build.get("buildNumber") or build.get("id") or "",
+                unit="build",
+                source_url=_ado_web_href(build),
+                observed_at=str(build.get("finishTime") or build.get("queueTime") or build.get("startTime") or ""),
+                created_by=created_by,
+                metadata={
+                    "provider": "azure_devops",
+                    "build_id": build.get("id"),
+                    "definition": (build.get("definition") or {}).get("name") if isinstance(build.get("definition"), dict) else None,
+                    "source_branch": build.get("sourceBranch"),
+                    "source_version": build.get("sourceVersion"),
+                    "organization": org,
+                    "project": ado_proj,
+                    "repository": repo,
+                },
+            )
+        )
+    for pr in (prs_payload.get("value") if isinstance(prs_payload, dict) else [])[:safe_limit]:
+        pr_id = pr.get("pullRequestId") or pr.get("codeReviewId")
+        imported.append(
+            await record_signal(
+                db=db,
+                project_id=str(project["project_id"]),
+                signal_type="pr",
+                name=f"Azure DevOps PR #{pr_id}: {pr.get('title') or ''}".strip(),
+                status=_ado_pr_status(pr),
+                value=pr_id or "",
+                unit="pr",
+                source_url=_ado_web_href(pr),
+                observed_at=str(pr.get("closedDate") or pr.get("creationDate") or ""),
+                created_by=created_by,
+                metadata={
+                    "provider": "azure_devops",
+                    "pr_id": str(pr_id or ""),
+                    "issue_id": str(pr_id or ""),
+                    "status": pr.get("status"),
+                    "author": (pr.get("createdBy") or {}).get("displayName") if isinstance(pr.get("createdBy"), dict) else None,
+                    "organization": org,
+                    "project": ado_proj,
+                    "repository": repo,
+                },
+            )
+        )
+    return {
+        "project_id": project["project_id"],
+        "repository": f"{org}/{ado_proj}/{repo}",
+        "imported_count": len(imported),
+        "signals": imported,
+    }
+
+
 async def save_evidence_pack(
     *,
     db: aiosqlite.Connection,
@@ -803,6 +1022,162 @@ async def get_evidence_pack(
     }
 
 
+def render_pr_evidence_template(saved_pack: dict[str, Any], *, base_url: str = "") -> dict[str, Any]:
+    evidence = saved_pack.get("evidence") or {}
+    project = evidence.get("project") or {}
+    correlation = evidence.get("correlation") or {}
+    policy_gates = evidence.get("policy_gates") or {}
+    readiness = evidence.get("readiness") or {}
+    evidence_id = saved_pack.get("evidence_id") or evidence.get("evidence_id") or ""
+    link = _evidence_admin_link(base_url, evidence_id)
+    filters = correlation.get("filters") or {}
+    filter_text = ", ".join(f"{key}={value}" for key, value in filters.items()) or "project_recent"
+    markdown = "\n".join(
+        [
+            "## AI-First Evidence",
+            "",
+            f"- Evidence Pack: {evidence_id}",
+            f"- CGA Link: {link}",
+            f"- Project: {project.get('project_name') or saved_pack.get('project_name')} ({project.get('project_id') or saved_pack.get('project_id')})",
+            f"- Correlation: {filter_text}",
+            f"- Readiness: {readiness.get('overall_status', 'unknown')} ({readiness.get('overall_score', 'unknown')})",
+            f"- Policy Gates: {policy_gates.get('overall_status', 'unknown')} ({policy_gates.get('enforcement_level', 'L0')})",
+            f"- Signal Evidence: {(evidence.get('signal_evidence') or {}).get('count', 0)} signal(s)",
+            f"- Trace Evidence: {(evidence.get('trace_evidence') or {}).get('count', 0)} trace(s)",
+            "",
+            "Reviewer note: verify the linked CGA evidence pack before approving AI-assisted changes.",
+        ]
+    )
+    return {"evidence_id": evidence_id, "markdown": markdown, "link": link}
+
+
+async def _latest_evidence_pack_for_project(db: aiosqlite.Connection, project: dict[str, Any]) -> dict[str, Any] | None:
+    async with db.execute(
+        """
+        SELECT id, evidence_id, project_id, project_external_id, project_name, status,
+               correlation_json, created_by, created_at
+        FROM ai_first_evidence_packs
+        WHERE project_id = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+        """,
+        (int(project["id"]),),
+    ) as cur:
+        row = await cur.fetchone()
+    if not row:
+        return None
+    return _evidence_summary_from_row(dict(row))
+
+
+def _evaluate_policy_gates(
+    *,
+    policy_profile: dict[str, Any],
+    latest_evidence_pack: dict[str, Any] | None,
+    ci_signal: dict[str, Any] | None,
+    pr_signal: dict[str, Any] | None,
+    benchmark_signal: dict[str, Any] | None,
+    activity_count: int,
+) -> dict[str, Any]:
+    profile_name = policy_profile.get("name") or "observe-only"
+    enforcement_level = policy_profile.get("enforcement_level") or "L0"
+    if enforcement_level == "L0":
+        return {
+            "profile_name": profile_name,
+            "enforcement_level": enforcement_level,
+            "overall_status": "ok",
+            "mode": "observe",
+            "gates": [],
+        }
+
+    severity = "required" if enforcement_level in {"L3", "L4"} else "warning"
+    gates = [
+        _policy_gate(
+            key="saved_evidence_pack",
+            label="Saved evidence pack",
+            status="ok" if latest_evidence_pack else "warn",
+            severity=severity,
+            summary=(
+                f"Latest evidence pack {latest_evidence_pack['evidence_id']} saved at {latest_evidence_pack['created_at']}"
+                if latest_evidence_pack
+                else "No saved evidence pack is available for this project yet"
+            ),
+            evidence=latest_evidence_pack or {},
+            recommendation=None if latest_evidence_pack else "Save an evidence pack for review or release/audit use.",
+        ),
+        _policy_gate_for_signal("ci_signal", "CI signal", ci_signal, severity, "Record or import CI status before review."),
+        _policy_gate_for_signal("pr_signal", "PR/review signal", pr_signal, severity, "Record or import PR/review status for the task."),
+        _policy_gate_for_signal("benchmark_signal", "Benchmark signal", benchmark_signal, "warning", "Record a token/HPS benchmark signal for ROI evidence."),
+        _policy_gate(
+            key="work_briefing_activity",
+            label="Work Briefing activity",
+            status="ok" if activity_count > 0 else "warn",
+            severity="warning",
+            summary=f"{activity_count} recent work activity records available" if activity_count > 0 else "No work activity has been recorded for this project",
+            evidence={"activity_count": activity_count},
+            recommendation=None if activity_count > 0 else "Publish task progress or validation activity into Work Briefing.",
+        ),
+    ]
+    overall_status = "fail" if any(gate["status"] == "fail" for gate in gates) else "warn" if any(gate["status"] == "warn" for gate in gates) else "ok"
+    return {
+        "profile_name": profile_name,
+        "enforcement_level": enforcement_level,
+        "overall_status": overall_status,
+        "mode": "warning_gates",
+        "gates": gates,
+    }
+
+
+def _policy_gate_for_signal(
+    key: str,
+    label: str,
+    signal: dict[str, Any] | None,
+    severity: str,
+    missing_recommendation: str,
+) -> dict[str, Any]:
+    if not signal:
+        return _policy_gate(
+            key=key,
+            label=label,
+            status="warn",
+            severity=severity,
+            summary=f"No {label.lower()} is available yet",
+            evidence={},
+            recommendation=missing_recommendation,
+        )
+    return _policy_gate(
+        key=key,
+        label=label,
+        status=_readiness_status_from_signal(signal),
+        severity=severity,
+        summary=_signal_summary(signal, f"No {label.lower()} is available yet"),
+        evidence=signal,
+        recommendation=None if _readiness_status_from_signal(signal) == "ok" else missing_recommendation,
+    )
+
+
+def _policy_gate(
+    *,
+    key: str,
+    label: str,
+    status: str,
+    severity: str,
+    summary: str,
+    evidence: dict[str, Any],
+    recommendation: str | None = None,
+) -> dict[str, Any]:
+    gate = {
+        "key": key,
+        "label": label,
+        "status": status,
+        "severity": severity,
+        "summary": summary,
+        "evidence": evidence,
+    }
+    if recommendation:
+        gate["recommendation"] = recommendation
+    return gate
+
+
 def _normalize_correlation_filters(
     *,
     task_id: str | None = None,
@@ -844,6 +1219,61 @@ def _activity_matches_correlation(activity: WorkActivity, correlation_filters: d
         if not _matches_filter_value(_activity_correlation_values(activity, key), value):
             return False
     return True
+
+
+async def _recent_signals_for_project(
+    db: aiosqlite.Connection,
+    project: dict[str, Any],
+    limit: int,
+) -> list[dict[str, Any]]:
+    safe_limit = max(1, min(int(limit or 25), 5000))
+    async with db.execute(
+        """
+        SELECT id, signal_id, project_id, project_external_id, project_name,
+               signal_type, name, status, value_text, unit, source_url,
+               metadata_json, observed_at, created_by, created_at
+        FROM ai_first_signals
+        WHERE project_id = ?
+        ORDER BY observed_at DESC, id DESC
+        LIMIT ?
+        """,
+        (int(project["id"]), safe_limit),
+    ) as cur:
+        rows = await cur.fetchall()
+    return [_signal_from_row(dict(row), include_metadata=True) for row in rows]
+
+
+def _filter_signals_by_correlation(
+    signals: list[dict[str, Any]],
+    correlation_filters: dict[str, str],
+) -> list[dict[str, Any]]:
+    if not correlation_filters:
+        return signals
+    return [signal for signal in signals if _signal_matches_correlation(signal, correlation_filters)]
+
+
+def _signal_matches_correlation(signal: dict[str, Any], correlation_filters: dict[str, str]) -> bool:
+    for key, value in correlation_filters.items():
+        if not _matches_filter_value(_signal_correlation_values(signal, key), value):
+            return False
+    return True
+
+
+def _signal_correlation_values(signal: dict[str, Any], key: str) -> list[str]:
+    values = [
+        signal.get("signal_id") or "",
+        signal.get("signal_type") or "",
+        signal.get("name") or "",
+        signal.get("status") or "",
+        signal.get("value") or "",
+        signal.get("source_url") or "",
+    ]
+    metadata = signal.get("metadata") if isinstance(signal.get("metadata"), dict) else {}
+    for alias in CORRELATION_METADATA_ALIASES.get(key, (key,)):
+        if alias in metadata:
+            values.extend(_flatten_scalar_values(metadata.get(alias)))
+    values.extend(_flatten_scalar_values(metadata.get("correlation")))
+    return values
 
 
 def _activity_correlation_values(activity: WorkActivity, key: str) -> list[str]:
@@ -1071,12 +1501,12 @@ async def _latest_signal_for_project(
     return _signal_from_row(dict(row))
 
 
-def _signal_from_row(row: dict[str, Any]) -> dict[str, Any]:
+def _signal_from_row(row: dict[str, Any], *, include_metadata: bool = False) -> dict[str, Any]:
     try:
         metadata = json.loads(row.get("metadata_json") or "{}")
     except Exception:
         metadata = {}
-    return {
+    signal = {
         "id": int(row["id"]),
         "signal_id": row.get("signal_id") or "",
         "project_db_id": row.get("project_id"),
@@ -1094,6 +1524,178 @@ def _signal_from_row(row: dict[str, Any]) -> dict[str, Any]:
         "created_by": row.get("created_by") or "",
         "created_at": row.get("created_at") or "",
     }
+    if include_metadata:
+        signal["metadata"] = metadata if isinstance(metadata, dict) else {}
+    return signal
+
+
+def _sanitize_signal_for_evidence(signal: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in signal.items()
+        if key != "metadata"
+    }
+
+
+def _resolve_github_slug(project: dict[str, Any], repo_url: str | None) -> tuple[str, str] | None:
+    for candidate in [repo_url, project.get("upstream_url"), _git_remote_url(project.get("repo_path"))]:
+        slug = _parse_github_slug(candidate)
+        if slug:
+            return slug
+    return None
+
+
+def _resolve_azure_devops_repo(
+    project: dict[str, Any],
+    *,
+    repo_url: str | None = None,
+    organization: str | None = None,
+    ado_project: str | None = None,
+    repository: str | None = None,
+) -> tuple[str, str, str] | None:
+    if organization and ado_project and repository:
+        return organization.strip(), ado_project.strip(), repository.strip()
+    for candidate in [repo_url, project.get("upstream_url"), _git_remote_url(project.get("repo_path"))]:
+        parsed = _parse_azure_devops_repo(candidate)
+        if parsed:
+            org, parsed_project, parsed_repo = parsed
+            return (
+                (organization or org).strip(),
+                (ado_project or parsed_project).strip(),
+                (repository or parsed_repo).strip(),
+            )
+    return None
+
+
+def _parse_azure_devops_repo(value: Any) -> tuple[str, str, str] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    patterns = [
+        r"https?://dev\.azure\.com/(?P<org>[^/]+)/(?P<project>[^/]+)/_git/(?P<repo>[^/?#]+)",
+        r"https?://(?P<org>[^/.]+)\.visualstudio\.com/(?P<project>[^/]+)/_git/(?P<repo>[^/?#]+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return unquote(match.group("org")), unquote(match.group("project")), unquote(match.group("repo"))
+    return None
+
+
+def _git_remote_url(repo_path: Any) -> str | None:
+    if not repo_path:
+        return None
+    config_path = Path(str(repo_path)) / ".git" / "config"
+    if not config_path.exists():
+        return None
+    try:
+        content = config_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return None
+    match = re.search(r"url\s*=\s*(\S+)", content)
+    return match.group(1) if match else None
+
+
+def _parse_github_slug(value: Any) -> tuple[str, str] | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    patterns = [
+        r"github\.com[:/](?P<owner>[^/]+)/(?P<repo>[^/.]+)(?:\.git)?/?$",
+        r"https?://www\.github\.com/(?P<owner>[^/]+)/(?P<repo>[^/.]+)(?:\.git)?/?$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match:
+            return match.group("owner"), match.group("repo")
+    return None
+
+
+async def _github_get_json(url: str, *, headers: dict[str, str], http_get_json: Any = None) -> Any:
+    if http_get_json:
+        return await http_get_json(url, headers)
+    try:
+        import httpx
+    except Exception as exc:  # pragma: no cover - dependency should exist in runtime
+        raise AiFirstSignalImportError("httpx is unavailable for GitHub import") from exc
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        response = await client.get(url, headers=headers)
+    if response.status_code >= 400:
+        raise AiFirstSignalImportError(f"GitHub import failed with HTTP {response.status_code}")
+    return response.json()
+
+
+async def _ado_get_json(url: str, *, headers: dict[str, str], http_get_json: Any = None) -> Any:
+    if http_get_json:
+        return await http_get_json(url, headers)
+    try:
+        import httpx
+    except Exception as exc:  # pragma: no cover - dependency should exist in runtime
+        raise AiFirstSignalImportError("httpx is unavailable for Azure DevOps import") from exc
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+        response = await client.get(url, headers=headers)
+    if response.status_code >= 400:
+        raise AiFirstSignalImportError(f"Azure DevOps import failed with HTTP {response.status_code}")
+    return response.json()
+
+
+def _github_run_status(run: dict[str, Any]) -> str:
+    conclusion = str(run.get("conclusion") or "").lower()
+    status = str(run.get("status") or "").lower()
+    if conclusion in {"success", "neutral", "skipped"}:
+        return "ok"
+    if conclusion in {"failure", "timed_out", "cancelled", "action_required"}:
+        return "fail"
+    if status in {"queued", "in_progress", "waiting", "requested"}:
+        return "pending"
+    return conclusion or status or "unknown"
+
+
+def _github_pr_status(pr: dict[str, Any]) -> str:
+    if pr.get("merged_at"):
+        return "merged"
+    state = str(pr.get("state") or "unknown").lower()
+    if state == "closed":
+        return "ok"
+    if state == "open":
+        return "open"
+    return state or "unknown"
+
+
+def _ado_build_status(build: dict[str, Any]) -> str:
+    result = str(build.get("result") or "").lower()
+    status = str(build.get("status") or "").lower()
+    if result in {"succeeded", "success"}:
+        return "ok"
+    if result in {"failed", "canceled", "cancelled"}:
+        return "fail"
+    if result in {"partiallysucceeded"}:
+        return "warn"
+    if status in {"inprogress", "notstarted", "postponed", "cancelling"}:
+        return "pending"
+    return result or status or "unknown"
+
+
+def _ado_pr_status(pr: dict[str, Any]) -> str:
+    status = str(pr.get("status") or "unknown").lower()
+    if status == "completed":
+        return "merged"
+    if status == "abandoned":
+        return "rejected"
+    if status == "active":
+        return "open"
+    return status or "unknown"
+
+
+def _ado_web_href(item: dict[str, Any]) -> str:
+    links = item.get("_links") if isinstance(item.get("_links"), dict) else {}
+    web = links.get("web") if isinstance(links.get("web"), dict) else {}
+    return str(web.get("href") or item.get("url") or "")
+
+
+def _evidence_admin_link(base_url: str, evidence_id: str) -> str:
+    base = str(base_url or "").rstrip("/") or "http://localhost:18001"
+    return f"{base}/admin/ai-first?evidence_id={evidence_id}"
 
 
 def _readiness_status_from_signal(signal: dict[str, Any] | None) -> str:
@@ -1483,6 +2085,8 @@ def _render_evidence_markdown(pack: dict[str, Any]) -> str:
     readiness = pack["readiness"]
     activities = pack["activity_evidence"]["activities"]
     correlation = pack.get("correlation", {})
+    policy_gates = pack.get("policy_gates", {})
+    signal_evidence = pack.get("signal_evidence", {})
     trace_evidence = pack.get("trace_evidence", {})
     lines = [
         f"# AI-First Evidence Pack - {project['project_name']}",
@@ -1508,6 +2112,14 @@ def _render_evidence_markdown(pack: dict[str, Any]) -> str:
     for dimension in readiness["dimensions"]:
         score = dimension["score"] if dimension["score"] is not None else "unknown"
         lines.append(f"- {dimension['label']}: {dimension['status']} ({score})")
+    gates = policy_gates.get("gates") or []
+    lines.extend(["", "## Policy Gates", ""])
+    if not gates:
+        lines.append(f"No active gates for profile {policy_gates.get('profile_name', 'observe-only')}.")
+    else:
+        lines.append(f"Overall: {policy_gates.get('overall_status', 'unknown')} ({policy_gates.get('enforcement_level', 'L0')})")
+        for gate in gates:
+            lines.append(f"- {gate['label']} [{gate['status']}/{gate['severity']}]: {gate['summary']}")
     if readiness["recommended_next_actions"]:
         lines.extend(["", "## Recommended Next Actions", ""])
         lines.extend(f"- {action}" for action in readiness["recommended_next_actions"])
@@ -1519,6 +2131,17 @@ def _render_evidence_markdown(pack: dict[str, Any]) -> str:
             status = f" [{activity['status']}]" if activity.get("status") else ""
             source = f" ({activity['source_item_id']})" if activity.get("source_item_id") else ""
             lines.append(f"- {activity['occurred_at']} {activity['event_type']}{status}{source}: {activity['title']}")
+    signals = signal_evidence.get("signals") or []
+    lines.extend(["", "## Signal Evidence", ""])
+    if not signals:
+        lines.append("No matching PR, CI, or benchmark signals were exported.")
+    else:
+        for signal in signals[:10]:
+            value = f" - {signal.get('value')} {signal.get('unit') or ''}" if signal.get("value") else ""
+            lines.append(
+                f"- {signal.get('observed_at') or 'unknown time'} {signal.get('signal_type')} "
+                f"[{signal.get('status')}]: {signal.get('name')}{value}"
+            )
     traces = trace_evidence.get("traces") or []
     lines.extend(["", "## MCP Trace Evidence", ""])
     if not traces:

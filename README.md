@@ -1,9 +1,9 @@
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.91
+- **Version:** 1.30.99
 - **Status:** Published
 - **Author:** Nate Scott
-- **Date:** 2026-06-18 (AI-First PR/CI/benchmark signals v0)
+- **Date:** 2026-06-19 (release docs aligned and relay local notes excluded)
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
@@ -73,9 +73,10 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 - **MCP-compatible API:** agent-facing retrieval tools for symbols, files, dependencies, imports, variable flow, and architecture queries.
 - **CGA-Relay:** one developer-machine `cga-relay` with stdio MCP gateway, local scan/sync, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
 - **Work Briefing Aggregation:** WA-compatible activity capture and briefing summaries inside CGA.
-- **AI-First Readiness And Evidence:** Admin APIs for project readiness snapshots and observe-only evidence packs that combine graph, indexing, ADC, verification, governance, and work activity signals.
+- **AI-First Readiness And Evidence:** Admin APIs for readiness snapshots, GitHub/Azure DevOps/verification signals, evidence packs, PR evidence links, and policy-derived gates that combine graph, indexing, ADC, governance, and work activity signals.
 - **Schedule Automation:** admin-defined recurring jobs for BrowserAgent page tests, agent activation calls, and generic HTTP tasks.
 - **Runtime Backup:** PostgreSQL and FalkorDB snapshots for local-first persistence and recovery.
+- **Upgrade Center:** admin-visible upgrade readiness, backup status, schema compatibility, relay guidance, and copyable upgrade commands.
 
 ## Screenshots
 

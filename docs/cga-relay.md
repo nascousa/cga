@@ -85,7 +85,7 @@ The relay allows plaintext HTTP only for loopback hosts such as `127.0.0.1` and 
 
 ## Scanner And Sync
 
-`scan` walks the configured root deterministically, applies include/exclude globs, skips oversized and binary files, hashes scanned text files with SHA-256, and reports candidate, excluded, scanned, changed, unchanged, oversized, skipped binary, tombstone, and bytes scanned counts.
+`scan` walks the configured root deterministically, applies include/exclude globs, skips oversized and binary files, hashes scanned text files with SHA-256, and reports candidate, excluded, scanned, changed, unchanged, oversized, skipped binary, tombstone, and bytes scanned counts. Built-in excludes cover dependency/build outputs, secret-like files, `.deploy-keys`, and local `.nasco` notes; if a previously synced path later becomes excluded, the next normal scan or sync reports a tombstone for cleanup.
 
 `--dry-run` never updates scan state. Normal scan mode writes local state under `STATE_DIR`. `sync` reads the central relay project registry, fails closed if login or token environment is missing, and submits changed text snapshots to the configured control API when not in dry-run mode.
 
