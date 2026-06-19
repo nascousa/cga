@@ -14,7 +14,7 @@ This ensures the NEXT agent handling this repository knows exactly where you lef
 - **Current Task:** Move the documentation alignment and relay `.nasco` exclusion cleanup into a new formal patch release so published source bundles include the updated docs.
 - **Last Action Taken:** Bumped CGA app, README, AI-first docs, issue template, publishing example, and CGA-Relay version metadata to `1.30.99`.
 - **Failing Tests / Errors:** Verification passed so far: `python -m compileall src/backend/main.py`, `python -m pytest src/tests/test_health.py -q --no-cov`, `cargo fmt`, `cargo test`, `cargo build --release`, editor diagnostics, `git diff --check`, and fixed-string stale-reference scans for public docs/version metadata.
-- **Next Steps:** Relay-sync, commit, push, package, tag, release, and upload Docker Desktop assets for `v1.30.99`.
+- **Next Steps:** Completed: relay sync accepted the `1.30.99` version/doc updates, commits were pushed through `82b5535`, local desktop `/health` reports `1.30.99`, `CGA-Docker-Desktop-1.30.99.zip` was built with generated source outputs excluded, tag `v1.30.99` was pushed, the GitHub Release workflow completed successfully, and the zip plus `.sha256` asset were uploaded to `https://github.com/nascousa/cga/releases/tag/v1.30.99`. Docker Desktop zip SHA256: `8FC53DA707F0A351F6D471E69D69B9F4851868B209CCD6DFDDAF0BA7C05BD42B`.
 
 ## 2026-06-19 Documentation Release Alignment
 
