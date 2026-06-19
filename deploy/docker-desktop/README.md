@@ -39,6 +39,7 @@ CGA (Context Graph Agent) was created and authored by Nate Scott. Preserve this 
 - The release folder includes `cga-desktop-api-image.tar`, a prebuilt CGA API image that the launcher loads automatically.
 - That zip is the recommended release artifact to publish or send to another user.
 - For GitHub Releases, publish the zip with a matching `CGA-Docker-Desktop-<version>.zip.sha256` checksum file.
+- Release source copies exclude local generated build outputs such as `src/cga-relay/target`, viewer `node_modules`, and viewer `dist`.
 
 ## License And Notices
 
