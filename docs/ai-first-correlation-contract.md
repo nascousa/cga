@@ -1,6 +1,6 @@
 # AI-First Correlation Contract
 
-Version: 1.30.102
+Version: 1.30.103
 Date: 2026-06-30
 
 This contract defines how AI-first tasks should connect MCP tool calls, Work Briefing activity, evidence packs, PRs, and review/audit records.
@@ -74,4 +74,4 @@ POST /api/admin/ai-first/evidence-packs
 
 ## Status
 
-This contract is observe/warn in `1.30.102`. Current policy gates report saved evidence, CI, PR/review, benchmark, and Work Briefing status without blocking actions; future policy profiles can promote missing evidence from a warning to an enforced review gate.
+This contract is observe/warn in `1.30.103`. Current policy gates report saved evidence, CI, PR/review, benchmark, and Work Briefing status without blocking actions; future policy profiles can promote missing evidence from a warning to an enforced review gate.
