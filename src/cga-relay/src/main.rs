@@ -8,7 +8,7 @@ use std::process;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const VERSION: &str = "1.30.100";
+const VERSION: &str = "1.30.101";
 const SERVER_NAME: &str = "cga-relay";
 const TRAY_ICON_LOGGED_IN_RESOURCE_ID: u16 = 1;
 const TRAY_ICON_LOGGED_OUT_RESOURCE_ID: u16 = 4;

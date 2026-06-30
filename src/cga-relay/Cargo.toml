@@ -1,6 +1,6 @@
 [package]
 name = "cga-relay"
-version = "1.30.100"
+version = "1.30.101"
 edition = "2021"
 
 [dependencies]

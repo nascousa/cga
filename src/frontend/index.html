@@ -1213,6 +1213,10 @@
       width: auto;
       min-width: 140px;
     }
+    .briefing-toolbar #ai-first-project-id {
+      width: 240px;
+      max-width: min(240px, 100%);
+    }
     .schedule-summary-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -3082,12 +3086,13 @@
       <div class="section-header">
         <h2>AI-First Readiness</h2>
         <div class="briefing-toolbar">
-          <input
+          <select
             id="ai-first-project-id"
-            list="briefing-project-options"
-            placeholder="Project ID or name"
-            onkeydown="if (event.key === 'Enter') { event.preventDefault(); loadAiFirstReadiness(); }"
-          />
+            title="Project readiness scope"
+            onchange="loadAiFirstReadiness()"
+          >
+            <option value="">All projects</option>
+          </select>
           <input id="ai-first-task-id" placeholder="Task ID" title="Optional task correlation filter" />
           <input id="ai-first-issue-id" placeholder="Issue/PBI" title="Optional issue or PBI correlation filter" />
           <input id="ai-first-pr-id" placeholder="PR" title="Optional pull request correlation filter" />
@@ -5418,22 +5423,31 @@ async function loadProjects() {
     if (p.project_id && p.project_name) _projectNameById[p.project_id] = p.project_name;
   });
   const briefingOptions = document.getElementById('briefing-project-options');
+  const seen = new Map();
+  _allProjects.forEach(p => {
+    if (p.project_id && !seen.has(p.project_id)) seen.set(p.project_id, p.project_name || '');
+  });
+  const entries = [...seen.entries()].sort((a, b) => {
+    const an = (a[1] || a[0]).toLowerCase();
+    const bn = (b[1] || b[0]).toLowerCase();
+    return an.localeCompare(bn);
+  });
   if (briefingOptions) {
     // Dedupe by project_id; show project name as the highlighted value, project_id as dim label.
-    const seen = new Map();
-    _allProjects.forEach(p => {
-      if (p.project_id && !seen.has(p.project_id)) seen.set(p.project_id, p.project_name || '');
-    });
-    const entries = [...seen.entries()].sort((a, b) => {
-      const an = (a[1] || a[0]).toLowerCase();
-      const bn = (b[1] || b[0]).toLowerCase();
-      return an.localeCompare(bn);
-    });
     briefingOptions.innerHTML = entries.map(([pid, name]) => {
       const display = name || pid;
       const tail = name ? pid : '';
       return `<option value="${esc(display)}" label="${esc(tail)}"></option>`;
     }).join('');
+  }
+  const aiFirstProjectSelect = document.getElementById('ai-first-project-id');
+  if (aiFirstProjectSelect) {
+    const selectedProjectId = aiFirstSelectedProjectId();
+    aiFirstProjectSelect.innerHTML = `<option value="">All projects</option>` + entries.map(([pid, name]) => {
+      const label = name ? `${name} (${pid})` : pid;
+      return `<option value="${esc(pid)}">${esc(label)}</option>`;
+    }).join('');
+    aiFirstProjectSelect.value = entries.some(([pid]) => pid === selectedProjectId) ? selectedProjectId : '';
   }
   // pre-load tokens for all projects (used by search)
   await Promise.all(_allProjects.map(async p => {
