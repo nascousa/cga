@@ -1213,9 +1213,74 @@
       width: auto;
       min-width: 140px;
     }
-    .briefing-toolbar #ai-first-project-id {
+    .ai-first-project-picker {
+      position: relative;
       width: 240px;
       max-width: min(240px, 100%);
+    }
+    .ai-first-project-button {
+      width: 100%;
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 7px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      cursor: pointer;
+      text-align: left;
+    }
+    .ai-first-project-button span:first-child {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .ai-first-project-menu {
+      display: none;
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0;
+      width: min(360px, calc(100vw - 24px));
+      max-height: 280px;
+      overflow-y: auto;
+      z-index: 80;
+      padding: 4px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 16px 34px rgba(0,0,0,.35);
+    }
+    .ai-first-project-picker.is-open .ai-first-project-menu {
+      display: block;
+    }
+    .ai-first-project-option {
+      width: 100%;
+      display: block;
+      padding: 7px 8px;
+      border: 0;
+      border-radius: 6px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      line-height: 1.25;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .ai-first-project-option:hover,
+    .ai-first-project-option:focus {
+      outline: none;
+      background: rgba(74,222,128,.08);
+    }
+    .ai-first-project-option.is-selected {
+      background: rgba(27, 99, 227, .22);
+      color: var(--text);
+      font-weight: 700;
     }
     .schedule-summary-grid {
       display: grid;
@@ -3086,13 +3151,23 @@
       <div class="section-header">
         <h2>AI-First Readiness</h2>
         <div class="briefing-toolbar">
-          <select
-            id="ai-first-project-id"
-            title="Project readiness scope"
-            onchange="loadAiFirstReadiness()"
-          >
-            <option value="">All projects</option>
-          </select>
+          <div class="ai-first-project-picker" id="ai-first-project-picker">
+            <input type="hidden" id="ai-first-project-id" value="" />
+            <button
+              type="button"
+              class="ai-first-project-button"
+              id="ai-first-project-button"
+              title="Project readiness scope"
+              aria-haspopup="listbox"
+              aria-expanded="false"
+              aria-controls="ai-first-project-menu"
+              onclick="toggleAiFirstProjectMenu(event)"
+            >
+              <span id="ai-first-project-label">All projects</span>
+              <span aria-hidden="true">▼</span>
+            </button>
+            <div class="ai-first-project-menu" id="ai-first-project-menu" role="listbox" aria-label="Project readiness scope"></div>
+          </div>
           <input id="ai-first-task-id" placeholder="Task ID" title="Optional task correlation filter" />
           <input id="ai-first-issue-id" placeholder="Issue/PBI" title="Optional issue or PBI correlation filter" />
           <input id="ai-first-pr-id" placeholder="PR" title="Optional pull request correlation filter" />
@@ -5030,6 +5105,84 @@ function aiFirstSelectedProjectId() {
   return _projectIdByName[raw] || raw;
 }
 
+function aiFirstProjectLabel(projectId, projectName) {
+  if (!projectId) return 'All projects';
+  return projectName ? `${projectName} (${projectId})` : projectId;
+}
+
+function closeAiFirstProjectMenu() {
+  const picker = document.getElementById('ai-first-project-picker');
+  const button = document.getElementById('ai-first-project-button');
+  if (picker) picker.classList.remove('is-open');
+  if (button) button.setAttribute('aria-expanded', 'false');
+}
+
+function toggleAiFirstProjectMenu(event) {
+  if (event) event.stopPropagation();
+  const picker = document.getElementById('ai-first-project-picker');
+  const button = document.getElementById('ai-first-project-button');
+  if (!picker) return;
+  const shouldOpen = !picker.classList.contains('is-open');
+  closeAiFirstProjectMenu();
+  if (shouldOpen) {
+    picker.classList.add('is-open');
+    if (button) button.setAttribute('aria-expanded', 'true');
+    const selected = picker.querySelector('.ai-first-project-option.is-selected') || picker.querySelector('.ai-first-project-option');
+    if (selected) selected.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function setAiFirstProjectSelection(projectId, label) {
+  const input = document.getElementById('ai-first-project-id');
+  const labelEl = document.getElementById('ai-first-project-label');
+  const menu = document.getElementById('ai-first-project-menu');
+  const value = projectId || '';
+  if (input) input.value = value;
+  if (labelEl) labelEl.textContent = label || 'All projects';
+  if (menu) {
+    menu.querySelectorAll('.ai-first-project-option').forEach(option => {
+      const selected = (option.getAttribute('data-ai-first-project-value') || '') === value;
+      option.classList.toggle('is-selected', selected);
+      option.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+  }
+}
+
+function selectAiFirstProject(projectId) {
+  const projectName = _projectNameById[projectId] || '';
+  setAiFirstProjectSelection(projectId, aiFirstProjectLabel(projectId, projectName));
+  closeAiFirstProjectMenu();
+  loadAiFirstReadiness();
+}
+
+function renderAiFirstProjectPicker(entries, selectedProjectId) {
+  const menu = document.getElementById('ai-first-project-menu');
+  if (!menu) return;
+  const activeProjectId = entries.some(([projectId]) => projectId === selectedProjectId) ? selectedProjectId : '';
+  const options = [['', 'All projects']].concat(entries.map(([projectId, projectName]) => [projectId, aiFirstProjectLabel(projectId, projectName)]));
+  menu.innerHTML = options.map(([projectId, label]) => `
+    <button
+      type="button"
+      class="ai-first-project-option${projectId === activeProjectId ? ' is-selected' : ''}"
+      role="option"
+      aria-selected="${projectId === activeProjectId ? 'true' : 'false'}"
+      data-ai-first-project-value="${esc(projectId)}"
+      title="${esc(label)}"
+      onclick="selectAiFirstProject(this.getAttribute('data-ai-first-project-value') || '')"
+    >${esc(label)}</button>
+  `).join('');
+  const activeEntry = entries.find(([projectId]) => projectId === activeProjectId);
+  setAiFirstProjectSelection(activeProjectId, activeEntry ? aiFirstProjectLabel(activeEntry[0], activeEntry[1]) : 'All projects');
+}
+
+document.addEventListener('click', event => {
+  const target = event.target;
+  if (!(target instanceof Element) || !target.closest('#ai-first-project-picker')) closeAiFirstProjectMenu();
+});
+document.addEventListener('keydown', event => {
+  if (event.key === 'Escape') closeAiFirstProjectMenu();
+});
+
 function aiFirstEvidenceRequestBody() {
   const projectId = aiFirstSelectedProjectId();
   const body = { project_id: projectId, limit: 25 };
@@ -5440,15 +5593,7 @@ async function loadProjects() {
       return `<option value="${esc(display)}" label="${esc(tail)}"></option>`;
     }).join('');
   }
-  const aiFirstProjectSelect = document.getElementById('ai-first-project-id');
-  if (aiFirstProjectSelect) {
-    const selectedProjectId = aiFirstSelectedProjectId();
-    aiFirstProjectSelect.innerHTML = `<option value="">All projects</option>` + entries.map(([pid, name]) => {
-      const label = name ? `${name} (${pid})` : pid;
-      return `<option value="${esc(pid)}">${esc(label)}</option>`;
-    }).join('');
-    aiFirstProjectSelect.value = entries.some(([pid]) => pid === selectedProjectId) ? selectedProjectId : '';
-  }
+  renderAiFirstProjectPicker(entries, aiFirstSelectedProjectId());
   // pre-load tokens for all projects (used by search)
   await Promise.all(_allProjects.map(async p => {
     try { _tokensCache[p.id] = await api('GET', `/auth/projects/${p.id}/tokens`); }
