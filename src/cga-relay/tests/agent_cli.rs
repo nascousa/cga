@@ -221,7 +221,9 @@ fn tray_status_reports_notification_area_mode_without_starting_loop() {
     assert!(out.contains("\"icon_variant\":\"gray\""));
     assert!(out.contains("\"logged_in\":false"));
     assert!(out.contains("\"username\":\"\""));
-    assert!(out.contains("\"menu\":[\"Not signed in\",\"Settings\",\"Logs\",\"About\",\"Exit\"]"));
+    assert!(out.contains(
+        "\"menu\":[\"Not signed in\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Exit\"]"
+    ));
     assert!(out.contains("\"name\":\"CGA-Relay\""));
     assert!(out.contains("\"user_groups\":[]"));
     assert!(out.contains("\"user_group_count\":0"));
@@ -279,7 +281,7 @@ fn tray_status_uses_color_icon_and_username_when_signed_in() {
     assert!(out.contains("\"logged_in\":true"));
     assert!(out.contains("\"username\":\"dev@example.com\""));
     assert!(out.contains(
-        "\"menu\":[\"Signed in: dev@example.com\",\"Settings\",\"Logs\",\"About\",\"Exit\"]"
+        "\"menu\":[\"Signed in: dev@example.com\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Exit\"]"
     ));
     assert!(out.contains("\"user_groups\":[\"Team Alpha\"]"));
     assert!(out.contains("\"user_group_count\":1"));
