@@ -8,7 +8,7 @@ use std::process;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const VERSION: &str = "1.30.99";
+const VERSION: &str = "1.30.103";
 const SERVER_NAME: &str = "cga-relay";
 const TRAY_ICON_LOGGED_IN_RESOURCE_ID: u16 = 1;
 const TRAY_ICON_LOGGED_OUT_RESOURCE_ID: u16 = 4;
@@ -432,9 +432,13 @@ fn tray_icon_variant(login: &TrayLoginStatus) -> &'static str {
 
 fn tray_menu_json(login: &TrayLoginStatus) -> String {
     format!(
-        "[\"{}\",\"Settings\",\"Logs\",\"About\",\"Exit\"]",
+        "[\"{}\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Exit\"]",
         json_escape(&tray_login_menu_label(login))
     )
+}
+
+fn cga_admin_web_url(config: &AgentConfig) -> String {
+    format!("{}/admin/ai-first", config.api_base_url)
 }
 
 fn tray_tooltip(config: &AgentConfig, login: &TrayLoginStatus) -> String {
@@ -2622,10 +2626,10 @@ fn unescape_field(value: &str) -> String {
 #[cfg(windows)]
 mod windows_tray {
     use super::{
-        tray_icon_resource_id, tray_login_menu_label, tray_login_status, tray_tooltip,
-        tray_user_group_summary, AgentConfig, AgentError, AgentResult, TrayLoginStatus,
-        PROJECT_AUTHOR, PROJECT_DISPLAY_NAME, PROJECT_LICENSE, PROJECT_REPOSITORY, PROJECT_SUPPORT,
-        SERVER_NAME, TRAY_ICON_LOGGED_IN_RESOURCE_ID, VERSION,
+        cga_admin_web_url, tray_icon_resource_id, tray_login_menu_label, tray_login_status,
+        tray_tooltip, tray_user_group_summary, AgentConfig, AgentError, AgentResult,
+        TrayLoginStatus, PROJECT_AUTHOR, PROJECT_DISPLAY_NAME, PROJECT_LICENSE, PROJECT_REPOSITORY,
+        PROJECT_SUPPORT, SERVER_NAME, TRAY_ICON_LOGGED_IN_RESOURCE_ID, VERSION,
     };
     use std::ffi::c_void;
     use std::mem::{size_of, zeroed};
@@ -2653,6 +2657,7 @@ mod windows_tray {
     const ID_MENU_ABOUT: usize = 1002;
     const ID_MENU_LOGS: usize = 1003;
     const ID_MENU_EXIT: usize = 1004;
+    const ID_MENU_OPEN_CGA_WEB: usize = 1005;
     const MF_DISABLED: Uint = 0x00000002;
     const MF_GRAYED: Uint = 0x00000001;
     const MF_SEPARATOR: Uint = 0x00000800;
@@ -2742,6 +2747,7 @@ mod windows_tray {
         config: AgentConfig,
         login: TrayLoginStatus,
         account_label: Vec<u16>,
+        cga_admin_web_url: Vec<u16>,
         settings_url: Vec<u16>,
         log_dir: Vec<u16>,
         status_text: Vec<u16>,
@@ -2911,6 +2917,7 @@ mod windows_tray {
             config: config.clone(),
             login,
             account_label: wide_null(&account_label),
+            cga_admin_web_url: wide_null(&cga_admin_web_url(config)),
             settings_url: wide_null(settings_url),
             log_dir: wide_null(&config.log_dir.to_string_lossy()),
             status_text: wide_null(&status_text),
@@ -2926,7 +2933,7 @@ mod windows_tray {
         };
         let user_groups = tray_user_group_summary(config, login);
         format!(
-            "CGA-Relay is running.\nRelay: {}\nUser Groups: {}\nAccount: {}\nRight-click for Settings, Logs, About, or Exit.",
+            "CGA-Relay is running.\nRelay: {}\nUser Groups: {}\nAccount: {}\nRight-click for Open CGA Web, Settings, Logs, About, or Exit.",
             config.agent_id, user_groups, account
         )
     }
@@ -3003,6 +3010,7 @@ mod windows_tray {
             );
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
         }
+        append_menu_item(menu, ID_MENU_OPEN_CGA_WEB, "Open CGA Web");
         append_menu_item(menu, ID_MENU_SETTINGS, "Settings");
         append_menu_item(menu, ID_MENU_LOGS, "Logs");
         append_menu_item(menu, ID_MENU_ABOUT, "About");
@@ -3065,6 +3073,11 @@ mod windows_tray {
 
     unsafe fn handle_menu_command(hwnd: Hwnd, command: usize) {
         match command {
+            ID_MENU_OPEN_CGA_WEB => {
+                if let Some(state) = tray_state_from_hwnd(hwnd) {
+                    open_shell_target(hwnd, state.cga_admin_web_url.as_ptr());
+                }
+            }
             ID_MENU_SETTINGS => {
                 if let Some(state) = tray_state_from_hwnd(hwnd) {
                     open_shell_target(hwnd, state.settings_url.as_ptr());

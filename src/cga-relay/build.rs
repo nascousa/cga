@@ -99,34 +99,35 @@ fn icon_pixel(
         return apply_icon_variant((0, 0, 0, 0), variant);
     }
 
-    let mut color = (18, 117, 127, 255);
+    let mut color = (15, 132, 62, 255);
     if x + y > width + width / 5 {
-        color = (36, 159, 128, 255);
+        color = (34, 172, 82, 255);
     }
 
-    let stroke = (width / 8).max(2);
-    let left = width / 4;
-    let right = width * 3 / 4;
-    let top = height / 4;
-    let mid = height / 2;
-    let bottom = height * 3 / 4;
-    let vertical = x >= left && x <= left + stroke && y >= top && y <= bottom;
-    let top_bar = x >= left && x <= right && y >= top && y <= top + stroke;
-    let middle_bar =
-        x >= left && x <= right && y >= mid.saturating_sub(stroke / 2) && y <= mid + stroke / 2;
-    let right_bowl = x >= right.saturating_sub(stroke) && x <= right && y >= top && y <= mid;
-    let diagonal_leg =
-        y > mid && y <= bottom && x >= left + (y - mid) / 2 && x <= left + (y - mid) / 2 + stroke;
-    if vertical || top_bar || middle_bar || right_bowl || diagonal_leg {
+    if letter_r_pixel(x, y, width, height) {
         return apply_icon_variant((245, 255, 250, 255), variant);
     }
 
-    let dot_radius = (width / 10).max(1);
-    if inside_circle(x, y, right, top, dot_radius) || inside_circle(x, y, right, bottom, dot_radius)
-    {
-        return apply_icon_variant((178, 255, 120, 255), variant);
-    }
     apply_icon_variant(color, variant)
+}
+
+fn letter_r_pixel(x: usize, y: usize, width: usize, height: usize) -> bool {
+    let stroke = (width / 6).max(2);
+    let left = width / 4;
+    let right = width * 3 / 4;
+    let top = height / 5;
+    let mid = height / 2;
+    let bottom = height * 4 / 5;
+    let vertical = x >= left && x < left + stroke && y >= top && y <= bottom;
+    let top_bar = x >= left && x <= right && y >= top && y < top + stroke;
+    let middle_bar =
+        x >= left && x <= right && y >= mid.saturating_sub(stroke / 2) && y < mid + stroke;
+    let bowl_right = x + stroke > right && x <= right && y >= top && y <= mid;
+    let leg_offset = y.saturating_sub(mid);
+    let diagonal_start = left + stroke + leg_offset / 2;
+    let diagonal_leg = y > mid && y <= bottom && x >= diagonal_start && x < diagonal_start + stroke;
+
+    vertical || top_bar || middle_bar || bowl_right || diagonal_leg
 }
 
 fn apply_icon_variant(color: (u8, u8, u8, u8), variant: IconVariant) -> (u8, u8, u8, u8) {

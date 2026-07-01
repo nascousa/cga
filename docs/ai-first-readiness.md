@@ -1,7 +1,7 @@
 # AI-First Readiness And Evidence MVP
 
-Version: 1.30.99
-Date: 2026-06-19
+Version: 1.30.103
+Date: 2026-06-30
 
 This MVP starts the CGA AI-first control-plane work with two admin-only APIs. The first measures whether a project has the basic engineering conditions for AI-first work. The second exports an observe-only evidence pack for review, team planning, or retrospectives.
 
