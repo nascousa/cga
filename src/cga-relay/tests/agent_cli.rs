@@ -787,6 +787,49 @@ fn mcp_tools_call_uses_account_session_when_project_token_env_is_missing() {
 }
 
 #[test]
+fn mcp_index_git_incremental_uses_local_git_and_forwards_incremental_paths() {
+    if Command::new("git").arg("--version").output().is_err() {
+        return;
+    }
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut stream = listener.accept().unwrap().0;
+        let mut buffer = [0_u8; 8192];
+        let read = stream.read(&mut buffer).unwrap();
+        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+        assert!(request.contains("POST /api/project/cga-relay/mcp-tool HTTP/1.1"));
+        assert!(request.contains("\"tool\":\"index_incremental\""));
+        assert!(request.contains("\"changed_paths\""));
+        assert!(request.contains("a.py"));
+        assert!(!request.contains("\"tool\":\"index_git_incremental\""));
+        let body = "{\"ok\":true,\"project_id\":\"PROJECT123\"}";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+
+    let tmp = TestDir::new("mcp-git-incremental");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join("src")).unwrap();
+    let init = Command::new("git").arg("init").arg(&repo).output().unwrap();
+    assert!(init.status.success(), "stderr: {}", stderr(&init));
+    fs::write(repo.join("src").join("a.py"), "print('a')\n").unwrap();
+    let api = format!("http://127.0.0.1:{port}");
+    let config = write_safe_config(tmp.path(), &repo, &[("API_BASE_URL", api)]);
+    let input = "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\",\"params\":{\"name\":\"index_git_incremental\",\"arguments\":{}}}\n";
+    let output = run_mcp(&config, input, &[("CGA_TEST_API_KEY", TEST_SECRET)]);
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("\"project_id\":\"PROJECT123\""));
+    server.join().unwrap();
+}
+
+#[test]
 fn mcp_tools_call_rejects_non_loopback_plaintext_cga_url() {
     let tmp = TestDir::new("mcp-remote-http");
     let repo = tmp.path().join("repo");
@@ -900,7 +943,8 @@ fn project_mcp_config_launches_new_agent_not_legacy_per_project_server() {
         .join("examples")
         .join("cga-relay.mcp.json");
     let text = fs::read_to_string(config_path).expect("example MCP config should exist");
-    assert!(text.contains("\"transport\": \"stdio\""));
+    assert!(text.contains("\"type\": \"stdio\""));
+    assert!(!text.contains("\"transport\""));
     assert!(text.contains("cga-relay"));
     assert!(text.contains("\"mcp\""));
     assert!(text.contains("\"--config\""));

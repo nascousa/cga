@@ -300,6 +300,7 @@ class ProjectIndexTriggerOut(BaseModel):
     changed_count: int = 0
     destructive_count: int = 0
     reason: str | None = None
+    message: str | None = None
 
 
 class ProjectIndexRecoveryOut(BaseModel):

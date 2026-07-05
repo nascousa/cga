@@ -2,16 +2,13 @@
   "servers": {
     "cga-relay": {
       "type": "stdio",
-      "transport": "stdio",
       "command": "cga-relay",
       "args": [
         "mcp",
         "--config",
-        "%USERPROFILE%\\.cga\\agent.env"
+        "%USERPROFILE%\\.cga\\my-project.env"
       ],
       "env": {
-        "CGA_API_KEY_ENV": "CGA_API_KEY",
-        "CGA_DEVELOPER_TOKEN_ENV": "CGA_DEVELOPER_TOKEN",
         "CGA_COMMUNICATION_PROFILE": "CRYSTALS-CNSA-2.0",
         "CGA_TRANSPORT_SCOPE": "local-ipc"
       }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -459,6 +460,28 @@ async def test_collect_git_changed_paths_parses_modified_and_untracked():
 
 
 @pytest.mark.asyncio
+async def test_collect_git_changed_paths_uses_normalized_repo_path():
+    proc = _FakeGitStatusProcess(stdout=" M src/a.py\n")
+    create_proc = AsyncMock(return_value=proc)
+    with patch("backend.tools.server._normalize_repo_path", return_value="/repos/project"), patch(
+        "backend.tools.server.asyncio.create_subprocess_exec", new=create_proc
+    ):
+        result = await mcp_srv._collect_git_changed_paths("D:/Repos/project", include_untracked=True)
+
+    assert result == {"changed_paths": ["src/a.py"], "destructive_paths": []}
+    create_proc.assert_awaited_once_with(
+        "git",
+        "-C",
+        "/repos/project",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+
+@pytest.mark.asyncio
 async def test_collect_git_changed_paths_marks_delete_and_rename_destructive():
     proc = _FakeGitStatusProcess(stdout=" D src/old.py\nR  src/old2.py -> src/new2.py\n")
     with patch("backend.tools.server.asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
@@ -532,38 +555,34 @@ async def test_index_repo_changes_can_still_promote_to_full_on_destructive_git_c
 
 
 @pytest.mark.asyncio
-async def test_index_repo_changes_falls_back_to_full_when_git_binary_missing():
+async def test_index_repo_changes_requires_relay_when_git_binary_missing():
     mcp_srv._producer = _mock_producer("5014-0")
     with patch(
         "backend.tools.server._collect_git_changed_paths",
         side_effect=FileNotFoundError("git"),
     ):
         result = await mcp_srv.index_repo_changes(repo_path="/repo")
-    assert result["status"] == "queued"
-    assert result["mode"] == "full"
+    assert result["status"] == "relay_required"
+    assert result["mode"] == "relay"
     assert result["reason"] == "git_unavailable"
-    mcp_srv._producer.submit_full_index.assert_awaited_once_with(
-        "/repo",
-        project_name="contextgraph",
-    )
+    assert "cga-relay" in result["message"]
+    mcp_srv._producer.submit_full_index.assert_not_called()
     mcp_srv._producer.submit_incremental_index.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_index_repo_changes_falls_back_to_full_when_git_status_fails():
+async def test_index_repo_changes_requires_relay_when_git_status_fails():
     mcp_srv._producer = _mock_producer("5015-0")
     with patch(
         "backend.tools.server._collect_git_changed_paths",
         side_effect=RuntimeError("git status failed"),
     ):
         result = await mcp_srv.index_repo_changes(repo_path="/repo")
-    assert result["status"] == "queued"
-    assert result["mode"] == "full"
+    assert result["status"] == "relay_required"
+    assert result["mode"] == "relay"
     assert result["reason"] == "git_status_failed"
-    mcp_srv._producer.submit_full_index.assert_awaited_once_with(
-        "/repo",
-        project_name="contextgraph",
-    )
+    assert "cga-relay" in result["message"]
+    mcp_srv._producer.submit_full_index.assert_not_called()
     mcp_srv._producer.submit_incremental_index.assert_not_called()
 
 

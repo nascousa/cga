@@ -6048,6 +6048,11 @@ async function triggerProjectIndex(projectId, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Submitting\u2026'; }
   try {
     const result = await api('POST', `/auth/projects/${projectId}/index`);
+    if (result.status === 'relay_required') {
+      toast(result.message || 'Use CGA-Relay for this repository; backend cannot read the local git worktree.', 'error');
+      await updateIndexStatus();
+      return;
+    }
     const mode = result.mode || 'incremental';
     toast(`Reindex queued: ${mode}`);
     await updateIndexStatus();

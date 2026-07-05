@@ -4,7 +4,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process;
+use std::process::{self, Command};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2146,8 +2146,106 @@ fn mcp_tools_json() -> String {
     .join(",")
 }
 
+#[derive(Debug, Default)]
+struct GitIncrementalPaths {
+    paths: Vec<String>,
+    destructive_count: usize,
+}
+
+fn collect_git_incremental_paths(
+    root: &Path,
+    include_untracked: bool,
+) -> AgentResult<GitIncrementalPaths> {
+    let untracked_flag = if include_untracked {
+        "--untracked-files=all"
+    } else {
+        "--untracked-files=no"
+    };
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .arg("status")
+        .arg("--porcelain=v1")
+        .arg(untracked_flag)
+        .output()
+        .map_err(|err| AgentError(format!("git status failed: {err}")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if stderr.trim().is_empty() {
+            stdout.trim()
+        } else {
+            stderr.trim()
+        };
+        return Err(AgentError(format!("git status failed: {detail}")));
+    }
+
+    let mut paths = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut destructive_count = 0_usize;
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        collect_git_status_line(root, line, &mut paths, &mut seen, &mut destructive_count);
+    }
+    Ok(GitIncrementalPaths {
+        paths,
+        destructive_count,
+    })
+}
+
+fn collect_git_status_line(
+    root: &Path,
+    line: &str,
+    paths: &mut Vec<String>,
+    seen: &mut BTreeSet<String>,
+    destructive_count: &mut usize,
+) {
+    let bytes = line.as_bytes();
+    if bytes.len() < 3 {
+        return;
+    }
+    let x = bytes[0] as char;
+    let y = bytes[1] as char;
+    let path_part = line[3..].trim();
+    if path_part.is_empty() {
+        return;
+    }
+
+    if x == 'R' || y == 'R' {
+        if let Some((old_path, new_path)) = path_part.split_once(" -> ") {
+            push_git_path(root, old_path, paths, seen);
+            *destructive_count += 1;
+            push_git_path(root, new_path, paths, seen);
+        } else {
+            push_git_path(root, path_part, paths, seen);
+        }
+        return;
+    }
+
+    if x == 'D' || y == 'D' {
+        push_git_path(root, path_part, paths, seen);
+        *destructive_count += 1;
+        return;
+    }
+
+    if x != ' ' || y != ' ' {
+        push_git_path(root, path_part, paths, seen);
+    }
+}
+
+fn push_git_path(
+    root: &Path,
+    rel_path: &str,
+    paths: &mut Vec<String>,
+    seen: &mut BTreeSet<String>,
+) {
+    let absolute = display_path(&root.join(rel_path));
+    if seen.insert(absolute.clone()) {
+        paths.push(absolute);
+    }
+}
+
 fn handle_mcp_tool_call(config: &AgentConfig, message: &str, id: &str) -> String {
-    let Some(tool_name) = json_string_field(message, "name") else {
+    let Some(mut tool_name) = json_string_field(message, "name") else {
         return rpc_error(id, -32602, "missing tool name");
     };
     let mut arguments = json_object_field(message, "arguments").unwrap_or_else(|| "{}".to_string());
@@ -2184,6 +2282,30 @@ fn handle_mcp_tool_call(config: &AgentConfig, message: &str, id: &str) -> String
         json_string_field(&arguments, "project_id").unwrap_or_else(|| config.project_id.clone());
     if !arguments.contains("\"project_id\"") {
         arguments = insert_json_field(&arguments, "project_id", &project_id);
+    }
+    if tool_name == "index_git_incremental" {
+        let include_untracked = json_bool_field(&arguments, "include_untracked").unwrap_or(true);
+        let local_changes =
+            match collect_git_incremental_paths(&config.project_root, include_untracked) {
+                Ok(changes) => changes,
+                Err(error) => return rpc_error(id, -32000, &error.0),
+            };
+        if local_changes.paths.is_empty() {
+            let body = format!(
+                "{{\"ok\":true,\"tool\":\"index_git_incremental\",\"backend_tool\":\"index_incremental\",\"project_id\":\"{}\",\"result\":{{\"status\":\"noop\",\"mode\":\"none\",\"changed_count\":0,\"destructive_count\":0,\"repo_path\":\"{}\"}}}}",
+                json_escape(&project_id),
+                json_escape(&display_path(&config.project_root))
+            );
+            return rpc_text_result(id, &body);
+        }
+        arguments = format!(
+            "{{\"repo_path\":\"{}\",\"changed_paths\":{},\"project_id\":\"{}\",\"destructive_count\":{}}}",
+            json_escape(&display_path(&config.project_root)),
+            string_array_json(&local_changes.paths),
+            json_escape(&project_id),
+            local_changes.destructive_count
+        );
+        tool_name = "index_incremental".to_string();
     }
     let request_body = format!(
         "{{\"tool\":\"{}\",\"arguments\":{},\"project_id\":\"{}\"}}",
@@ -2464,6 +2586,14 @@ fn json_field(text: &str, field: &str) -> Option<String> {
         end = index + ch.len_utf8();
     }
     Some(tail[..end].trim().to_string())
+}
+
+fn json_bool_field(text: &str, field: &str) -> Option<bool> {
+    match json_field(text, field)?.as_str() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
 }
 
 fn json_object_field(text: &str, field: &str) -> Option<String> {
