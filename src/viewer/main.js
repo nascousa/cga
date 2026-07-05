@@ -168,6 +168,7 @@ const state = {
 
 const elements = {
   workspace: document.getElementById('workspace'),
+  openFalkorBrowser: document.getElementById('open-falkor-browser'),
   copyFalkorUrl: document.getElementById('copy-falkor-url'),
   togglePanel: document.getElementById('toggle-panel'),
   projectSelect: document.getElementById('project-select'),
@@ -295,6 +296,31 @@ async function api(path) {
     throw new Error(response.status === 401 ? `${detail}. Open Admin and sign in first.` : detail)
   }
   return payload
+}
+
+async function postJson(path) {
+  const headers = { Accept: 'application/json' }
+  const jwt = token()
+  if (jwt) headers.Authorization = `Bearer ${jwt}`
+  const response = await fetch(path, { method: 'POST', headers })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) {
+    const detail = payload.detail || response.statusText
+    throw new Error(response.status === 401 ? `${detail}. Open Admin and sign in first.` : detail)
+  }
+  return payload
+}
+
+async function openFalkorBrowser(event) {
+  event?.preventDefault()
+  try {
+    const launch = await postJson('/api/admin/fdb-browser/launch')
+    if (!launch?.url) throw new Error('FalkorDB Browser URL was not returned.')
+    elements.openFalkorBrowser.href = launch.url
+    window.open(launch.url, '_blank', 'noopener,noreferrer')
+  } catch (error) {
+    setStatus(error.message, 'error')
+  }
 }
 
 function selectedEdgeTypes() {
@@ -1974,6 +2000,7 @@ async function loadProjects() {
 }
 
 function wireEvents() {
+  elements.openFalkorBrowser?.addEventListener('click', openFalkorBrowser)
   elements.copyFalkorUrl?.addEventListener('click', async () => {
     try {
       await copyTextToClipboard(FALKOR_CONNECTION_URL)
