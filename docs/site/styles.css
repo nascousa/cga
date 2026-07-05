@@ -207,7 +207,7 @@ a { color: inherit; text-decoration: none; }
 
 .demo-band { display: grid; grid-template-columns: minmax(0, 0.7fr) minmax(360px, 1fr); gap: 28px; align-items: center; }
 .demo-frame { margin: 0; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; background: rgba(2, 6, 12, 0.9); box-shadow: var(--shadow); }
-.demo-video { display: block; width: 100%; aspect-ratio: 16 / 9; background: #05070d; object-fit: cover; }
+.demo-media { display: block; width: 100%; aspect-ratio: 16 / 9; background: #05070d; object-fit: cover; }
 .demo-frame figcaption { padding: 14px 16px 16px; color: var(--muted); font-size: 14px; line-height: 1.5; }
 
 .split-band { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(320px, 0.8fr); gap: 28px; align-items: center; }
