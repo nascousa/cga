@@ -6044,12 +6044,83 @@ async function updateIndexStatus() {
   }
 }
 
+const CGA_RELAY_PORTS = Object.freeze(Array.from({ length: 20 }, (_, i) => 17860 + i));
+
+function projectExternalIdForDbId(projectId) {
+  const project = _allProjects.find(item => Number(item.id) === Number(projectId));
+  return project?.project_id || '';
+}
+
+async function relayFetchJson(url, options = {}, timeoutMs = 700) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      ...options,
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    const text = await response.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = { ok: false, error: text }; }
+    if (!response.ok) throw new Error(data?.error || data?.detail || response.statusText);
+    return data;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function findLocalRelay(projectExternalId) {
+  for (const port of CGA_RELAY_PORTS) {
+    try {
+      const status = await relayFetchJson(`http://127.0.0.1:${port}/status.json`);
+      if (status?.project_id === projectExternalId && status?.index_endpoint) {
+        return status;
+      }
+    } catch {
+      // Most ports in the scan range will not have a relay listener.
+    }
+  }
+  return null;
+}
+
+async function triggerLocalRelayIndex(projectId) {
+  const projectExternalId = projectExternalIdForDbId(projectId);
+  if (!projectExternalId) throw new Error('Project external ID is unavailable for local relay lookup.');
+  const relay = await findLocalRelay(projectExternalId);
+  if (!relay) throw new Error('Local CGA-Relay is not running for this project.');
+  return await relayFetchJson(relay.index_endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ project_id: projectExternalId, include_untracked: true }),
+  }, 20000);
+}
+
+function toastRelayIndexResult(result) {
+  const inner = result?.result || {};
+  if (inner.status === 'noop') {
+    toast('CGA-Relay found no local git changes');
+    return;
+  }
+  if (inner.status === 'queued') {
+    toast(`CGA-Relay reindex queued: ${inner.mode || 'incremental'}`);
+    return;
+  }
+  toast(`CGA-Relay reindex result: ${inner.status || result?.status || 'ok'}`);
+}
+
 async function triggerProjectIndex(projectId, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Submitting\u2026'; }
   try {
     const result = await api('POST', `/auth/projects/${projectId}/index`);
     if (result.status === 'relay_required') {
-      toast(result.message || 'Use CGA-Relay for this repository; backend cannot read the local git worktree.', 'error');
+      try {
+        toast('Contacting local CGA-Relay...');
+        const relayResult = await triggerLocalRelayIndex(projectId);
+        toastRelayIndexResult(relayResult);
+      } catch (relayError) {
+        toast(relayError.message || result.message || 'Use CGA-Relay for this repository; backend cannot read the local git worktree.', 'error');
+      }
       await updateIndexStatus();
       return;
     }

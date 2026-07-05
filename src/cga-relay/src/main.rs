@@ -42,6 +42,7 @@ struct AgentConfig {
     include_globs: Vec<String>,
     exclude_globs: Vec<String>,
     max_file_bytes: u64,
+    browser_allowed_origins: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -560,6 +561,10 @@ fn load_config(path: &str) -> AgentResult<AgentConfig> {
         include_globs: split_globs(&values["INCLUDE_GLOBS"]),
         exclude_globs: split_globs(&values["EXCLUDE_GLOBS"]),
         max_file_bytes,
+        browser_allowed_origins: values
+            .get("BROWSER_ALLOWED_ORIGINS")
+            .map(|value| split_origins(value))
+            .unwrap_or_default(),
     })
 }
 
@@ -586,6 +591,15 @@ fn split_globs(value: &str) -> Vec<String> {
         .map(str::trim)
         .filter(|item| !item.is_empty())
         .map(|item| item.replace('\\', "/"))
+        .collect()
+}
+
+fn split_origins(value: &str) -> Vec<String> {
+    value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .filter_map(normalize_origin)
         .collect()
 }
 
@@ -891,12 +905,24 @@ fn settings_status_json(config: &AgentConfig) -> String {
     let groups = load_account_groups(config).unwrap_or_default();
     let projects = projects_from_account_groups(&groups);
     let settings_url = fs::read_to_string(settings_url_path(config)).unwrap_or_default();
+    let settings_url = settings_url.trim();
+    let relay_base_url = settings_url
+        .strip_suffix("/settings")
+        .unwrap_or(settings_url);
+    let index_endpoint = if relay_base_url.is_empty() {
+        String::new()
+    } else {
+        format!("{relay_base_url}/api/index-git-incremental")
+    };
     format!(
-        "{{\"enabled\":true,\"page\":\"local-account-settings\",\"login_endpoint\":\"/login\",\"projects_endpoint\":\"/api/auth/me/groups\",\"session_configured\":{},\"username\":\"{}\",\"project_count\":{},\"settings_url\":\"{}\"}}",
+        "{{\"enabled\":true,\"page\":\"local-account-settings\",\"project_id\":\"{}\",\"project_root\":\"{}\",\"login_endpoint\":\"/login\",\"projects_endpoint\":\"/api/auth/me/groups\",\"index_endpoint\":\"{}\",\"session_configured\":{},\"username\":\"{}\",\"project_count\":{},\"settings_url\":\"{}\"}}",
+        json_escape(&config.project_id),
+        json_escape(&display_path(&config.project_root)),
+        json_escape(&index_endpoint),
         session.contains_key("access_token"),
         json_escape(session.get("username").map(String::as_str).unwrap_or("")),
         projects.len(),
-        json_escape(settings_url.trim())
+        json_escape(settings_url)
     )
 }
 
@@ -932,25 +958,45 @@ fn handle_settings_connection(config: &AgentConfig, mut stream: TcpStream) -> Ag
             request.method, request.path, request.body
         ),
     );
-    let response = match (request.method.as_str(), request.path.as_str()) {
-        ("GET", "/") | ("GET", "/settings") => html_response(&settings_page_html(config, None)),
-        ("POST", "/login") => match handle_settings_login(config, &request.body) {
-            Ok(message) => html_response(&settings_page_html(config, Some(&message))),
-            Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
-        },
-        ("POST", "/refresh") => match handle_settings_refresh(config) {
-            Ok(message) => html_response(&settings_page_html(config, Some(&message))),
-            Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
-        },
-        ("POST", "/logout") => {
-            let _ = fs::remove_file(account_session_path(config));
-            let _ = fs::remove_file(account_projects_path(config));
-            let _ = fs::remove_file(account_groups_path(config));
-            html_response(&settings_page_html(config, Some("Signed out.")))
+    let response = if request_has_blocked_origin(config, &request) {
+        plain_response(403, "Forbidden")
+    } else {
+        match (request.method.as_str(), request.path.as_str()) {
+            ("OPTIONS", _) => empty_response(200),
+            ("GET", "/") | ("GET", "/settings") => html_response(&settings_page_html(config, None)),
+            ("POST", "/login") => match handle_settings_login(config, &request.body) {
+                Ok(message) => html_response(&settings_page_html(config, Some(&message))),
+                Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
+            },
+            ("POST", "/refresh") => match handle_settings_refresh(config) {
+                Ok(message) => html_response(&settings_page_html(config, Some(&message))),
+                Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
+            },
+            ("POST", "/logout") => {
+                let _ = fs::remove_file(account_session_path(config));
+                let _ = fs::remove_file(account_projects_path(config));
+                let _ = fs::remove_file(account_groups_path(config));
+                html_response(&settings_page_html(config, Some("Signed out.")))
+            }
+            ("GET", "/status.json") => json_response(&settings_status_json(config)),
+            ("POST", "/api/index-git-incremental") => {
+                let arguments = if request.body.trim().is_empty() {
+                    "{}"
+                } else {
+                    request.body.trim()
+                };
+                match run_index_git_incremental(config, arguments) {
+                    Ok(body) => json_response(&body),
+                    Err(error) => json_response_status(
+                        500,
+                        &format!("{{\"ok\":false,\"error\":\"{}\"}}", json_escape(&error.0)),
+                    ),
+                }
+            }
+            _ => plain_response(404, "Not Found"),
         }
-        ("GET", "/status.json") => json_response(&settings_status_json(config)),
-        _ => plain_response(404, "Not Found"),
     };
+    let response = add_cors_headers(config, &request, &response);
     stream
         .write_all(response.as_bytes())
         .map_err(|err| AgentError(format!("settings response failed: {err}")))
@@ -959,7 +1005,16 @@ fn handle_settings_connection(config: &AgentConfig, mut stream: TcpStream) -> Ag
 struct LocalHttpRequest {
     method: String,
     path: String,
+    headers: BTreeMap<String, String>,
     body: String,
+}
+
+impl LocalHttpRequest {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .get(&name.to_ascii_lowercase())
+            .map(String::as_str)
+    }
 }
 
 fn read_http_request(stream: &mut TcpStream) -> AgentResult<LocalHttpRequest> {
@@ -992,8 +1047,10 @@ fn read_http_request(stream: &mut TcpStream) -> AgentResult<LocalHttpRequest> {
     let raw_path = request_parts.next().unwrap_or("/");
     let path = raw_path.split('?').next().unwrap_or("/").to_string();
     let mut content_length = 0_usize;
+    let mut headers = BTreeMap::new();
     for line in lines {
         if let Some((name, value)) = line.split_once(':') {
+            headers.insert(name.trim().to_ascii_lowercase(), value.trim().to_string());
             if name.eq_ignore_ascii_case("content-length") {
                 content_length = value.trim().parse::<usize>().unwrap_or(0);
             }
@@ -1011,7 +1068,12 @@ fn read_http_request(stream: &mut TcpStream) -> AgentResult<LocalHttpRequest> {
     }
     let body_end = body_start + content_length.min(buffer.len().saturating_sub(body_start));
     let body = String::from_utf8_lossy(&buffer[body_start..body_end]).into_owned();
-    Ok(LocalHttpRequest { method, path, body })
+    Ok(LocalHttpRequest {
+        method,
+        path,
+        headers,
+        body,
+    })
 }
 
 fn handle_settings_login(config: &AgentConfig, body: &str) -> AgentResult<String> {
@@ -1345,6 +1407,14 @@ fn json_response(body: &str) -> String {
     http_response(200, "application/json; charset=utf-8", body)
 }
 
+fn json_response_status(status: u16, body: &str) -> String {
+    http_response(status, "application/json; charset=utf-8", body)
+}
+
+fn empty_response(status: u16) -> String {
+    http_response(status, "text/plain; charset=utf-8", "")
+}
+
 fn plain_response(status: u16, body: &str) -> String {
     http_response(status, "text/plain; charset=utf-8", body)
 }
@@ -1352,6 +1422,8 @@ fn plain_response(status: u16, body: &str) -> String {
 fn http_response(status: u16, content_type: &str, body: &str) -> String {
     let reason = match status {
         200 => "OK",
+        403 => "Forbidden",
+        500 => "Internal Server Error",
         404 => "Not Found",
         _ => "OK",
     };
@@ -1359,6 +1431,73 @@ fn http_response(status: u16, content_type: &str, body: &str) -> String {
         "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
+}
+
+fn add_cors_headers(config: &AgentConfig, request: &LocalHttpRequest, response: &str) -> String {
+    let Some(origin) = request.header("origin") else {
+        return response.to_string();
+    };
+    if !is_browser_origin_allowed(config, origin) {
+        return response.to_string();
+    }
+    let Some((head, body)) = response.split_once("\r\n\r\n") else {
+        return response.to_string();
+    };
+    format!(
+        "{head}\r\nAccess-Control-Allow-Origin: {}\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, X-CGA-Relay-Intent\r\nAccess-Control-Allow-Private-Network: true\r\nVary: Origin\r\n\r\n{body}",
+        json_escape(origin)
+    )
+}
+
+fn request_has_blocked_origin(config: &AgentConfig, request: &LocalHttpRequest) -> bool {
+    request
+        .header("origin")
+        .is_some_and(|origin| !is_browser_origin_allowed(config, origin))
+}
+
+fn is_browser_origin_allowed(config: &AgentConfig, origin: &str) -> bool {
+    let Some(normalized) = normalize_origin(origin) else {
+        return false;
+    };
+    if origin_is_loopback(&normalized) {
+        return true;
+    }
+    if normalize_origin(&config.api_base_url).as_ref() == Some(&normalized) {
+        return true;
+    }
+    if normalize_origin(&config.control_api_base_url).as_ref() == Some(&normalized) {
+        return true;
+    }
+    config
+        .browser_allowed_origins
+        .iter()
+        .any(|allowed| allowed == &normalized)
+}
+
+fn normalize_origin(value: &str) -> Option<String> {
+    let trimmed = value.trim().trim_end_matches('/');
+    let (scheme, rest) = trimmed.split_once("://")?;
+    let scheme = scheme.to_ascii_lowercase();
+    if scheme != "http" && scheme != "https" {
+        return None;
+    }
+    let authority = rest.split('/').next().unwrap_or("");
+    if authority.is_empty() || authority.contains('@') {
+        return None;
+    }
+    Some(format!("{scheme}://{authority}"))
+}
+
+fn origin_is_loopback(origin: &str) -> bool {
+    let Some((_, rest)) = origin.split_once("://") else {
+        return false;
+    };
+    let host = rest
+        .rsplit_once(':')
+        .map(|(host, _)| host)
+        .unwrap_or(rest)
+        .trim_matches(['[', ']']);
+    is_loopback_host(host)
 }
 
 fn html_escape(value: &str) -> String {
@@ -1761,6 +1900,33 @@ mod tests {
             "target/**",
             "src/cga-relay/target/debug/object.o"
         ));
+    }
+
+    #[test]
+    fn browser_origins_require_loopback_or_allowlist() {
+        let config = AgentConfig {
+            agent_id: "agent".to_string(),
+            api_base_url: "http://127.0.0.1:18091".to_string(),
+            control_api_base_url: "http://127.0.0.1:18091".to_string(),
+            api_key_env: "CGA_TEST_API_KEY".to_string(),
+            account_email: String::new(),
+            account_token_env: "CGA_TEST_DEVELOPER_TOKEN".to_string(),
+            project_id: "PROJECT123".to_string(),
+            project_root: PathBuf::from("repo"),
+            state_dir: PathBuf::from("state"),
+            log_dir: PathBuf::from("logs"),
+            include_globs: Vec::new(),
+            exclude_globs: Vec::new(),
+            max_file_bytes: 1024,
+            browser_allowed_origins: split_origins("http://cga-admin.example.test:18091"),
+        };
+
+        assert!(is_browser_origin_allowed(&config, "http://127.0.0.1:17860"));
+        assert!(is_browser_origin_allowed(
+            &config,
+            "http://cga-admin.example.test:18091"
+        ));
+        assert!(!is_browser_origin_allowed(&config, "https://example.com"));
     }
 }
 
@@ -2244,8 +2410,82 @@ fn push_git_path(
     }
 }
 
+fn run_index_git_incremental(config: &AgentConfig, arguments: &str) -> AgentResult<String> {
+    let project_id =
+        json_string_field(arguments, "project_id").unwrap_or_else(|| config.project_id.clone());
+    if project_id != config.project_id {
+        return Err(AgentError(
+            "project_id does not match this local relay config".to_string(),
+        ));
+    }
+    let include_untracked = json_bool_field(arguments, "include_untracked").unwrap_or(true);
+    let local_changes = collect_git_incremental_paths(&config.project_root, include_untracked)?;
+    if local_changes.paths.is_empty() {
+        return Ok(format!(
+            "{{\"ok\":true,\"tool\":\"index_git_incremental\",\"backend_tool\":\"index_incremental\",\"project_id\":\"{}\",\"result\":{{\"status\":\"noop\",\"mode\":\"none\",\"changed_count\":0,\"destructive_count\":0,\"repo_path\":\"{}\"}}}}",
+            json_escape(&project_id),
+            json_escape(&display_path(&config.project_root))
+        ));
+    }
+    let incremental_arguments = format!(
+        "{{\"repo_path\":\"{}\",\"changed_paths\":{},\"project_id\":\"{}\",\"destructive_count\":{}}}",
+        json_escape(&display_path(&config.project_root)),
+        string_array_json(&local_changes.paths),
+        json_escape(&project_id),
+        local_changes.destructive_count
+    );
+    post_cga_relay_tool(
+        config,
+        "index_incremental",
+        &incremental_arguments,
+        &project_id,
+    )
+}
+
+fn post_cga_relay_tool(
+    config: &AgentConfig,
+    tool_name: &str,
+    arguments: &str,
+    project_id: &str,
+) -> AgentResult<String> {
+    let request_body = format!(
+        "{{\"tool\":\"{}\",\"arguments\":{},\"project_id\":\"{}\"}}",
+        json_escape(tool_name),
+        arguments,
+        json_escape(project_id)
+    );
+    if let Ok(api_key) = env::var(&config.api_key_env) {
+        http_post_json(
+            config,
+            &format!("{}/api/project/cga-relay/mcp-tool", config.api_base_url),
+            &[
+                ("Authorization", format!("Bearer {api_key}")),
+                ("X-Project-ID", project_id.to_string()),
+            ],
+            &request_body,
+        )
+    } else if let Ok(session) = read_account_session(config) {
+        if let Some(access_token) = session.get("access_token") {
+            http_post_json(
+                config,
+                &format!("{}/api/auth/cga-relay/mcp-tool", config.api_base_url),
+                &[("Authorization", format!("Bearer {access_token}"))],
+                &request_body,
+            )
+        } else {
+            Err(AgentError(
+                "API key env var is not set and CGA account login is missing".to_string(),
+            ))
+        }
+    } else {
+        Err(AgentError(
+            "API key env var is not set and CGA account login is missing".to_string(),
+        ))
+    }
+}
+
 fn handle_mcp_tool_call(config: &AgentConfig, message: &str, id: &str) -> String {
-    let Some(mut tool_name) = json_string_field(message, "name") else {
+    let Some(tool_name) = json_string_field(message, "name") else {
         return rpc_error(id, -32602, "missing tool name");
     };
     let mut arguments = json_object_field(message, "arguments").unwrap_or_else(|| "{}".to_string());
@@ -2284,63 +2524,13 @@ fn handle_mcp_tool_call(config: &AgentConfig, message: &str, id: &str) -> String
         arguments = insert_json_field(&arguments, "project_id", &project_id);
     }
     if tool_name == "index_git_incremental" {
-        let include_untracked = json_bool_field(&arguments, "include_untracked").unwrap_or(true);
-        let local_changes =
-            match collect_git_incremental_paths(&config.project_root, include_untracked) {
-                Ok(changes) => changes,
-                Err(error) => return rpc_error(id, -32000, &error.0),
-            };
-        if local_changes.paths.is_empty() {
-            let body = format!(
-                "{{\"ok\":true,\"tool\":\"index_git_incremental\",\"backend_tool\":\"index_incremental\",\"project_id\":\"{}\",\"result\":{{\"status\":\"noop\",\"mode\":\"none\",\"changed_count\":0,\"destructive_count\":0,\"repo_path\":\"{}\"}}}}",
-                json_escape(&project_id),
-                json_escape(&display_path(&config.project_root))
-            );
-            return rpc_text_result(id, &body);
-        }
-        arguments = format!(
-            "{{\"repo_path\":\"{}\",\"changed_paths\":{},\"project_id\":\"{}\",\"destructive_count\":{}}}",
-            json_escape(&display_path(&config.project_root)),
-            string_array_json(&local_changes.paths),
-            json_escape(&project_id),
-            local_changes.destructive_count
-        );
-        tool_name = "index_incremental".to_string();
+        let call = run_index_git_incremental(config, &arguments);
+        return match call {
+            Ok(body) => rpc_text_result(id, &body),
+            Err(error) => rpc_error(id, -32000, &error.0),
+        };
     }
-    let request_body = format!(
-        "{{\"tool\":\"{}\",\"arguments\":{},\"project_id\":\"{}\"}}",
-        json_escape(&tool_name),
-        arguments,
-        json_escape(&project_id)
-    );
-    let call = if let Ok(api_key) = env::var(&config.api_key_env) {
-        http_post_json(
-            config,
-            &format!("{}/api/project/cga-relay/mcp-tool", config.api_base_url),
-            &[
-                ("Authorization", format!("Bearer {api_key}")),
-                ("X-Project-ID", project_id),
-            ],
-            &request_body,
-        )
-    } else if let Ok(session) = read_account_session(config) {
-        if let Some(access_token) = session.get("access_token") {
-            http_post_json(
-                config,
-                &format!("{}/api/auth/cga-relay/mcp-tool", config.api_base_url),
-                &[("Authorization", format!("Bearer {access_token}"))],
-                &request_body,
-            )
-        } else {
-            Err(AgentError(
-                "API key env var is not set and CGA account login is missing".to_string(),
-            ))
-        }
-    } else {
-        Err(AgentError(
-            "API key env var is not set and CGA account login is missing".to_string(),
-        ))
-    };
+    let call = post_cga_relay_tool(config, &tool_name, &arguments, &project_id);
     match call {
         Ok(body) => rpc_text_result(id, &body),
         Err(error) => rpc_error(id, -32000, &error.0),

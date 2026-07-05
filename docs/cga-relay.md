@@ -68,7 +68,7 @@ cga-relay mcp --config %USERPROFILE%\.cga\relay.env
 
 ## Settings Page
 
-When `tray` starts, CGA-Relay also starts a loopback-only dark-mode settings page on `127.0.0.1` and records its URL under `STATE_DIR/settings-url.txt`. The tray `Settings` menu item opens this relay settings page, not the CGA admin settings screen.
+When `tray` starts, CGA-Relay also starts a loopback-only dark-mode settings page on `127.0.0.1` and records its URL under `STATE_DIR/settings-url.txt`. The tray `Settings` menu item opens this relay settings page, not the CGA admin settings screen. The same loopback server exposes `GET /status.json` for browser discovery and `POST /api/index-git-incremental` for the CGA Admin page to trigger local git-aware incremental indexing.
 
 The settings page lets the developer sign in with a CGA account and review current user groups. After login, CGA-Relay calls `/api/auth/me` and `/api/auth/me/groups`, caches the account session and current user's group-to-project mappings under `STATE_DIR`, derives local relay project access only from those group mappings, and imports group-authorized projects with valid local `repo_path` values into the local registry under the `account` namespace. Use the Settings page `Refresh access` button after CGA admin group or project membership changes to reload the current account's group-authorized project access without signing out. The cached account session is local machine state and must not be copied into repository files or committed.
 
@@ -112,7 +112,9 @@ For a multi-project workspace, use one machine-local env file per CGA project so
 
 If CGA runs on another LAN host or in remote Docker, do not point coding agents directly at the remote SSE endpoint. The agent should start local `cga-relay`; relay reads the local git worktree and forwards indexing requests to CGA.
 
-For plaintext HTTP, relay intentionally accepts only loopback CGA URLs such as `http://127.0.0.1:18091`. If your CGA service is reachable at a LAN address such as `http://192.168.1.240:18091`, expose it to relay through an approved local loopback proxy or a deployment-approved PQC/hybrid-PQC TLS endpoint, then set both `API_BASE_URL` and `CONTROL_API_BASE_URL` in the machine-local env file to that local endpoint.
+For plaintext HTTP, relay intentionally accepts only loopback CGA URLs such as `http://127.0.0.1:18091`. If your CGA service is reachable at a LAN address such as `http://<cga-host>:18091`, expose it to relay through an approved local loopback proxy or a deployment-approved PQC/hybrid-PQC TLS endpoint, then set both `API_BASE_URL` and `CONTROL_API_BASE_URL` in the machine-local env file to that local endpoint.
+
+If the CGA Admin page itself is served from a LAN origin, add that browser origin to `BROWSER_ALLOWED_ORIGINS` so the Admin page can call the relay's loopback HTTP endpoint. Keep this list narrow and origin-only, for example `http://<cga-admin-host>:18091`.
 
 Example machine-local config for a LAN CGA behind a loopback proxy:
 
@@ -120,6 +122,7 @@ Example machine-local config for a LAN CGA behind a loopback proxy:
 AGENT_ID=dev-machine-codex
 API_BASE_URL=http://127.0.0.1:18091
 CONTROL_API_BASE_URL=http://127.0.0.1:18091
+BROWSER_ALLOWED_ORIGINS=http://<cga-admin-host>:18091
 API_KEY_ENV=CONTEXTGRAPH_MCP_TOKEN
 ACCOUNT_TOKEN_ENV=CGA_DEVELOPER_TOKEN
 PROJECT_ID=replace-with-cga-project-id
@@ -130,7 +133,7 @@ LOG_DIR=%USERPROFILE%\.cga\logs
 
 Store token values only in the named environment variables or the relay account session. Never write token values into the env file or MCP pointer.
 
-When a backend Admin Reindex request cannot run git in the API container, CGA returns `relay_required`. That is expected for remote Docker setups. Use `index_git_incremental` through `cga-relay`; relay computes `git status` on the developer machine and forwards `index_incremental` with the local changed paths.
+When a backend Admin Reindex request cannot run git in the API container, CGA returns `relay_required`. That is expected for remote Docker setups. If `cga-relay tray --config ...` is running for the same `PROJECT_ID`, the Admin page probes `127.0.0.1:17860-17879/status.json` and calls the matched relay's `POST /api/index-git-incremental` endpoint. Relay computes `git status` on the developer machine and forwards `index_incremental` with the local changed paths. If the browser cannot find a matching local relay, start or sign in to the tray relay, then retry Reindex.
 
 ## CRYSTALS/CNSA 2.0 Communication Profile
 

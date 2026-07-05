@@ -313,6 +313,11 @@ fn settings_render_shows_local_account_login_page() {
         "version\t1\nproject\tAlpha Project\tALPHA12345\tC:/repo\t1\nproject\tBeta Project\tBETA123456\tC:/other\t1\n",
     )
     .unwrap();
+    fs::write(
+        state.join("settings-url.txt"),
+        "http://127.0.0.1:17860/settings\n",
+    )
+    .unwrap();
 
     let output = run_agent(&["settings", "--config", config.to_str().unwrap(), "--render"]);
 
@@ -346,7 +351,11 @@ fn settings_render_shows_local_account_login_page() {
     assert!(status.status.success(), "stderr: {}", stderr(&status));
     let status_out = stdout(&status);
     assert!(status_out.contains("\"page\":\"local-account-settings\""));
+    assert!(status_out.contains("\"project_id\":\"PROJECT123\""));
+    assert!(status_out.contains("\"project_root\":"));
     assert!(status_out.contains("\"projects_endpoint\":\"/api/auth/me/groups\""));
+    assert!(status_out
+        .contains("\"index_endpoint\":\"http://127.0.0.1:17860/api/index-git-incremental\""));
     assert!(status_out.contains("\"project_count\":1"));
     assert!(status_out.contains("\"session_configured\":true"));
     assert!(status_out.contains("\"username\":\"dev@example.com\""));

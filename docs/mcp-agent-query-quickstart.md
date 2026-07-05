@@ -81,7 +81,7 @@ Point VS Code at the local relay executable, not the remote SSE endpoint:
 
 The shared config does not store secrets. When VS Code launches `cga-relay` over stdio, that hop is local IPC; relay-to-CGA HTTP requests add the CRYSTALS/CNSA 2.0 profile headers automatically and reject non-loopback plaintext HTTP.
 
-For cross-LAN setups, expose the remote CGA service through an approved local loopback proxy or a deployment-approved PQC/hybrid-PQC TLS endpoint, then set `API_BASE_URL` and `CONTROL_API_BASE_URL` in the relay env file to that local/protected endpoint. If the Admin Reindex button returns `relay_required`, use the relay MCP tool `index_git_incremental`; it computes git changes on the developer machine and sends `index_incremental` to CGA.
+For cross-LAN setups, expose the remote CGA service through an approved local loopback proxy or a deployment-approved PQC/hybrid-PQC TLS endpoint, then set `API_BASE_URL` and `CONTROL_API_BASE_URL` in the relay env file to that local/protected endpoint. If the Admin page is served from a LAN URL, add that exact origin to `BROWSER_ALLOWED_ORIGINS`, such as `http://<cga-admin-host>:18091`. Keep `cga-relay tray --config ...` running for the project: when Admin Reindex returns `relay_required`, the browser probes the local relay status endpoint on `127.0.0.1:17860-17879` and triggers `index_git_incremental` through the matching relay. The same operation remains available as the relay MCP tool `index_git_incremental` for agents.
 
 ## 4) Run minimal query client
 
