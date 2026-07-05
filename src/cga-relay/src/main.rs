@@ -8,6 +8,12 @@ use std::process::{self, Command};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 const VERSION: &str = "1.30.103";
 const SERVER_NAME: &str = "cga-relay";
 const TRAY_ICON_LOGGED_IN_RESOURCE_ID: u16 = 1;
@@ -2327,7 +2333,10 @@ fn collect_git_incremental_paths(
     } else {
         "--untracked-files=no"
     };
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    let output = command
         .arg("-C")
         .arg(root)
         .arg("status")

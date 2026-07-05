@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -251,7 +252,8 @@ def test_retrieve_context_records_task_correlation_in_trace_args():
 @pytest.mark.asyncio
 async def test_index_full_queues_job():
     mcp_srv._producer = _mock_producer("5000-0")
-    result = await mcp_srv.index_full(repo_path="/repo/myproject")
+    with patch("backend.tools.server._resolve_repo_root", return_value=Path("/repo/myproject")):
+        result = await mcp_srv.index_full(repo_path="/repo/myproject")
     assert result["status"] == "queued"
     assert result["stream_id"] == "5000-0"
     assert result["job_id"] == "job-1"
@@ -264,12 +266,24 @@ async def test_index_full_queues_job():
 @pytest.mark.asyncio
 async def test_index_full_uses_explicit_project_name_override():
     mcp_srv._producer = _mock_producer("5000-1")
-    result = await mcp_srv.index_full(repo_path="/repo/osagent", project_name="osagent")
+    with patch("backend.tools.server._resolve_repo_root", return_value=Path("/repo/osagent")):
+        result = await mcp_srv.index_full(repo_path="/repo/osagent", project_name="osagent")
     assert result["job_id"] == "job-1"
     mcp_srv._producer.submit_full_index.assert_awaited_once_with(
         "/repo/osagent",
         project_name="osagent",
     )
+
+
+@pytest.mark.asyncio
+async def test_index_full_requires_visible_repo_path():
+    mcp_srv._producer = _mock_producer("5000-2")
+    with patch("backend.tools.server._resolve_repo_root", side_effect=FileNotFoundError("missing")):
+        result = await mcp_srv.index_full(repo_path="D:/Repos/missing")
+    assert result["status"] == "relay_required"
+    assert result["reason"] == "repo_path_unavailable"
+    assert "cannot read" in result["message"]
+    mcp_srv._producer.submit_full_index.assert_not_called()
 
 
 @pytest.mark.asyncio

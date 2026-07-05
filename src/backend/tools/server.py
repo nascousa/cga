@@ -35,7 +35,7 @@ from backend.auth.context import _current_project_external_id
 from backend.agent.query_strategy import run_cg_first_strategy
 from backend.graph.registry import GraphRegistry
 from backend.graph import schema as S
-from backend.indexer.pipeline import _normalize_repo_path
+from backend.indexer.pipeline import _normalize_repo_path, _resolve_repo_root
 from backend.perf.context_quality import benchmark_context_quality as run_context_quality_benchmark
 from backend.perf.token_efficiency import benchmark_token_efficiency as run_token_efficiency_benchmark
 from backend.tools.producer import MCPProducer
@@ -359,6 +359,23 @@ async def index_full(repo_path: str, project_name: str | None = None) -> dict:
     """Enqueue a full index job for the given repository path."""
     if not _producer:
         raise RuntimeError("MCP server not initialized")
+    try:
+        _resolve_repo_root(repo_path)
+    except FileNotFoundError:
+        log.warning(
+            "index_full.repo_unavailable",
+            repo_path=repo_path,
+            fallback_mode="cga_relay_or_mount_required",
+        )
+        return {
+            "status": "relay_required",
+            "mode": "relay",
+            "reason": "repo_path_unavailable",
+            "changed_count": 0,
+            "destructive_count": 0,
+            "repo_path": repo_path,
+            "message": "The CGA indexer cannot read this repository path. Mount the checkout into the API/indexer runtime or run a local cga-relay configured for this project.",
+        }
     resolved_project_name = _resolve_project_name(project_name)
     submitted = await _producer.submit_full_index(repo_path, project_name=resolved_project_name)
     # Invalidate cache so stale reads are avoided after re-index

@@ -1521,12 +1521,12 @@ async def trigger_project_full_index(
         project_name=project["project_name"],
         repo_path=repo_path,
         status=result.get("status", "queued"),
-        mode="full",
+        mode=result.get("mode", "full"),
         job_id=result.get("job_id"),
         stream_id=result.get("stream_id"),
         changed_count=0,
         destructive_count=0,
-        reason="admin_triggered_full",
+        reason=result.get("reason") or "admin_triggered_full",
         message=result.get("message"),
     )
 

@@ -3595,7 +3595,7 @@
     </div>
     <div class="form-group">
       <label>Repository Path</label>
-      <input id="np-repo-path" placeholder="e.g. /repos/MyProject or D:/Repos/MyProject" />
+      <input id="np-repo-path" placeholder="e.g. /repos/MyProject or D:/Repos/MyProject" onblur="this.value=normalizeRepoPath(this.value)" />
       <small style="color:var(--text-dim);font-size:0.78em">Stored path used for indexing. Decouples indexing from project name.</small>
     </div>
     <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
@@ -4075,6 +4075,10 @@ function toast(msg, type = 'success') {
 
 function jsArg(value) {
   return esc(JSON.stringify(String(value ?? '')));
+}
+
+function normalizeRepoPath(value) {
+  return String(value ?? '').trim().replace(/\\/g, '/');
 }
 
 async function copyText(value, label) {
@@ -6146,6 +6150,11 @@ async function triggerProjectFullIndex(projectId, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Submitting\u2026'; }
   try {
     const result = await api('POST', `/auth/projects/${projectId}/index-full`);
+    if (result.status === 'relay_required') {
+      toast(result.message || 'CGA indexer cannot read this repository path; configure a local relay for this project or mount the repo into the backend runtime.', 'error');
+      await updateIndexStatus();
+      return;
+    }
     toast('Full index queued');
     await updateIndexStatus();
   } catch (e) {
@@ -6583,7 +6592,7 @@ function openEditProject(id) {
   document.getElementById('np-key').value = p.project_name;
   document.getElementById('np-url').value = p.upstream_url || '';
   document.getElementById('np-desc').value = p.description || '';
-  document.getElementById('np-repo-path').value = p.repo_path || '';
+  document.getElementById('np-repo-path').value = normalizeRepoPath(p.repo_path || '');
   openModal('modal-project');
 }
 async function submitProjectModal() {
@@ -6595,7 +6604,7 @@ async function submitProjectModal() {
         project_name: key,
         upstream_url: document.getElementById('np-url').value.trim(),
         description: document.getElementById('np-desc').value.trim(),
-        repo_path: document.getElementById('np-repo-path').value.trim()
+        repo_path: normalizeRepoPath(document.getElementById('np-repo-path').value)
       });
       closeModal('modal-project'); toast('Project updated'); await loadProjects();
     } else {
@@ -6603,7 +6612,7 @@ async function submitProjectModal() {
         project_name: key,
         upstream_url: document.getElementById('np-url').value.trim(),
         description: document.getElementById('np-desc').value.trim(),
-        repo_path: document.getElementById('np-repo-path').value.trim()
+        repo_path: normalizeRepoPath(document.getElementById('np-repo-path').value)
       });
       closeModal('modal-project'); toast('Project created'); await loadProjects();
     }

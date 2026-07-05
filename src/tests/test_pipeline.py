@@ -154,6 +154,53 @@ def test_index_full_skips_repo_delete_when_repo_not_yet_indexed(tmp_path: Path) 
     assert any(call.args[0] == S.MERGE_REPO for call in calls)
 
 
+def test_index_full_fails_when_repo_path_is_not_visible(tmp_path: Path) -> None:
+    graph = MagicMock()
+    pipeline = IndexPipeline(graph)
+
+    missing_repo = tmp_path / "missing-repo"
+
+    try:
+        pipeline.index_full(str(missing_repo))
+    except FileNotFoundError as exc:
+        assert "Repository path is not visible" in str(exc)
+    else:
+        raise AssertionError("Expected index_full to fail for an invisible repository path")
+
+    graph.query.assert_not_called()
+
+
+def test_index_incremental_resolves_relative_paths_under_repo_root(tmp_path: Path) -> None:
+    graph = MagicMock()
+    query_result = MagicMock()
+    query_result.result_set = []
+    graph.query.return_value = query_result
+
+    repo_root = tmp_path / "repo"
+    source_dir = repo_root / "src"
+    source_dir.mkdir(parents=True)
+    source_file = source_dir / "service.py"
+    source_file.write_text("def render(x):\n    return x\n", encoding="utf-8")
+
+    pipeline = IndexPipeline(graph)
+    pipeline._index_file = MagicMock(return_value={
+        "files": 1,
+        "skipped": 0,
+        "symbols": 0,
+        "calls": 0,
+        "imports": 0,
+        "variables": 0,
+        "variable_flows": 0,
+        "errors": 0,
+    })
+    pipeline._count_symbols = MagicMock(return_value=0)
+
+    pipeline.index_incremental(str(repo_root), ["src/service.py"])
+
+    pipeline._index_file.assert_called_once()
+    assert pipeline._index_file.call_args.args[1] == str(source_file)
+
+
 def test_index_file_clears_existing_file_subgraph_before_rewrite(tmp_path: Path) -> None:
     graph = MagicMock()
     repo_root = tmp_path / "repo"
