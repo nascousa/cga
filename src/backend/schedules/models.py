@@ -6,7 +6,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-ScheduledTaskType = Literal["agent_activation", "browseragent_task", "http_request"]
+ScheduledTaskType = Literal["agent_activation", "browseragent_task", "http_request", "extension_task"]
 
 
 class ScheduledTaskBase(BaseModel):
@@ -46,7 +46,7 @@ class ScheduledTaskBase(BaseModel):
 
     @model_validator(mode="after")
     def validate_enabled_target(self) -> "ScheduledTaskBase":
-        if self.enabled and not self.target_url:
+        if self.enabled and self.task_type != "extension_task" and not self.target_url:
             raise ValueError("target_url is required for enabled scheduled tasks")
         return self
 

@@ -68,6 +68,7 @@ from backend.integrations.azure_devops import AzureDevOpsEnricher, AZURE_DEVOPS_
 from backend.indexer.consumer import IndexerConsumer
 from backend.cga_relay.router import account_router as cga_relay_account_router
 from backend.cga_relay.router import router as cga_relay_router
+from backend.extensions.router import router as extensions_router
 from backend.tools.producer import MCPProducer
 from backend.tools import server as mcp_server
 from backend.perf.context_quality import benchmark_context_quality, ContextQualityInputError
@@ -80,7 +81,7 @@ from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.103"
+APP_VERSION = "1.30.110"
 AUTH_SCHEMA_VERSION = 1
 GRAPH_SCHEMA_VERSION = 1
 RUNTIME_CONFIG_VERSION = 1
@@ -412,6 +413,7 @@ app.include_router(cga_relay_router, prefix="/api")
 app.include_router(cga_relay_account_router, prefix="/api")
 app.include_router(viewer_router, prefix="/api")
 app.include_router(schedules_router, prefix="/api")
+app.include_router(extensions_router, prefix="/api")
 
 
 def _truncate(value: str | None, limit: int) -> str | None:

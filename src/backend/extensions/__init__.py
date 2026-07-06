@@ -1,0 +1,1 @@
+"""CGA extension host package."""

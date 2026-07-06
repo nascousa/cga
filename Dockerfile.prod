@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source
 COPY src/ ./src/
+COPY extensions/ ./extensions/
 
 # Entrypoint: init DB then start server
 COPY docker-entrypoint.sh /entrypoint.sh

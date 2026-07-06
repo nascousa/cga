@@ -857,6 +857,26 @@
       text-align: center;
     }
     .project-actions { display: flex; justify-content: center; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+    .project-actions.schedule-actions { gap: 4px; flex-wrap: nowrap; }
+    .btn.schedule-action-btn {
+      width: 26px;
+      height: 26px;
+      padding: 0 !important;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 26px;
+    }
+    .schedule-action-btn svg {
+      width: 14px;
+      height: 14px;
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      pointer-events: none;
+    }
     .token-type-badge {
       padding: 2px 8px; border-radius: 999px; font-size: 11px;
       background: #1e2a3a; color: #6ab3e3; border: 1px solid rgba(106,179,227,.3);
@@ -1316,6 +1336,46 @@
     .schedule-summary-cell strong[data-schedule-status="failed"] { color: var(--danger); }
     .schedule-summary-cell strong[data-schedule-status="running"] { color: var(--info); }
     .schedule-summary-cell strong[data-schedule-status="empty"] { color: var(--muted); }
+    .extension-layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+    }
+    .extension-layout .settings-card { height: 100%; }
+    .extension-form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .extension-form-grid .wide { grid-column: 1 / -1; }
+    .extension-finding-list {
+      display: grid;
+      gap: 8px;
+    }
+    .extension-finding-card {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      gap: 8px 10px;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(10,14,22,.46);
+    }
+    .extension-finding-card strong {
+      color: var(--text);
+      font-size: 13px;
+    }
+    .extension-finding-card .mono {
+      grid-column: 2;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 980px) {
+      .extension-layout,
+      .extension-form-grid { grid-template-columns: 1fr; }
+      .extension-form-grid .wide { grid-column: auto; }
+    }
     .schedule-editor-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1494,6 +1554,18 @@
       align-items: center;
       justify-content: space-between;
       gap: 10px;
+    }
+    .briefing-collapsible-head > :first-child,
+    .briefing-section-head > :first-child {
+      min-width: 0;
+    }
+    .briefing-section-actions {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
     }
     .briefing-collapsible-head {
       margin-bottom: 6px;
@@ -2551,6 +2623,7 @@
       <button class="tab-btn" id="tab-report-btn" style="display:none" onclick="switchTab('report',this)">Report</button>
       <button class="tab-btn" id="tab-ai-first-btn" style="display:none" onclick="switchTab('ai-first',this)">AI-First</button>
       <button class="tab-btn active" id="tab-projects-btn" onclick="switchTab('projects',this)">Project</button>
+      <button class="tab-btn" id="tab-extensions-btn" style="display:none" onclick="switchTab('extensions',this)">Extension</button>
       <button class="tab-btn" id="tab-schedule-btn" style="display:none" onclick="switchTab('schedule',this)">Schedule</button>
       <button class="tab-btn" id="tab-users-btn" onclick="switchTab('users',this)">User</button>
       <button class="tab-btn" id="tab-audit-btn" onclick="switchTab('audit',this)">Audit</button>
@@ -2628,6 +2701,123 @@
         </table>
       </div>
       <div class="pagination-wrap" id="projects-pagination"></div>
+    </div>
+
+    <!-- EXTENSIONS (admin only) -->
+    <div class="pane" id="pane-extensions">
+      <div class="section-header">
+        <h2>Extension</h2>
+        <div class="briefing-toolbar">
+          <button class="btn btn-sm" onclick="loadExtensions()">Refresh</button>
+          <button class="btn btn-primary btn-sm" onclick="runSelectedExtension(this)">Run Now</button>
+          <button class="btn btn-sm btn-accent" onclick="scheduleSelectedExtension()">Schedule Scan</button>
+        </div>
+      </div>
+
+      <div class="schedule-summary-grid">
+        <div class="schedule-summary-cell"><span>Extension</span><strong id="extension-summary-name">—</strong></div>
+        <div class="schedule-summary-cell"><span>Scope</span><strong id="extension-summary-project">Platform</strong></div>
+        <div class="schedule-summary-cell"><span>Last Severity</span><strong id="extension-summary-severity" data-schedule-status="empty">—</strong></div>
+        <div class="schedule-summary-cell"><span>Findings</span><strong id="extension-summary-findings">0</strong></div>
+      </div>
+
+      <div class="extension-layout">
+        <section class="briefing-section">
+          <div class="briefing-section-head">
+            <div>
+              <span class="briefing-kicker">Catalog</span>
+              <h3 id="extension-title">Platform extension</h3>
+            </div>
+            <span id="extension-version" class="pill pill-gray">—</span>
+          </div>
+          <div class="settings-card">
+            <div class="settings-row settings-form-row">
+              <label for="extension-select">Extension</label>
+              <span class="settings-control"><select id="extension-select" onchange="onExtensionSelectionChanged()"></select></span>
+            </div>
+            <div class="settings-row settings-form-row">
+              <label>Scope</label>
+              <span class="settings-control"><span class="pill pill-blue">Platform</span></span>
+            </div>
+            <div class="settings-row settings-form-row">
+              <label>Status</label>
+              <span class="settings-control"><span id="extension-enabled-pill" class="pill pill-gray">—</span></span>
+            </div>
+            <div class="settings-row settings-form-row">
+              <label>Last Run</label>
+              <span class="settings-control"><span id="extension-last-run" class="mono">—</span></span>
+            </div>
+          </div>
+        </section>
+
+        <section class="briefing-section">
+          <div class="briefing-section-head">
+            <div>
+              <span class="briefing-kicker">Configuration</span>
+              <h3>Azure Policy monitor</h3>
+            </div>
+            <button class="btn btn-primary btn-sm" onclick="saveSelectedExtensionConfig(this)">Save Config</button>
+          </div>
+          <div class="settings-card">
+            <div class="extension-form-grid">
+              <div class="form-group">
+                <label>Enabled</label>
+                <select id="extension-config-enabled">
+                  <option value="true">Enabled</option>
+                  <option value="false">Disabled</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Baseline Cloud</label>
+                <input id="extension-config-baseline" placeholder="AllEnvironments" />
+              </div>
+              <div class="form-group wide">
+                <label>Repository Path</label>
+                <input id="extension-config-repo-path" placeholder="D:\\Repos\\azure-policy" />
+              </div>
+              <div class="form-group wide">
+                <label>Policy Root</label>
+                <input id="extension-config-policy-root" placeholder="settings/BuiltInPoliciesV2" />
+              </div>
+              <div class="form-group wide">
+                <label>Cloud Folders</label>
+                <input id="extension-config-cloud-folders" placeholder="AllEnvironments, USNat, USSec" />
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="briefing-section">
+        <div class="briefing-section-head">
+          <div>
+            <span class="briefing-kicker">Findings</span>
+            <h3>Latest scan</h3>
+          </div>
+        </div>
+        <div id="extension-findings" class="extension-finding-list"><div class="empty-state">No extension run selected</div></div>
+      </section>
+
+      <section class="briefing-section">
+        <div class="briefing-section-head">
+          <div>
+            <span class="briefing-kicker">History</span>
+            <h3>Recent extension runs</h3>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th class="center-col-header">Started</th>
+              <th class="center-col-header">Status</th>
+              <th class="center-col-header">Severity</th>
+              <th class="center-col-header">Duration</th>
+              <th>Summary</th>
+            </tr></thead>
+            <tbody id="extension-runs-body"></tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
     <!-- SCHEDULE (admin only) -->
@@ -2774,6 +2964,7 @@
               <option value="browseragent_task">BrowserAgent task</option>
               <option value="agent_activation">Agent activation</option>
               <option value="http_request">HTTP request</option>
+              <option value="extension_task">Extension task</option>
             </select>
             <input id="schedule-filter-search" placeholder="Search schedules" oninput="renderSchedules()" />
           </div>
@@ -2816,6 +3007,7 @@
               <option value="browseragent_task">BrowserAgent task</option>
               <option value="agent_activation">Agent activation</option>
               <option value="http_request">HTTP request</option>
+              <option value="extension_task">Extension task</option>
             </select>
           </div>
           <div class="form-group">
@@ -3864,6 +4056,7 @@ let _indexingStrategyDraft = { intelligence_strategy: 'auto', parsing_strategy: 
 
 const ADMIN_TAB_ROUTES = Object.freeze({
   projects: '/admin/projects',
+  extensions: '/admin/extensions',
   schedule: '/admin/schedule',
   users: '/admin/users',
   audit: '/admin/audit',
@@ -3877,6 +4070,8 @@ const ADMIN_PATH_TABS = Object.freeze({
   '/admin': 'projects',
   '/admin/projects': 'projects',
   '/admin/project': 'projects',
+  '/admin/extensions': 'extensions',
+  '/admin/extension': 'extensions',
   '/admin/schedule': 'schedule',
   '/admin/schedules': 'schedule',
   '/admin/users': 'users',
@@ -4014,6 +4209,20 @@ function _renderUsersSortIcons() {
   });
 }
 
+const SCHEDULE_ACTION_ICONS = Object.freeze({
+  run: '<polygon points="6 4 18 12 6 20 6 4"></polygon>',
+  retry: '<path d="M21 12a9 9 0 1 1-2.64-6.36"></path><path d="M21 3v6h-6"></path>',
+  enable: '<circle cx="12" cy="12" r="9"></circle><path d="M10 8l6 4-6 4V8"></path>',
+  disable: '<rect x="6" y="6" width="12" height="12" rx="2"></rect>',
+  edit: '<path d="M12 20h9"></path><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"></path>',
+  delete: '<path d="M3 6h18"></path><path d="M8 6V4h8v2"></path><path d="M19 6l-1 14H6L5 6"></path><path d="M10 11v5"></path><path d="M14 11v5"></path>',
+});
+
+function scheduleActionButton(action, label, onclick, className = 'btn-ghost') {
+  const icon = SCHEDULE_ACTION_ICONS[action] || '';
+  return `<button type="button" class="btn btn-sm schedule-action-btn ${className}" onclick="${onclick}" title="${esc(label)}" aria-label="${esc(label)}"><svg viewBox="0 0 24 24" aria-hidden="true">${icon}</svg></button>`;
+}
+
 function setProjectsSort(key) {
   if (_projectsSort.key === key) {
     _projectsSort.dir = _projectsSort.dir === 'asc' ? 'desc' : 'asc';
@@ -4120,6 +4329,82 @@ function renderBriefingCollapseButton(sectionKey, label) {
   const safeKey = esc(sectionKey);
   const safeLabel = esc(label || 'section');
   return `<button type="button" class="briefing-collapse-btn" data-briefing-collapse="${safeKey}" data-briefing-collapse-label="${safeLabel}" aria-expanded="${collapsed ? 'false' : 'true'}" aria-controls="${esc(briefingSectionBodyId(sectionKey))}" title="${collapsed ? 'Expand' : 'Collapse'} section">${collapsed ? '&#9654;' : '&#9660;'}</button>`;
+}
+
+function slugifyBriefingSectionKey(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function directBriefingSectionHeader(section) {
+  return [...section.children].find(child =>
+    child.classList?.contains('briefing-section-head') || child.classList?.contains('briefing-collapsible-head')
+  );
+}
+
+function briefingSectionAutoKey(section, index) {
+  const paneKey = slugifyBriefingSectionKey(section.closest('.pane')?.id?.replace(/^pane-/, '')) || 'page';
+  const header = directBriefingSectionHeader(section);
+  const heading = header?.querySelector('h2,h3');
+  const sectionKey = slugifyBriefingSectionKey(heading?.id || heading?.textContent) || `section-${index + 1}`;
+  return `${paneKey}-${sectionKey}`;
+}
+
+function briefingSectionLabel(section) {
+  const header = directBriefingSectionHeader(section);
+  return header?.querySelector('h2,h3')?.textContent?.trim() || 'section';
+}
+
+function ensureBriefingSectionActions(header) {
+  const existing = [...header.children].find(child => child.classList?.contains('briefing-section-actions'));
+  if (existing) return existing;
+  const actions = document.createElement('div');
+  actions.className = 'briefing-section-actions';
+  const children = [...header.children];
+  children.slice(1).forEach(child => actions.appendChild(child));
+  header.appendChild(actions);
+  return actions;
+}
+
+function ensureBriefingSectionContent(section, header, sectionKey) {
+  const existing = [...section.children].find(child => child.hasAttribute?.('data-briefing-section-content'));
+  if (existing) {
+    const bodyId = briefingSectionBodyId(sectionKey);
+    if (!existing.id && !document.getElementById(bodyId)) existing.id = bodyId;
+    return existing;
+  }
+  const content = document.createElement('div');
+  content.id = briefingSectionBodyId(sectionKey);
+  content.setAttribute('data-briefing-section-content', '');
+  [...section.children]
+    .filter(child => child !== header)
+    .forEach(child => content.appendChild(child));
+  section.appendChild(content);
+  return content;
+}
+
+function ensureBriefingSectionCollapseButton(section, header, sectionKey) {
+  const existing = [...section.querySelectorAll('[data-briefing-collapse]')]
+    .find(button => button.getAttribute('data-briefing-collapse') === String(sectionKey || ''));
+  if (existing) return;
+  const actions = ensureBriefingSectionActions(header);
+  actions.insertAdjacentHTML('beforeend', renderBriefingCollapseButton(sectionKey, briefingSectionLabel(section)));
+}
+
+function enhanceStaticBriefingSections(root = document) {
+  root.querySelectorAll('section.briefing-section').forEach((section, index) => {
+    const header = directBriefingSectionHeader(section);
+    if (!header) return;
+    const sectionKey = section.getAttribute('data-briefing-section') || briefingSectionAutoKey(section, index);
+    section.setAttribute('data-briefing-section', sectionKey);
+    ensureBriefingSectionContent(section, header, sectionKey);
+    ensureBriefingSectionCollapseButton(section, header, sectionKey);
+  });
+  bindBriefingCollapseButtons(root);
+  applyAllBriefingSectionCollapse();
 }
 
 function findBriefingSection(sectionKey) {
@@ -4376,6 +4661,7 @@ async function initApp() {
     } catch {}
     document.getElementById('tab-briefing-btn').style.display = '';
     document.getElementById('tab-report-btn').style.display = '';
+    document.getElementById('tab-extensions-btn').style.display = '';
     document.getElementById('tab-schedule-btn').style.display = '';
     document.getElementById('tab-viewer-btn').style.display = '';
     document.getElementById('tab-settings-btn').style.display = '';
@@ -4930,6 +5216,7 @@ function switchTab(name, btn, options = {}) {
   if (options.updateUrl !== false) {
     setAdminRoute(nextName, { replace: Boolean(options.replace) || nextName !== requestedName });
   }
+  enhanceStaticBriefingSections(document);
   if (_auditPollInterval) {
     clearInterval(_auditPollInterval);
     _auditPollInterval = null;
@@ -4958,6 +5245,7 @@ function switchTab(name, btn, options = {}) {
       }
     }, 10000);
   }
+  if (nextName === 'extensions') loadExtensions({ silent: true });
   if (nextName === 'briefing') {
     loadWorkBriefing();
     _briefingPollInterval = setInterval(() => {
@@ -4995,6 +5283,10 @@ let _projectNameById = {};
 let _scheduleTasks = [];
 let _scheduleRuns = [];
 let _scheduleEditingId = null;
+let _extensionsCatalog = [];
+let _selectedExtensionId = 'azure_policy_change_monitor';
+let _selectedExtensionProjectId = '';
+let _extensionOverview = null;
 let _auditPollInterval = null;
 let _briefingPollInterval = null;
 let _schedulePollInterval = null;
@@ -5606,10 +5898,271 @@ async function loadProjects() {
   filterProjects(document.getElementById('project-search')?.value || '');
 }
 
+function extensionSeverityClass(severity) {
+  const value = String(severity || '').toLowerCase();
+  if (value === 'critical' || value === 'high') return 'pill-red';
+  if (value === 'medium') return 'pill-amber';
+  if (value === 'low') return 'pill-blue';
+  if (value === 'info') return 'pill-green';
+  return 'pill-gray';
+}
+
+function extensionSummaryTone(severity) {
+  const value = String(severity || '').toLowerCase();
+  if (value === 'critical' || value === 'high') return 'failed';
+  if (value === 'medium') return 'running';
+  if (value === 'low' || value === 'info') return 'success';
+  return 'empty';
+}
+
+function selectedExtensionDefinition() {
+  return _extensionsCatalog.find(item => item.extension_id === _selectedExtensionId) || _extensionsCatalog[0] || null;
+}
+
+function extensionActiveProjects() {
+  return _allProjects.filter(project => project.is_active !== 0 && project.is_active !== false);
+}
+
+function extensionProjectLabel(project) {
+  if (!project) return '—';
+  return project.project_name || project.project_id || String(project.id || '—');
+}
+
+function extensionScopeLabel(overview = null) {
+  const projectName = overview?.config?.project_name || overview?.last_run?.project_name;
+  const projectExternalId = overview?.config?.project_external_id || overview?.last_run?.project_external_id;
+  return projectName || projectExternalId || 'Platform';
+}
+
+function setExtensionSummary(overview = null) {
+  const definition = overview?.definition || selectedExtensionDefinition();
+  const run = overview?.last_run || null;
+  const findings = Array.isArray(run?.result?.findings) ? run.result.findings : [];
+  const severity = run?.severity || '—';
+  document.getElementById('extension-summary-name').textContent = definition?.name || '—';
+  document.getElementById('extension-summary-project').textContent = extensionScopeLabel(overview);
+  const severityEl = document.getElementById('extension-summary-severity');
+  severityEl.textContent = severity;
+  severityEl.dataset.scheduleStatus = extensionSummaryTone(severity);
+  document.getElementById('extension-summary-findings').textContent = String(run?.summary?.finding_count ?? findings.length ?? 0);
+}
+
+function renderExtensionSelectors() {
+  const extensionSelect = document.getElementById('extension-select');
+  if (!extensionSelect) return;
+  if (!_extensionsCatalog.some(item => item.extension_id === _selectedExtensionId)) {
+    _selectedExtensionId = _extensionsCatalog[0]?.extension_id || '';
+  }
+  _selectedExtensionProjectId = '';
+  extensionSelect.innerHTML = _extensionsCatalog.length
+    ? _extensionsCatalog.map(item => `<option value="${esc(item.extension_id)}" ${item.extension_id === _selectedExtensionId ? 'selected' : ''}>${esc(item.name || item.extension_id)}</option>`).join('')
+    : '<option value="">No extensions</option>';
+}
+
+async function loadExtensions(options = {}) {
+  if (_me?.role !== 'admin') return;
+  try {
+    const catalog = await api('GET', '/admin/extensions');
+    _extensionsCatalog = catalog.items || [];
+    renderExtensionSelectors();
+    setExtensionSummary(_extensionOverview);
+    if (_selectedExtensionId) {
+      await loadExtensionProject({ silent: options?.silent });
+    } else {
+      renderExtensionOverview(null);
+    }
+  } catch (e) {
+    if (!options?.silent) toast(e.message, 'error');
+  }
+}
+
+async function onExtensionSelectionChanged() {
+  _selectedExtensionId = document.getElementById('extension-select')?.value || _selectedExtensionId;
+  _selectedExtensionProjectId = '';
+  await loadExtensionProject();
+}
+
+async function loadExtensionProject(options = {}) {
+  if (!_selectedExtensionId) return;
+  try {
+    _extensionOverview = await api('GET', `/admin/extensions/${encodeURIComponent(_selectedExtensionId)}`);
+    renderExtensionOverview(_extensionOverview);
+  } catch (e) {
+    if (!options?.silent) toast(e.message, 'error');
+  }
+}
+
+function renderExtensionOverview(overview) {
+  const definition = overview?.definition || selectedExtensionDefinition();
+  const config = overview?.config || null;
+  const cfg = config?.config || definition?.default_config || {};
+  const lastRun = overview?.last_run || null;
+  const title = document.getElementById('extension-title');
+  const version = document.getElementById('extension-version');
+  if (title) title.textContent = definition?.name || 'Platform extension';
+  if (version) version.textContent = definition?.version ? `v${definition.version}` : '—';
+  const enabledPill = document.getElementById('extension-enabled-pill');
+  if (enabledPill) {
+    enabledPill.textContent = config?.enabled === false ? 'Disabled' : 'Enabled';
+    enabledPill.className = 'pill ' + (config?.enabled === false ? 'pill-gray' : 'pill-green');
+  }
+  const lastRunEl = document.getElementById('extension-last-run');
+  if (lastRunEl) lastRunEl.textContent = lastRun ? `${_fmtIso(lastRun.started_at)} · ${lastRun.status}` : '—';
+  const enabledInput = document.getElementById('extension-config-enabled');
+  if (enabledInput) enabledInput.value = String(config?.enabled !== false);
+  const repoInput = document.getElementById('extension-config-repo-path');
+  const policyRootInput = document.getElementById('extension-config-policy-root');
+  const foldersInput = document.getElementById('extension-config-cloud-folders');
+  const baselineInput = document.getElementById('extension-config-baseline');
+  if (repoInput && document.activeElement !== repoInput) repoInput.value = cfg.repo_path || '';
+  if (policyRootInput && document.activeElement !== policyRootInput) policyRootInput.value = cfg.policy_root || 'settings/BuiltInPoliciesV2';
+  if (foldersInput && document.activeElement !== foldersInput) foldersInput.value = Array.isArray(cfg.cloud_folders) ? cfg.cloud_folders.join(', ') : 'AllEnvironments, USNat, USSec';
+  if (baselineInput && document.activeElement !== baselineInput) baselineInput.value = cfg.baseline_folder || 'AllEnvironments';
+  setExtensionSummary(overview);
+  renderExtensionFindings(lastRun);
+  renderExtensionRuns(overview?.recent_runs || []);
+}
+
+function renderExtensionFindings(run) {
+  const root = document.getElementById('extension-findings');
+  if (!root) return;
+  const findings = Array.isArray(run?.result?.findings) ? run.result.findings : [];
+  if (!run) {
+    root.innerHTML = '<div class="empty-state">No extension run selected</div>';
+    return;
+  }
+  if (!findings.length) {
+    root.innerHTML = '<div class="empty-state">No findings in the latest scan</div>';
+    return;
+  }
+  root.innerHTML = findings.slice(0, 25).map(finding => {
+    const evidence = finding.evidence && Object.keys(finding.evidence).length
+      ? JSON.stringify(finding.evidence, null, 2)
+      : '';
+    return `
+      <article class="extension-finding-card">
+        <span class="pill ${extensionSeverityClass(finding.severity)}">${esc(finding.severity || 'info')}</span>
+        <div>
+          <strong>${esc(finding.message || finding.check || 'Finding')}</strong>
+          <div class="mono">${esc([finding.check, finding.file].filter(Boolean).join(' · '))}</div>
+        </div>
+        ${evidence ? `<div class="mono">${esc(evidence)}</div>` : ''}
+      </article>
+    `;
+  }).join('') + (findings.length > 25 ? `<div class="empty-state">Showing 25 of ${esc(String(findings.length))} findings</div>` : '');
+}
+
+function extensionRunSummaryText(run) {
+  const summary = run?.summary || {};
+  const counts = summary.severity_counts || {};
+  const parts = [];
+  if (summary.finding_count != null) parts.push(`${summary.finding_count} findings`);
+  ['critical', 'high', 'medium', 'low', 'info'].forEach(key => {
+    if (counts[key]) parts.push(`${counts[key]} ${key}`);
+  });
+  return parts.join(' · ') || '—';
+}
+
+function renderExtensionRuns(runs) {
+  const tbody = document.getElementById('extension-runs-body');
+  if (!tbody) return;
+  if (!runs.length) {
+    tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state">No extension runs recorded yet</div></td></tr>';
+    return;
+  }
+  tbody.innerHTML = runs.map(run => `
+    <tr>
+      <td class="mono" style="text-align:center">${esc(_fmtIso(run.started_at))}</td>
+      <td style="text-align:center"><span class="pill ${scheduleStatusClass(run.status)}">${esc(run.status || '')}</span></td>
+      <td style="text-align:center"><span class="pill ${extensionSeverityClass(run.severity)}">${esc(run.severity || 'info')}</span></td>
+      <td class="mono" style="text-align:center">${esc(String(run.duration_ms || 0))} ms</td>
+      <td>${esc(extensionRunSummaryText(run))}</td>
+    </tr>
+  `).join('');
+}
+
+function readSelectedExtensionConfig() {
+  const current = _extensionOverview?.config?.config || selectedExtensionDefinition()?.default_config || {};
+  const cloudFolders = (document.getElementById('extension-config-cloud-folders')?.value || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
+  return {
+    ...current,
+    repo_path: document.getElementById('extension-config-repo-path')?.value.trim() || '',
+    policy_root: document.getElementById('extension-config-policy-root')?.value.trim() || 'settings/BuiltInPoliciesV2',
+    cloud_folders: cloudFolders.length ? cloudFolders : ['AllEnvironments', 'USNat', 'USSec'],
+    baseline_folder: document.getElementById('extension-config-baseline')?.value.trim() || 'AllEnvironments',
+    read_only: true,
+  };
+}
+
+async function saveSelectedExtensionConfig(btn) {
+  if (!_selectedExtensionId) return;
+  const originalText = btn?.textContent || 'Save Config';
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+  try {
+    await api('PUT', `/admin/extensions/${encodeURIComponent(_selectedExtensionId)}/config`, {
+      enabled: document.getElementById('extension-config-enabled')?.value !== 'false',
+      config: readSelectedExtensionConfig(),
+    });
+    toast('Extension config saved');
+    await loadExtensionProject({ silent: true });
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
+  }
+}
+
+async function runSelectedExtension(btn) {
+  if (!_selectedExtensionId) {
+    toast('Select an extension first', 'error');
+    return;
+  }
+  const originalText = btn?.textContent || 'Run Now';
+  if (btn) { btn.disabled = true; btn.textContent = 'Running...'; }
+  try {
+    const run = await api('POST', `/admin/extensions/${encodeURIComponent(_selectedExtensionId)}/run`, {
+      config_override: readSelectedExtensionConfig(),
+    });
+    toast(run.status === 'success' ? 'Extension run completed' : 'Extension run failed', run.status === 'success' ? 'success' : 'error');
+    await loadExtensionProject({ silent: true });
+  } catch (e) {
+    toast(e.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
+  }
+}
+
+function scheduleSelectedExtension() {
+  if (!_selectedExtensionId) {
+    toast('Select an extension first', 'error');
+    return;
+  }
+  const definition = selectedExtensionDefinition();
+  switchTab('schedule');
+  openScheduleEditor();
+  document.getElementById('schedule-task-type').value = 'extension_task';
+  applyScheduleTypeDefaults(true);
+  document.getElementById('schedule-name').value = `${definition?.name || 'Extension'} - Platform`;
+  document.getElementById('schedule-description').value = 'Azure Policy extension scan';
+  document.getElementById('schedule-project-id').value = '';
+  document.getElementById('schedule-agent-id').value = '';
+  document.getElementById('schedule-target-url').value = '';
+  document.getElementById('schedule-cadence').value = '1440';
+  document.getElementById('schedule-timeout').value = '300';
+  document.getElementById('schedule-payload').value = JSON.stringify({
+    extension_id: _selectedExtensionId,
+    config_override: readSelectedExtensionConfig(),
+  }, null, 2);
+}
+
 const SCHEDULE_TYPE_LABELS = Object.freeze({
   browseragent_task: 'BrowserAgent',
   agent_activation: 'Agent Activation',
   http_request: 'HTTP Request',
+  extension_task: 'Extension Task',
 });
 
 const BROWSER_TASK_TEMPLATES = Object.freeze({
@@ -5740,6 +6293,7 @@ function applyBrowserTaskTemplate(template) {
 function defaultSchedulePayload(type) {
   if (type === 'agent_activation') return { action: 'activate_agent', params: {} };
   if (type === 'http_request') return { ok: true };
+  if (type === 'extension_task') return { extension_id: _selectedExtensionId || 'azure_policy_change_monitor', config_override: {} };
   return { browser_task: defaultBrowserTaskSpec() };
 }
 
@@ -5763,7 +6317,7 @@ function applyScheduleTypeDefaults(force = false) {
   const targetEl = document.getElementById('schedule-target-url');
   const payloadEl = document.getElementById('schedule-payload');
   const targetDefault = defaultScheduleTarget(type);
-  const knownTargets = ['http://localhost:9876/command', 'http://localhost:9876/command/batch', 'http://localhost:3002/activate'];
+  const knownTargets = ['', 'http://localhost:9876/command', 'http://localhost:9876/command/batch', 'http://localhost:3002/activate'];
   toggleBrowserTaskEditor(type);
   if (targetEl && (force || !targetEl.value.trim() || knownTargets.includes(targetEl.value.trim()))) {
     targetEl.value = targetDefault;
@@ -5838,7 +6392,10 @@ async function saveScheduleTask() {
       payload,
     };
     if (!body.name) throw new Error('Name is required');
-    if (body.enabled && !body.target_url) throw new Error('Target URL is required for enabled tasks');
+    if (body.enabled && body.task_type !== 'extension_task' && !body.target_url) throw new Error('Target URL is required for enabled tasks');
+    if (body.task_type === 'extension_task' && !String(body.payload?.extension_id || '').trim()) {
+      throw new Error('extension_id is required for extension tasks');
+    }
     if (body.task_type === 'browseragent_task' && body.payload?.browser_task && !String(body.payload.browser_task.url || '').trim()) {
       throw new Error('Page URL is required for BrowserAgent tasks');
     }
@@ -5929,11 +6486,13 @@ function renderSchedules() {
     tbody.innerHTML = rows.map(task => {
       const status = task.last_run_status || 'never';
       const statusCls = task.last_run_status ? scheduleStatusClass(task.last_run_status) : 'pill-gray';
-      const projectText = task.project_name || task.project_external_id || '—';
+      const projectText = task.project_name || task.project_external_id || (task.task_type === 'extension_task' ? 'Platform' : '—');
       const browserTask = browserTaskSpecFromPayload(task.payload || {});
       const retryButton = task.last_run_status === 'failed'
-        ? `<button class="btn btn-sm btn-danger" onclick="retryScheduleTask(${task.id},this)" title="Retry this failed schedule now">Retry</button>`
+        ? scheduleActionButton('retry', 'Retry failed schedule now', `retryScheduleTask(${task.id},this)`, 'btn-danger')
         : '';
+      const toggleAction = task.enabled ? 'disable' : 'enable';
+      const toggleLabel = task.enabled ? 'Disable schedule' : 'Enable schedule';
       return `
         <tr>
           <td>
@@ -5950,12 +6509,12 @@ function renderSchedules() {
           <td class="mono" style="text-align:center">${esc(_fmtIso(task.last_run_at))}</td>
           <td style="text-align:center"><span class="pill ${statusCls}">${esc(status)}</span></td>
           <td>
-            <div class="project-actions">
-              <button class="btn btn-sm btn-accent" onclick="runScheduleTask(${task.id},this)">Run</button>
+            <div class="project-actions schedule-actions">
+              ${scheduleActionButton('run', 'Run schedule now', `runScheduleTask(${task.id},this)`, 'btn-accent')}
               ${retryButton}
-              <button class="btn btn-sm btn-ghost" onclick="toggleScheduleTask(${task.id},${task.enabled ? 'false' : 'true'})">${task.enabled ? 'Disable' : 'Enable'}</button>
-              <button class="btn btn-sm" onclick="openScheduleEditor(${task.id})">Edit</button>
-              <button class="btn btn-sm btn-danger" onclick="deleteScheduleTask(${task.id})">Delete</button>
+              ${scheduleActionButton(toggleAction, toggleLabel, `toggleScheduleTask(${task.id},${task.enabled ? 'false' : 'true'})`, 'btn-ghost')}
+              ${scheduleActionButton('edit', 'Edit schedule', `openScheduleEditor(${task.id})`, '')}
+              ${scheduleActionButton('delete', 'Delete schedule', `deleteScheduleTask(${task.id})`, 'btn-danger')}
             </div>
           </td>
         </tr>
@@ -5977,8 +6536,8 @@ function renderSchedules() {
         <td class="mono" style="text-align:center">${esc(String(run.duration_ms || 0))} ms</td>
         <td><div class="schedule-run-error" title="${esc(run.error || '')}">${esc(run.error || '—')}</div></td>
         <td>
-          <div class="project-actions">
-            ${run.status === 'failed' ? `<button class="btn btn-sm btn-danger" onclick="retryScheduleTask(${run.schedule_id},this)" title="Retry this failed schedule now">Retry</button>` : '<span style="color:var(--muted)">—</span>'}
+          <div class="project-actions schedule-actions">
+            ${run.status === 'failed' ? scheduleActionButton('retry', 'Retry failed schedule now', `retryScheduleTask(${run.schedule_id},this)`, 'btn-danger') : '<span style="color:var(--muted)">—</span>'}
           </div>
         </td>
       </tr>
@@ -5988,8 +6547,15 @@ function renderSchedules() {
 
 async function runScheduleTask(taskId, btn, options = {}) {
   const isRetry = options?.retry === true;
-  const originalText = btn?.textContent || (isRetry ? 'Retry' : 'Run');
-  if (btn) { btn.disabled = true; btn.textContent = isRetry ? 'Retrying...' : 'Running...'; }
+  const originalHtml = btn?.innerHTML || '';
+  const originalTitle = btn?.getAttribute('title') || '';
+  const originalLabel = btn?.getAttribute('aria-label') || originalTitle;
+  if (btn) {
+    btn.disabled = true;
+    btn.setAttribute('aria-busy', 'true');
+    btn.setAttribute('title', isRetry ? 'Retrying schedule...' : 'Running schedule...');
+    btn.setAttribute('aria-label', isRetry ? 'Retrying schedule' : 'Running schedule');
+  }
   try {
     const run = await api('POST', `/admin/schedules/${taskId}/run`);
     const successMessage = isRetry ? 'Schedule retry completed' : 'Schedule run completed';
@@ -5999,7 +6565,13 @@ async function runScheduleTask(taskId, btn, options = {}) {
   } catch (e) {
     toast(e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = originalText; }
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = originalHtml;
+      btn.removeAttribute('aria-busy');
+      if (originalTitle) btn.setAttribute('title', originalTitle);
+      if (originalLabel) btn.setAttribute('aria-label', originalLabel);
+    }
   }
 }
 
