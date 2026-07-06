@@ -662,6 +662,13 @@ def build_request_payload(task: ScheduledTaskOut, *, command_run_id: str | None 
             "project_id": task.project_external_id,
             "payload": task.payload,
         }
+    if task.task_type == "extension_task":
+        return {
+            "extension_id": task.payload.get("extension_id"),
+            "project_id": task.project_id,
+            "project_external_id": task.project_external_id,
+            "config_override": task.payload.get("config_override") or {},
+        }
     if task.task_type == "browseragent_task":
         spec = _browser_task_spec(task.payload)
         if spec:
@@ -672,6 +679,8 @@ def build_request_payload(task: ScheduledTaskOut, *, command_run_id: str | None 
 async def execute_scheduled_task(db: Connection, task: ScheduledTaskOut) -> ScheduledTaskRunOut:
     started_at = iso_utc()
     started_clock = time.perf_counter()
+    if task.task_type == "extension_task":
+        return await _execute_extension_task(db, task, started_at=started_at, started_clock=started_clock)
     if not task.target_url:
         return await record_scheduled_task_run(
             db,
@@ -755,6 +764,63 @@ async def execute_scheduled_task(db: Connection, task: ScheduledTaskOut) -> Sche
             task,
             status="failed",
             duration_ms=duration_ms,
+            error=str(exc),
+            started_at=started_at,
+            finished_at=iso_utc(),
+        )
+
+
+async def _execute_extension_task(
+    db: Connection,
+    task: ScheduledTaskOut,
+    *,
+    started_at: str,
+    started_clock: float,
+) -> ScheduledTaskRunOut:
+    extension_id = str(task.payload.get("extension_id") or "").strip()
+    if not extension_id:
+        return await record_scheduled_task_run(
+            db,
+            task,
+            status="failed",
+            status_code=400,
+            duration_ms=0,
+            error="extension_id is required for extension tasks",
+            started_at=started_at,
+        )
+    try:
+        from backend.extensions.service import run_project_extension
+
+        extension_run = await run_project_extension(
+            db,
+            extension_id,
+            int(task.project_id) if task.project_id else None,
+            config_override=task.payload.get("config_override") or {},
+            schedule_id=task.id,
+        )
+        duration_ms = int((time.perf_counter() - started_clock) * 1000)
+        response = extension_run.model_dump()
+        status = "success" if extension_run.status == "success" else "failed"
+        return await record_scheduled_task_run(
+            db,
+            task,
+            status=status,
+            status_code=200 if status == "success" else 500,
+            duration_ms=duration_ms,
+            response=response,
+            error="" if status == "success" else "Extension task failed",
+            started_at=started_at,
+            finished_at=iso_utc(),
+        )
+    except Exception as exc:
+        duration_ms = int((time.perf_counter() - started_clock) * 1000)
+        return await record_scheduled_task_run(
+            db,
+            task,
+            status="failed",
+            status_code=500,
+            duration_ms=duration_ms,
+            response={"extension_id": extension_id},
             error=str(exc),
             started_at=started_at,
             finished_at=iso_utc(),

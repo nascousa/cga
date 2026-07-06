@@ -153,6 +153,40 @@ CREATE TABLE IF NOT EXISTS scheduled_task_runs (
 CREATE INDEX IF NOT EXISTS idx_scheduled_task_runs_schedule_started
     ON scheduled_task_runs(schedule_id, started_at DESC);
 
+CREATE TABLE IF NOT EXISTS extension_configs (
+    id           BIGSERIAL PRIMARY KEY,
+    extension_id TEXT    NOT NULL,
+    project_id   BIGINT  REFERENCES projects(id) ON DELETE CASCADE,
+    enabled      INTEGER NOT NULL DEFAULT 1,
+    config_json  TEXT    NOT NULL DEFAULT '{}',
+    created_at   TEXT    NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS'),
+    updated_at   TEXT    NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS'),
+    UNIQUE(extension_id, project_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_extension_configs_project
+    ON extension_configs(project_id);
+
+CREATE TABLE IF NOT EXISTS extension_runs (
+    id            BIGSERIAL PRIMARY KEY,
+    extension_id  TEXT    NOT NULL,
+    project_id    BIGINT  REFERENCES projects(id) ON DELETE SET NULL,
+    schedule_id   BIGINT  REFERENCES scheduled_tasks(id) ON DELETE SET NULL,
+    status        TEXT    NOT NULL,
+    severity      TEXT    NOT NULL DEFAULT 'info',
+    started_at    TEXT    NOT NULL,
+    finished_at   TEXT    NOT NULL,
+    duration_ms   INTEGER NOT NULL DEFAULT 0,
+    summary_json  TEXT    NOT NULL DEFAULT '{}',
+    result_json   TEXT    NOT NULL DEFAULT '{}',
+    created_at    TEXT    NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_extension_runs_project_started
+    ON extension_runs(project_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_extension_runs_extension_started
+    ON extension_runs(extension_id, started_at DESC);
+
 CREATE TABLE IF NOT EXISTS oauth_connections (
     id              BIGSERIAL PRIMARY KEY,
     user_id         BIGINT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -286,6 +320,10 @@ async def init_db(dsn: str | None = None) -> None:
     pool = await init_pool(dsn)
     async with pool.acquire() as db:
         await db.executescript(_CREATE_TABLES)
+        try:
+            await db.execute("ALTER TABLE extension_configs ALTER COLUMN project_id DROP NOT NULL")
+        except Exception:
+            pass
         await _ensure_scheduled_task_ids(db)
         # Best-effort legacy role rename.
         try:
