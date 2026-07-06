@@ -390,6 +390,12 @@ def test_admin_embeds_versioned_graph_viewer() -> None:
     assert '<link rel="icon" href="/favicon.svg" type="image/svg+xml" />' in response.text
     assert 'data-src="/viewer/?v=1.30.79"' in response.text
     assert '<h1>CONTEXT GRAPH AGENT</h1>' in response.text
+    assert '<div class="login-panel">' in response.text
+    assert '<span class="login-version" id="login-app-version">v…</span>' in response.text
+    assert '</form>\r\n      <span class="login-version" id="login-app-version">v…</span>' in response.text or '</form>\n      <span class="login-version" id="login-app-version">v…</span>' in response.text
+    assert "System version" not in response.text
+    assert '<footer class="footer login-footer" style="position:absolute;">' in response.text
+    assert '<span>Created by <a href="https://natescott.us"' in response.text
     assert '<svg class="brand-logo" width="28" height="28" viewBox="0 0 64 64" aria-hidden="true" focusable="false"' in response.text
     assert '>CGA</text>' in response.text
     assert '<span class="logo-text">CONTEXT GRAPH AGENT</span>' in response.text
@@ -407,6 +413,8 @@ def test_admin_embeds_versioned_graph_viewer() -> None:
     assert 'id="wsr-preview-prev" class="wsr-preview-editor"' in response.text
     assert 'onclick="copyFalkorDbUrl()"' in response.text
     assert 'aria-label="Copy FalkorDB connection URL"' in response.text
+    assert "async function loadAppVersion()" in response.text
+    assert "document.getElementById('login-app-version')" in response.text
     assert "const ADMIN_TAB_ROUTES" in response.text
     assert "viewer: '/admin/graph'" in response.text
 

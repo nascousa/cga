@@ -140,8 +140,15 @@
       position: relative;
       z-index: 2;
     }
-    .login-card {
+    .login-panel {
       width: min(400px, 100%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+    .login-card {
+      width: 100%;
       background: var(--panel-elevated);
       border: 1px solid var(--border);
       border-radius: 16px;
@@ -2477,6 +2484,20 @@
       color: var(--text);
       text-decoration: underline;
     }
+    .login-footer {
+      left: 0;
+      right: 0;
+      bottom: 0;
+      border-top: 0;
+    }
+    .login-version {
+      color: var(--text-soft);
+      display: block;
+      font-size: 11px;
+      letter-spacing: 0;
+      margin-top: 16px;
+      text-align: center;
+    }
   
     .user-menu-wrap { position: relative; }
     .user-menu-btn {
@@ -2518,28 +2539,33 @@
 
 <!-- LOGIN -->
 <div id="login-screen">
-  <div class="login-card">
-    <h1>CONTEXT GRAPH AGENT</h1>
-    <p>Context Graph Agent project console</p>
-    <form id="login-form">
-      <div class="form-group">
-        <label>Username</label>
-        <input id="lf-user" type="text" autocomplete="username" required />
-      </div>
-      <div class="form-group">
-        <label>Password</label>
-        <input id="lf-pass" type="password" autocomplete="current-password" required />
-      </div>
-      <label class="login-remember">
-        <input id="lf-remember-user" type="checkbox" />
-        <span>Remember me</span>
-      </label>
-      <div id="login-err" style="color:var(--danger);font-size:13px;margin-bottom:12px;display:none"></div>
-      <button type="submit" class="btn btn-primary" style="width:100%">Sign in</button>
-      <button id="login-github-btn" type="button" class="btn btn-ghost" style="width:100%;margin-top:8px">Sign in with GitHub</button>
-    </form>
+  <div class="login-panel">
+    <div class="login-card">
+      <h1>CONTEXT GRAPH AGENT</h1>
+      <p>Context Graph Agent project console</p>
+      <form id="login-form">
+        <div class="form-group">
+          <label>Username</label>
+          <input id="lf-user" type="text" autocomplete="username" required />
+        </div>
+        <div class="form-group">
+          <label>Password</label>
+          <input id="lf-pass" type="password" autocomplete="current-password" required />
+        </div>
+        <label class="login-remember">
+          <input id="lf-remember-user" type="checkbox" />
+          <span>Remember me</span>
+        </label>
+        <div id="login-err" style="color:var(--danger);font-size:13px;margin-bottom:12px;display:none"></div>
+        <button type="submit" class="btn btn-primary" style="width:100%">Sign in</button>
+        <button id="login-github-btn" type="button" class="btn btn-ghost" style="width:100%;margin-top:8px">Sign in with GitHub</button>
+      </form>
+      <span class="login-version" id="login-app-version">v…</span>
+    </div>
   </div>
-  <footer class="footer" style="position:absolute;left:0;right:0;bottom:0;">Created by <a href="https://natescott.us" target="_blank" rel="noopener noreferrer">Nate Scott</a></footer>
+  <footer class="footer login-footer" style="position:absolute;">
+    <span>Created by <a href="https://natescott.us" target="_blank" rel="noopener noreferrer">Nate Scott</a></span>
+  </footer>
 </div>
 
 <!-- APP -->
@@ -4366,16 +4392,28 @@ if (rememberUsernameCheckbox) {
   rememberUsernameCheckbox.addEventListener('change', persistRememberedUsername);
 }
 
+async function loadAppVersion() {
+  try {
+    const response = await fetch('/health');
+    const data = await response.json();
+    if (!data.version) return;
+    const label = 'v' + data.version;
+    const appVersionEl = document.getElementById('app-version');
+    const loginVersionEl = document.getElementById('login-app-version');
+    if (appVersionEl) appVersionEl.textContent = label;
+    if (loginVersionEl) loginVersionEl.textContent = label;
+  } catch {}
+}
+
+loadAppVersion();
+
 async function initApp() {
   try { _me = await api('GET', '/auth/me'); } catch { logout(); return; }
   destroyLoginBackground();
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
   document.getElementById('topbar-user').textContent = _me.username;
-  // Fetch and display app version from backend
-  fetch('/health').then(r => r.json()).then(d => {
-    if (d.version) document.getElementById('app-version').textContent = 'v' + d.version;
-  }).catch(() => {});
+  loadAppVersion();
   const roleEl = document.getElementById('topbar-role');
   roleEl.textContent = _me.role;
   roleEl.className = 'role-tag' + (_me.role === 'admin' ? '' : ' developer');
