@@ -24,7 +24,7 @@ That makes CGA different from embedding-only RAG or broad text search:
 
 For the short answers to common questions from agent builders, see [docs/faq.md](docs/faq.md).
 
-![CGA graph viewer rotating project relationships](docs/cga_360p.gif)
+![CGA graph viewer rotating project relationships](docs/cga_dvd.webp)
 
 ## Why CGA
 
