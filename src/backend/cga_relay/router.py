@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import re
 import time
 from typing import Any
 
@@ -39,6 +40,114 @@ class CgaRelaySync(BaseModel):
     counts: dict[str, Any] = Field(default_factory=dict)
     snapshots: list[dict[str, Any]] = Field(default_factory=list)
     tombstones: list[str] = Field(default_factory=list)
+
+
+_DEFAULT_REFS = {"", "main", "master", "default"}
+
+
+def _argument_value(arguments: dict[str, Any], *names: str) -> Any:
+    for name in names:
+        if name in arguments and arguments[name] is not None:
+            return arguments[name]
+    return None
+
+
+def _normalize_ref_id(value: Any) -> str:
+    return str(value or "").strip()
+
+
+def _is_default_ref(ref_id: str | None) -> bool:
+    return _normalize_ref_id(ref_id).lower() in _DEFAULT_REFS
+
+
+def _graph_name_component(ref_id: str) -> str:
+    component = re.sub(r"[^a-z0-9]+", "_", ref_id.strip().lower()).strip("_")
+    if not component:
+        raise HTTPException(status_code=400, detail="ref_id must contain letters or numbers")
+    return component
+
+
+def _graph_name_for_project(project_name: str, ref_id: str | None = None) -> str:
+    main_graph_name = project_name.strip().lower()
+    if _is_default_ref(ref_id):
+        return main_graph_name
+    return f"{main_graph_name}__ref__{_graph_name_component(_normalize_ref_id(ref_id))}"
+
+
+def _ref_arguments(arguments: dict[str, Any]) -> tuple[str, str]:
+    ref_id = _normalize_ref_id(_argument_value(arguments, "ref_id", "branch", "git_branch"))
+    parent_ref = _normalize_ref_id(
+        _argument_value(arguments, "parent_ref", "base_ref", "base_branch")
+    )
+    return ref_id, parent_ref
+
+
+def _graph_file_count(graph_name: str) -> int:
+    if mcp_server._registry is None:
+        raise RuntimeError("MCP server not initialized")
+    token = _current_project_name.set(graph_name)
+    try:
+        rows = mcp_server._registry.current().query("MATCH (f:File) RETURN count(f)").result_set
+    finally:
+        _current_project_name.reset(token)
+    return int(rows[0][0]) if rows else 0
+
+
+def _call_in_graph(graph_name: str, function, **kwargs):
+    token = _current_project_name.set(graph_name)
+    try:
+        return function(**kwargs)
+    finally:
+        _current_project_name.reset(token)
+
+
+def _query_graph_scope(
+    project_name: str,
+    ref_id: str,
+    fallback_ref: str,
+) -> tuple[str, str, bool]:
+    requested_graph_name = _graph_name_for_project(project_name, ref_id)
+    graph_name = requested_graph_name
+    fallback_graph_used = False
+    if not _is_default_ref(ref_id) and fallback_ref and _graph_file_count(requested_graph_name) == 0:
+        fallback_graph_name = _graph_name_for_project(project_name, fallback_ref)
+        if _graph_file_count(fallback_graph_name) > 0:
+            graph_name = fallback_graph_name
+            fallback_graph_used = True
+    return requested_graph_name, graph_name, fallback_graph_used
+
+
+async def _promote_ref(arguments: dict[str, Any], project_name: str) -> dict[str, Any]:
+    ref_id, parent_ref = _ref_arguments(arguments)
+    if not ref_id or _is_default_ref(ref_id):
+        raise HTTPException(status_code=400, detail="a non-default ref_id is required")
+    repo_path = _argument_value(arguments, "repo_path", "project_root", "root")
+    if not repo_path:
+        raise HTTPException(status_code=400, detail="repo_path is required")
+    if mcp_server._registry is None:
+        raise RuntimeError("MCP server not initialized")
+
+    source_graph_name = _graph_name_for_project(project_name, ref_id)
+    target_graph_name = _graph_name_for_project(project_name, parent_ref)
+    rows = mcp_server._registry.get(source_graph_name).query(
+        "MATCH (f:File) RETURN f.path ORDER BY f.path"
+    ).result_set
+    promoted_files = [str(row[0]) for row in rows if row and row[0]]
+    index_result = await mcp_server.index_incremental(
+        repo_path=str(repo_path),
+        changed_paths=promoted_files,
+        project_name=target_graph_name,
+    )
+    deleted_ref_graph = bool(arguments.get("delete_ref_graph", False))
+    if deleted_ref_graph:
+        mcp_server._registry.delete(source_graph_name)
+    return {
+        "promoted_files": promoted_files,
+        "source_graph_name": source_graph_name,
+        "target_graph_name": target_graph_name,
+        "deleted_ref_graph": deleted_ref_graph,
+        "index_result": index_result,
+    }
 
 
 def _project_context(request: Request) -> dict[str, Any]:
@@ -115,6 +224,8 @@ async def _maybe_await(value: Any) -> Any:
 async def dispatch_tool(tool: str, arguments: dict[str, Any], project_name: str) -> dict[str, Any]:
     """Dispatch a CGA-Relay tool call into existing CGA MCP tool functions."""
     args = dict(arguments or {})
+    ref_id, parent_ref = _ref_arguments(args)
+    graph_name = _graph_name_for_project(project_name, ref_id)
     if tool == "index_git_incremental":
         backend_tool = "index_repo_changes"
         repo_path = args.get("repo_path") or args.get("project_root") or args.get("root")
@@ -124,7 +235,7 @@ async def dispatch_tool(tool: str, arguments: dict[str, Any], project_name: str)
             repo_path=str(repo_path),
             include_untracked=bool(args.get("include_untracked", True)),
             auto_full_on_destructive=bool(args.get("auto_full_on_destructive", False)),
-            project_name=project_name,
+            project_name=graph_name,
         )
     elif tool == "index_incremental":
         backend_tool = "index_incremental"
@@ -137,7 +248,7 @@ async def dispatch_tool(tool: str, arguments: dict[str, Any], project_name: str)
         result = await mcp_server.index_incremental(
             repo_path=str(repo_path),
             changed_paths=[str(path) for path in changed_paths],
-            project_name=project_name,
+            project_name=graph_name,
         )
     elif tool == "index_progress":
         backend_tool = "get_index_job_status"
@@ -151,7 +262,13 @@ async def dispatch_tool(tool: str, arguments: dict[str, Any], project_name: str)
         if not query:
             raise HTTPException(status_code=400, detail="query is required")
         raw_token_budget = args.get("token_budget")
-        result = mcp_server.strategy_query(
+        fallback_ref = _normalize_ref_id(args.get("fallback_ref"))
+        requested_graph_name, graph_name, fallback_graph_used = _query_graph_scope(
+            project_name, ref_id, fallback_ref
+        )
+        result = _call_in_graph(
+            graph_name,
+            mcp_server.strategy_query,
             query=str(query),
             graph_top_k=int(args.get("graph_top_k", 8)),
             min_graph_hits=int(args.get("min_graph_hits", 3)),
@@ -164,7 +281,13 @@ async def dispatch_tool(tool: str, arguments: dict[str, Any], project_name: str)
         query = args.get("query") or args.get("symbol")
         if not query:
             raise HTTPException(status_code=400, detail="query is required")
-        result = mcp_server.retrieve_context(
+        fallback_ref = _normalize_ref_id(args.get("fallback_ref"))
+        requested_graph_name, graph_name, fallback_graph_used = _query_graph_scope(
+            project_name, ref_id, fallback_ref
+        )
+        result = _call_in_graph(
+            graph_name,
+            mcp_server.retrieve_context,
             query=str(query),
             limit=int(args.get("limit", 10)),
             task_id=str(args.get("task_id")) if args.get("task_id") else None,
@@ -172,6 +295,9 @@ async def dispatch_tool(tool: str, arguments: dict[str, Any], project_name: str)
             pr_id=str(args.get("pr_id")) if args.get("pr_id") else None,
             activity_id=str(args.get("activity_id")) if args.get("activity_id") else None,
         )
+    elif tool == "promote_ref":
+        backend_tool = "index_incremental"
+        result = await _promote_ref(args, project_name)
     elif tool == "health_check":
         backend_tool = "health_check"
         result = {"status": "ok", "service": "cga-relay-bridge"}
@@ -184,12 +310,25 @@ async def dispatch_tool(tool: str, arguments: dict[str, Any], project_name: str)
     else:
         raise HTTPException(status_code=400, detail=f"unknown CGA-Relay tool: {tool}")
 
-    return {
+    response = {
         "ok": True,
         "tool": tool,
         "backend_tool": backend_tool,
         "result": await _maybe_await(result),
     }
+    if ref_id or parent_ref or args.get("fallback_ref"):
+        response.update(
+            {
+                "ref_id": ref_id,
+                "parent_ref": parent_ref,
+                "requested_graph_name": locals().get("requested_graph_name", graph_name),
+                "graph_name": graph_name,
+                "parent_graph_name": _graph_name_for_project(project_name, parent_ref),
+                "fallback_ref": _normalize_ref_id(args.get("fallback_ref")),
+                "fallback_graph_used": locals().get("fallback_graph_used", False),
+            }
+        )
+    return response
 
 
 def sync_summary(payload: CgaRelaySync) -> dict[str, Any]:

@@ -112,10 +112,199 @@ fn help_output_lists_required_commands() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let text = stdout(&output);
     for command in [
-        "doctor", "login", "projects", "scan", "sync", "settings", "tray", "mcp",
+        "doctor", "login", "projects", "scan", "sync", "index", "refs", "settings", "tray", "mcp",
     ] {
         assert!(text.contains(command), "help missing {command}: {text}");
     }
+}
+
+fn assert_cli_tool_request(
+    expected_tool: &'static str,
+    expected_fragments: &'static [&'static str],
+) -> (u16, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut stream = listener.accept().unwrap().0;
+        let mut buffer = [0_u8; 8192];
+        let read = stream.read(&mut buffer).unwrap();
+        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+        assert!(request.contains("POST /api/project/cga-relay/mcp-tool HTTP/1.1"));
+        assert!(request.contains(expected_tool));
+        for fragment in expected_fragments {
+            assert!(
+                request.contains(fragment),
+                "request missing {fragment}: {request}"
+            );
+        }
+        let body = format!("{{\"ok\":true,\"tool\":\"{expected_tool}\"}}");
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    (port, server)
+}
+
+#[test]
+fn index_git_cli_forwards_branch_and_parent_ref() {
+    let (port, server) = assert_cli_tool_request(
+        "index_git_incremental",
+        &[
+            "feature/client-menu-order",
+            "parent_ref",
+            "include_untracked",
+        ],
+    );
+    let tmp = TestDir::new("index-git-cli");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+
+    let output = Command::new(agent_bin())
+        .args([
+            "index",
+            "git",
+            "--config",
+            config.to_str().unwrap(),
+            "--repo-path",
+            repo.to_str().unwrap(),
+            "--branch",
+            "feature/client-menu-order",
+            "--parent-ref",
+            "main",
+            "--no-include-untracked",
+        ])
+        .env("CGA_TEST_API_KEY", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("index_git_incremental"));
+    assert!(!stdout(&output).contains(TEST_SECRET));
+    server.join().unwrap();
+}
+
+#[test]
+fn index_incremental_cli_forwards_multiple_changed_paths() {
+    let (port, server) = assert_cli_tool_request(
+        "index_incremental",
+        &["src/a.py", "src/b.py", "bugfix/cache-key", "changed_paths"],
+    );
+    let tmp = TestDir::new("index-incremental-cli");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+
+    let output = Command::new(agent_bin())
+        .args([
+            "index",
+            "incremental",
+            "--config",
+            config.to_str().unwrap(),
+            "--repo-path",
+            repo.to_str().unwrap(),
+            "--changed-path",
+            "src/a.py",
+            "--changed-path",
+            "src/b.py",
+            "--ref",
+            "bugfix/cache-key",
+        ])
+        .env("CGA_TEST_API_KEY", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("index_incremental"));
+    server.join().unwrap();
+}
+
+#[test]
+fn refs_promote_cli_forwards_delete_option() {
+    let (port, server) = assert_cli_tool_request(
+        "promote_ref",
+        &[
+            "feature/client-menu-order",
+            "parent_ref",
+            "delete_ref_graph",
+        ],
+    );
+    let tmp = TestDir::new("refs-promote-cli");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+
+    let output = Command::new(agent_bin())
+        .args([
+            "refs",
+            "promote",
+            "--config",
+            config.to_str().unwrap(),
+            "--repo-path",
+            repo.to_str().unwrap(),
+            "--ref",
+            "feature/client-menu-order",
+            "--parent-ref",
+            "main",
+            "--delete-ref-graph",
+        ])
+        .env("CGA_TEST_API_KEY", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("promote_ref"));
+    server.join().unwrap();
+}
+
+#[test]
+fn index_incremental_cli_requires_changed_path() {
+    let tmp = TestDir::new("index-incremental-missing-path");
+    let config = write_safe_config(tmp.path(), tmp.path(), &[]);
+
+    let output = Command::new(agent_bin())
+        .args([
+            "index",
+            "incremental",
+            "--config",
+            config.to_str().unwrap(),
+            "--ref",
+            "feature/example",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("requires at least one --changed-path"));
+}
+
+#[test]
+fn refs_promote_cli_requires_ref() {
+    let tmp = TestDir::new("refs-promote-missing-ref");
+    let config = write_safe_config(tmp.path(), tmp.path(), &[]);
+
+    let output = Command::new(agent_bin())
+        .args(["refs", "promote", "--config", config.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("missing required option: --ref"));
 }
 
 #[test]
@@ -665,9 +854,46 @@ fn mcp_tools_list_exposes_expected_tools() {
         "query_impact_graph",
         "fetch_minimal_code",
         "get_optimized_context",
+        "promote_ref",
     ] {
         assert!(out.contains(tool), "tools/list missing {tool}: {out}");
     }
+}
+
+#[test]
+fn mcp_promote_ref_forwards_branch_arguments() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut stream = listener.accept().unwrap().0;
+        let mut buffer = [0_u8; 4096];
+        let read = stream.read(&mut buffer).unwrap();
+        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+        assert!(request.contains("promote_ref"));
+        assert!(request.contains("feature/client-menu-order"));
+        assert!(request.contains("parent_ref"));
+        assert!(request.contains("delete_ref_graph"));
+        let body = "{\"ok\":true,\"tool\":\"promote_ref\"}";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+
+    let tmp = TestDir::new("mcp-promote-ref");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let api = format!("http://127.0.0.1:{port}");
+    let config = write_safe_config(tmp.path(), &repo, &[("API_BASE_URL", api)]);
+    let input = "{\"jsonrpc\":\"2.0\",\"id\":34,\"method\":\"tools/call\",\"params\":{\"name\":\"promote_ref\",\"arguments\":{\"ref_id\":\"feature/client-menu-order\",\"parent_ref\":\"main\",\"repo_path\":\"C:/repo\",\"delete_ref_graph\":true}}}\n";
+    let output = run_mcp(&config, input, &[("CGA_TEST_API_KEY", TEST_SECRET)]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("promote_ref"));
+    assert!(!stdout(&output).contains(TEST_SECRET));
+    server.join().unwrap();
 }
 
 #[test]

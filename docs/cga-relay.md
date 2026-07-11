@@ -39,6 +39,9 @@ cga-relay projects add --config %USERPROFILE%\.cga\relay.env --namespace dev --p
 cga-relay projects list --config %USERPROFILE%\.cga\relay.env --json
 cga-relay scan --config %USERPROFILE%\.cga\relay.env --dry-run --json
 cga-relay sync --config %USERPROFILE%\.cga\relay.env --all --dry-run --json
+cga-relay index git --config %USERPROFILE%\.cga\relay.env --repo-path C:\Repos\ExampleProject --branch feature/example --parent-ref main
+cga-relay index incremental --config %USERPROFILE%\.cga\relay.env --repo-path C:\Repos\ExampleProject --changed-path src\main.py --ref feature/example
+cga-relay refs promote --config %USERPROFILE%\.cga\relay.env --repo-path C:\Repos\ExampleProject --ref feature/example --parent-ref main --delete-ref-graph
 cga-relay settings --config %USERPROFILE%\.cga\relay.env --status --json
 cga-relay settings --config %USERPROFILE%\.cga\relay.env --render
 cga-relay tray --config %USERPROFILE%\.cga\relay.env
@@ -90,3 +93,9 @@ The relay allows plaintext HTTP only for loopback hosts such as `127.0.0.1` and 
 `--dry-run` never updates scan state. Normal scan mode writes local state under `STATE_DIR`. `sync` reads the central relay project registry, fails closed if login or token environment is missing, and submits changed text snapshots to the configured control API when not in dry-run mode.
 
 The project-token backend bridge is exposed at `/api/project/cga-relay/mcp-tool` and `/api/project/cga-relay/sync`. These routes are protected by project tokens through the existing `/api/project` middleware and require the authenticated project identity to match the submitted `project_id`. The account-login bridge is exposed at `/api/auth/cga-relay/mcp-tool` and `/api/auth/cga-relay/sync` and is protected by the normal user JWT flow.
+
+## Branch Graphs
+
+Relay MCP indexing and query tools support isolated temporary ref graphs through `ref_id`, `branch`, or `git_branch`. Parent aliases are `parent_ref`, `base_ref`, and `base_branch`. The `promote_ref` tool reindexes source-ref file paths from the merged target working tree into the parent/default graph and can then delete the source graph.
+
+See [BRANCH-GRAPHS.md](BRANCH-GRAPHS.md) for graph naming, fallback behavior, promotion semantics, examples, and current limitations.

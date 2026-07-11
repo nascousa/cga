@@ -8,7 +8,7 @@ use std::process;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const VERSION: &str = "1.30.103";
+const VERSION: &str = "1.30.111";
 const SERVER_NAME: &str = "cga-relay";
 const TRAY_ICON_LOGGED_IN_RESOURCE_ID: u16 = 1;
 const TRAY_ICON_LOGGED_OUT_RESOURCE_ID: u16 = 4;
@@ -137,6 +137,8 @@ fn run(args: Vec<String>) -> AgentResult<()> {
         "projects" => cmd_projects(&args[1..]),
         "scan" => cmd_scan(&args[1..]),
         "sync" => cmd_sync(&args[1..]),
+        "index" => cmd_index(&args[1..]),
+        "refs" => cmd_refs(&args[1..]),
         "settings" => cmd_settings(&args[1..]),
         "tray" => cmd_tray(&args[1..]),
         "mcp" => cmd_mcp(&args[1..]),
@@ -159,9 +161,16 @@ fn print_help() {
     println!("  projects  Add/list central local project registry entries");
     println!("  scan      Scan the configured project root");
     println!("  sync      Scan registered projects and submit changed snapshots");
+    println!("  index     Index Git or explicit file changes into a default/ref graph");
+    println!("  refs      Promote temporary ref graphs after merge");
     println!("  settings  Render or inspect the local account settings page");
     println!("  tray      Run the Windows notification-area tray icon");
     println!("  mcp       Run the stdio MCP-compatible gateway");
+    println!();
+    println!("Branch graph examples:");
+    println!("  cga-relay index git --config <path> --repo-path <path> --branch <ref> [--parent-ref <ref>] [--no-include-untracked]");
+    println!("  cga-relay index incremental --config <path> --repo-path <path> --changed-path <path> [--changed-path <path>] [--ref <ref>]");
+    println!("  cga-relay refs promote --config <path> --repo-path <path> --ref <ref> [--parent-ref <ref>] [--delete-ref-graph]");
 }
 
 fn cmd_doctor(args: &[String]) -> AgentResult<()> {
@@ -280,6 +289,85 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
         project_payloads.len(),
         project_payloads.join(",")
     );
+    Ok(())
+}
+
+fn cmd_index(args: &[String]) -> AgentResult<()> {
+    let subcommand = args
+        .first()
+        .ok_or_else(|| AgentError("missing index subcommand".to_string()))?;
+    let rest = &args[1..];
+    let config = load_config(required_arg(rest, "--config")?)?;
+    let repo_path = optional_arg(rest, "--repo-path")
+        .map(str::to_string)
+        .unwrap_or_else(|| display_path(&config.project_root));
+    let ref_id = optional_alias_arg(rest, &["--ref", "--branch", "--git-branch"]);
+    let parent_ref = optional_alias_arg(rest, &["--parent-ref", "--base-ref", "--base-branch"]);
+
+    let mut fields = vec![format!("\"repo_path\":\"{}\"", json_escape(&repo_path))];
+    if let Some(ref_id) = ref_id {
+        fields.push(format!("\"ref_id\":\"{}\"", json_escape(ref_id)));
+    }
+    if let Some(parent_ref) = parent_ref {
+        fields.push(format!("\"parent_ref\":\"{}\"", json_escape(parent_ref)));
+    }
+
+    let tool = match subcommand.as_str() {
+        "git" => {
+            fields.push(format!(
+                "\"include_untracked\":{}",
+                !has_flag(rest, "--no-include-untracked")
+            ));
+            fields.push(format!(
+                "\"auto_full_on_destructive\":{}",
+                has_flag(rest, "--auto-full-on-destructive")
+            ));
+            "index_git_incremental"
+        }
+        "incremental" => {
+            let changed_paths = repeated_args(rest, "--changed-path");
+            if changed_paths.is_empty() {
+                return Err(AgentError(
+                    "index incremental requires at least one --changed-path".to_string(),
+                ));
+            }
+            fields.push(format!(
+                "\"changed_paths\":{}",
+                string_array_json(&changed_paths)
+            ));
+            "index_incremental"
+        }
+        other => return Err(AgentError(format!("unknown index subcommand: {other}"))),
+    };
+
+    let arguments = format!("{{{}}}", fields.join(","));
+    println!("{}", call_cga_tool(&config, tool, &arguments)?);
+    Ok(())
+}
+
+fn cmd_refs(args: &[String]) -> AgentResult<()> {
+    let subcommand = args
+        .first()
+        .ok_or_else(|| AgentError("missing refs subcommand".to_string()))?;
+    if subcommand != "promote" {
+        return Err(AgentError(format!("unknown refs subcommand: {subcommand}")));
+    }
+    let rest = &args[1..];
+    let config = load_config(required_arg(rest, "--config")?)?;
+    let repo_path = optional_arg(rest, "--repo-path")
+        .map(str::to_string)
+        .unwrap_or_else(|| display_path(&config.project_root));
+    let ref_id = required_alias_arg(rest, &["--ref", "--branch", "--git-branch"])?;
+    let parent_ref = optional_alias_arg(rest, &["--parent-ref", "--base-ref", "--base-branch"])
+        .unwrap_or("main");
+    let arguments = format!(
+        "{{\"repo_path\":\"{}\",\"ref_id\":\"{}\",\"parent_ref\":\"{}\",\"delete_ref_graph\":{}}}",
+        json_escape(&repo_path),
+        json_escape(ref_id),
+        json_escape(parent_ref),
+        has_flag(rest, "--delete-ref-graph")
+    );
+    println!("{}", call_cga_tool(&config, "promote_ref", &arguments)?);
     Ok(())
 }
 
@@ -483,6 +571,22 @@ fn required_arg<'a>(args: &'a [String], name: &str) -> AgentResult<&'a str> {
 fn optional_arg<'a>(args: &'a [String], name: &str) -> Option<&'a str> {
     args.windows(2)
         .find_map(|window| (window[0] == name).then_some(window[1].as_str()))
+}
+
+fn optional_alias_arg<'a>(args: &'a [String], names: &[&str]) -> Option<&'a str> {
+    names.iter().find_map(|name| optional_arg(args, name))
+}
+
+fn required_alias_arg<'a>(args: &'a [String], names: &[&str]) -> AgentResult<&'a str> {
+    optional_alias_arg(args, names)
+        .ok_or_else(|| AgentError(format!("missing required option: {}", names.join(" or "))))
+}
+
+fn repeated_args(args: &[String], name: &str) -> Vec<String> {
+    args.windows(2)
+        .filter(|window| window[0] == name)
+        .map(|window| window[1].clone())
+        .collect()
 }
 
 fn has_flag(args: &[String], name: &str) -> bool {
@@ -2134,6 +2238,7 @@ fn mcp_tools_json() -> String {
         "query_impact_graph",
         "fetch_minimal_code",
         "get_optimized_context",
+        "promote_ref",
     ]
     .into_iter()
     .map(|name| {
@@ -2150,7 +2255,7 @@ fn handle_mcp_tool_call(config: &AgentConfig, message: &str, id: &str) -> String
     let Some(tool_name) = json_string_field(message, "name") else {
         return rpc_error(id, -32602, "missing tool name");
     };
-    let mut arguments = json_object_field(message, "arguments").unwrap_or_else(|| "{}".to_string());
+    let arguments = json_object_field(message, "arguments").unwrap_or_else(|| "{}".to_string());
     if tool_name == "health_check" {
         return match http_get_json(config, &format!("{}/health", config.api_base_url)) {
             Ok(body) => rpc_text_result(id, &body),
@@ -2174,25 +2279,36 @@ fn handle_mcp_tool_call(config: &AgentConfig, message: &str, id: &str) -> String
         "query_impact_graph",
         "fetch_minimal_code",
         "get_optimized_context",
+        "promote_ref",
     ]
     .into_iter()
     .collect();
     if !known_tools.contains(tool_name.as_str()) {
         return rpc_error(id, -32602, "unknown tool");
     }
-    let project_id =
-        json_string_field(&arguments, "project_id").unwrap_or_else(|| config.project_id.clone());
-    if !arguments.contains("\"project_id\"") {
-        arguments = insert_json_field(&arguments, "project_id", &project_id);
+    let call = call_cga_tool(config, &tool_name, &arguments);
+    match call {
+        Ok(body) => rpc_text_result(id, &body),
+        Err(error) => rpc_error(id, -32000, &error.0),
     }
+}
+
+fn call_cga_tool(config: &AgentConfig, tool_name: &str, arguments: &str) -> AgentResult<String> {
+    let project_id =
+        json_string_field(arguments, "project_id").unwrap_or_else(|| config.project_id.clone());
+    let arguments = if arguments.contains("\"project_id\"") {
+        arguments.to_string()
+    } else {
+        insert_json_field(arguments, "project_id", &project_id)
+    };
     let request_body = format!(
         "{{\"tool\":\"{}\",\"arguments\":{},\"project_id\":\"{}\"}}",
-        json_escape(&tool_name),
+        json_escape(tool_name),
         arguments,
         json_escape(&project_id)
     );
-    let call = if let Ok(api_key) = env::var(&config.api_key_env) {
-        http_post_json(
+    if let Ok(api_key) = env::var(&config.api_key_env) {
+        return http_post_json(
             config,
             &format!("{}/api/project/cga-relay/mcp-tool", config.api_base_url),
             &[
@@ -2200,29 +2316,21 @@ fn handle_mcp_tool_call(config: &AgentConfig, message: &str, id: &str) -> String
                 ("X-Project-ID", project_id),
             ],
             &request_body,
-        )
-    } else if let Ok(session) = read_account_session(config) {
+        );
+    }
+    if let Ok(session) = read_account_session(config) {
         if let Some(access_token) = session.get("access_token") {
-            http_post_json(
+            return http_post_json(
                 config,
                 &format!("{}/api/auth/cga-relay/mcp-tool", config.api_base_url),
                 &[("Authorization", format!("Bearer {access_token}"))],
                 &request_body,
-            )
-        } else {
-            Err(AgentError(
-                "API key env var is not set and CGA account login is missing".to_string(),
-            ))
+            );
         }
-    } else {
-        Err(AgentError(
-            "API key env var is not set and CGA account login is missing".to_string(),
-        ))
-    };
-    match call {
-        Ok(body) => rpc_text_result(id, &body),
-        Err(error) => rpc_error(id, -32000, &error.0),
     }
+    Err(AgentError(
+        "API key env var is not set and CGA account login is missing".to_string(),
+    ))
 }
 
 fn rpc_text_result(id: &str, body: &str) -> String {

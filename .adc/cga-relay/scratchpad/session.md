@@ -9,6 +9,13 @@ This ensures the NEXT agent handling this repository knows exactly where you lef
 - **Failing Tests / Errors:** 
 - **Next Steps:** 
 
+## 2026-07-10 CGA-Relay Branch Graph Support
+
+- **Current Task:** Add backward-compatible temporary branch/ref graph routing, query fallback, post-merge promotion, and direct branch-aware Relay CLI commands.
+- **Last Action Taken:** Added safe ref graph naming and aliases, branch-scoped indexing/query routing, graph-scoped cache keys, empty-branch fallback, `promote_ref`, true FalkorDB source graph deletion, Relay MCP exposure, plus `index git`, `index incremental`, and `refs promote` CLI wrappers that reuse the authenticated MCP bridge. Fixed portable release staging to include `extensions/` and removed a stale `$LASTEXITCODE` check that misreported a successful PowerShell child script as failed.
+- **Failing Tests / Errors:** ContextGraph MCP pre-edit retrieval was blocked with HTTP 426 because the running SSE profile lacked valid CRYSTALS headers. The standard Relay release output remained locked by the active tray process, while isolated optimized builds succeeded. Official Relay dry-run selected `account/ContextGraphAgent` (`J4BE9NUG2A`) and found 364 scanned files, 39 changes, and no tombstones, but final submission still returned `HTTP request failed` because the configured project token/account login was unavailable; direct API fallback was not counted as completion. Final validation passed: Python `69 passed`, Rust `32 passed`, Ruff, compileall, formatting, diff, editor diagnostics, isolated release build, and Docker Desktop bundle build. `CGA-Docker-Desktop-1.30.111.zip` contains extensions, excludes generated dependency/build caches, and has SHA256 `5161A567BC4C6D5464503A0607DDF76A7A6BF2521B199B753C117B65A4EFCA40`.
+- **Next Steps:** Refresh CGA-Relay account login or configure the project token, then retry official change aggregation. Refresh the standard `target/release/cga-relay.exe` after the active tray process exits if it remains locked. Future UI, merge automation, overlay queries, and TTL cleanup remain separate phases.
+
 ## 2026-06-19 Release Documentation Inclusion
 
 - **Current Task:** Move the documentation alignment and relay `.nasco` exclusion cleanup into a new formal patch release so published source bundles include the updated docs.

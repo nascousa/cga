@@ -41,6 +41,12 @@ class GraphClient:
             except Exception:
                 pass
 
+    def delete(self) -> None:
+        """Delete the connected FalkorDB graph."""
+        if not self._graph:
+            raise RuntimeError("GraphClient not connected - call connect() first")
+        self._graph.delete()
+
     def query(self, cypher: str, params: dict | None = None, timeout: int | None = None):
         if not self._graph:
             raise RuntimeError("GraphClient not connected – call connect() first")

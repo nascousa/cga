@@ -1,9 +1,9 @@
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.110
+- **Version:** 1.30.111
 - **Status:** Published
 - **Author:** Nate Scott
-- **Date:** 2026-07-01 (Section collapse controls)
+- **Date:** 2026-07-10 (CGA-Relay branch graphs)
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
@@ -71,7 +71,7 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 - **Admin Dashboard:** project registration, user access groups, indexing status, settings, schedules, and operational views.
 - **3D Graph Viewer:** visual exploration of repository relationships and graph layout controls.
 - **MCP-compatible API:** agent-facing retrieval tools for symbols, files, dependencies, imports, variable flow, and architecture queries.
-- **CGA-Relay:** one developer-machine `cga-relay` with stdio MCP gateway, local scan/sync, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
+- **CGA-Relay:** one developer-machine `cga-relay` with stdio MCP gateway, local scan/sync, branch/ref graph routing and promotion, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
 - **Work Briefing Aggregation:** WA-compatible activity capture and briefing summaries inside CGA.
 - **AI-First Readiness And Evidence:** Admin APIs for readiness snapshots, GitHub/Azure DevOps/verification signals, evidence packs, PR evidence links, and policy-derived gates that combine graph, indexing, ADC, governance, and work activity signals.
 - **Schedule Automation:** admin-defined recurring jobs for BrowserAgent page tests, agent activation calls, generic HTTP tasks, and project extensions.
