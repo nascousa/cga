@@ -8,7 +8,7 @@ use std::process;
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const VERSION: &str = "1.30.112";
+const VERSION: &str = "1.30.113";
 const SERVER_NAME: &str = "cga-relay";
 const TRAY_ICON_LOGGED_IN_RESOURCE_ID: u16 = 1;
 const TRAY_ICON_LOGGED_OUT_RESOURCE_ID: u16 = 4;
@@ -414,7 +414,7 @@ fn tray_status_json(config: &AgentConfig) -> String {
     let login = tray_login_status(config);
     let user_groups = tray_user_group_labels(config, &login);
     format!(
-        "{{\"supported\":{},\"agent_id\":\"{}\",\"project_id\":\"{}\",\"mode\":\"{}\",\"tooltip\":\"{}\",\"icon\":\"embedded-resource:{}\",\"icon_variant\":\"{}\",\"icon_loaded\":{},\"logged_in\":{},\"username\":\"{}\",\"menu\":{},\"about\":{{\"name\":\"{}\",\"user_groups\":{},\"user_group_count\":{},\"author\":\"{}\",\"repository\":\"{}\",\"support\":\"{}\",\"license\":\"{}\"}},\"menu_events\":[\"WM_CONTEXTMENU\",\"WM_RBUTTONUP\",\"WM_TIMER\"]}}",
+        "{{\"supported\":{},\"agent_id\":\"{}\",\"project_id\":\"{}\",\"mode\":\"{}\",\"tooltip\":\"{}\",\"icon\":\"embedded-resource:{}\",\"icon_variant\":\"{}\",\"icon_loaded\":{},\"logged_in\":{},\"username\":\"{}\",\"menu\":{},\"about\":{{\"name\":\"{}\",\"user_groups\":{},\"user_group_count\":{},\"author\":\"{}\",\"repository\":\"{}\",\"support\":\"{}\",\"license\":\"{}\"}},\"menu_events\":[\"WM_LBUTTONDBLCLK\",\"WM_CONTEXTMENU\",\"WM_RBUTTONUP\",\"WM_TIMER\"]}}",
         tray_supported(),
         json_escape(&config.agent_id),
         json_escape(&config.project_id),
@@ -2787,7 +2787,7 @@ mod windows_tray {
     const TRAY_CALLBACK_MESSAGE: Uint = WM_USER + 1;
     const WM_CONTEXTMENU: Uint = 0x007B;
     const WM_DESTROY: Uint = 0x0002;
-    const WM_LBUTTONUP: Uint = 0x0202;
+    const WM_LBUTTONDBLCLK: Uint = 0x0203;
     const WM_NULL: Uint = 0x0000;
     const WM_RBUTTONUP: Uint = 0x0205;
     const WM_TIMER: Uint = 0x0113;
@@ -2858,7 +2858,6 @@ mod windows_tray {
         cga_admin_web_url: Vec<u16>,
         settings_url: Vec<u16>,
         log_dir: Vec<u16>,
-        status_text: Vec<u16>,
         about_text: Vec<u16>,
     }
 
@@ -3018,7 +3017,6 @@ mod windows_tray {
     }
 
     fn tray_state(config: &AgentConfig, settings_url: &str, login: TrayLoginStatus) -> TrayState {
-        let status_text = tray_status_text(config, &login);
         let about_text = tray_about_text(config, &login);
         let account_label = escape_menu_label(&tray_login_menu_label(&login));
         TrayState {
@@ -3028,22 +3026,8 @@ mod windows_tray {
             cga_admin_web_url: wide_null(&cga_admin_web_url(config)),
             settings_url: wide_null(settings_url),
             log_dir: wide_null(&config.log_dir.to_string_lossy()),
-            status_text: wide_null(&status_text),
             about_text: wide_null(&about_text),
         }
-    }
-
-    fn tray_status_text(config: &AgentConfig, login: &TrayLoginStatus) -> String {
-        let account = if login.logged_in {
-            format!("Signed in as {}", login.username)
-        } else {
-            "Not signed in".to_string()
-        };
-        let user_groups = tray_user_group_summary(config, login);
-        format!(
-            "CGA-Relay is running.\nRelay: {}\nUser Groups: {}\nAccount: {}\nRight-click for Open CGA Web, Settings, Logs, About, or Exit.",
-            config.agent_id, user_groups, account
-        )
     }
 
     fn tray_about_text(config: &AgentConfig, login: &TrayLoginStatus) -> String {
@@ -3067,13 +3051,8 @@ mod windows_tray {
     ) -> Lresult {
         match msg {
             TRAY_CALLBACK_MESSAGE => match tray_event(l_param) {
-                WM_LBUTTONUP => {
-                    let caption = wide_null("CGA-Relay");
-                    let fallback = wide_null("CGA-Relay is running. Right-click for menu.");
-                    let text = tray_state_from_hwnd(hwnd)
-                        .map(|state| state.status_text.as_ptr())
-                        .unwrap_or(fallback.as_ptr());
-                    MessageBoxW(hwnd, text, caption.as_ptr(), MB_OK | MB_ICONINFORMATION);
+                WM_LBUTTONDBLCLK => {
+                    handle_menu_command(hwnd, ID_MENU_SETTINGS);
                     0
                 }
                 WM_RBUTTONUP => {
@@ -3164,7 +3143,6 @@ mod windows_tray {
         }
         state.login = login;
         state.account_label = wide_null(&escape_menu_label(&tray_login_menu_label(&state.login)));
-        state.status_text = wide_null(&tray_status_text(&state.config, &state.login));
         state.about_text = wide_null(&tray_about_text(&state.config, &state.login));
         let tooltip = tray_tooltip(&state.config, &state.login);
         modify_icon(hwnd, h_instance, &tooltip, state.login.logged_in);

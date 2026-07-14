@@ -420,7 +420,9 @@ fn tray_status_reports_notification_area_mode_without_starting_loop() {
     assert!(out.contains("\"author\":\"Nate Scott\""));
     assert!(out.contains("\"repository\":\"https://github.com/nascousa/cga\""));
     assert!(out.contains("\"support\":\"https://github.com/nascousa/cga/issues\""));
-    assert!(out.contains("\"menu_events\":[\"WM_CONTEXTMENU\",\"WM_RBUTTONUP\",\"WM_TIMER\"]"));
+    assert!(out.contains(
+        "\"menu_events\":[\"WM_LBUTTONDBLCLK\",\"WM_CONTEXTMENU\",\"WM_RBUTTONUP\",\"WM_TIMER\"]"
+    ));
     if cfg!(windows) {
         assert!(out.contains("\"supported\":true"));
         assert!(out.contains("\"icon_loaded\":true"));
