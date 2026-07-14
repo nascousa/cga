@@ -4,6 +4,8 @@ This report summarizes the current live database-backed CGA benchmark for Contex
 
 The benchmark compares broad source context against graph-scoped CG context made from the target symbol excerpt plus one neighboring graph excerpt. It reports prompt-token reduction and Hallucination Pressure Score (HPS), a deterministic pre-answer context risk score.
 
+This is a historical 2026-06-02 snapshot from the earlier fixed-neighbor methodology. It does not evaluate model answers, citation correctness, regression gates, or adaptive expansion. The current benchmark implementation freezes real `CALLS`, `IMPORTS`, and `FLOWS_TO` candidates and evaluates them separately with the controlled answer runner described in [README.md](README.md). The figures below have not been relabeled as answer-quality results.
+
 Lower HPS is better.
 
 ```text
@@ -51,14 +53,15 @@ The final results are averaged across 102 total real-code cases.
 
 The live run is intentionally not flattened into a single success claim: ADC's HPS increased slightly under this conservative neighboring-context setup, while BrowserAgent and IcM_Automation improved. Across all 102 real-data cases, CG reduced average tokens by 90.44% and reduced average HPS by 13.34%.
 
-## Reproduce The Live Benchmark
+## Run The Current Live Benchmark
 
-Run the live database-backed benchmark against currently registered CGA projects:
+Run the current target-first database-backed benchmark and freeze its graph expansion candidates. Because the methodology has changed since this historical snapshot, this command produces a new case-set hash and should not be expected to reproduce the figures above:
 
 ```powershell
 python -m src.scripts.run_live_context_quality_benchmark `
-  --projects BrowserAgent IcM_Automation ADC `
+  --projects BrowserAgent IcM_Automation ContextGraphAgent `
   --cases-per-project 34 `
+  --frozen-cases docs/benchmarks/context-quality-live-projects.cases.jsonl `
   --output docs/benchmarks/context-quality-live-projects.report.json `
   --markdown docs/benchmarks/context-quality-live-projects.report.md `
   --run-date 2026-06-02

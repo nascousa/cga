@@ -1,4 +1,14 @@
-from scripts.run_live_context_quality_benchmark import render_markdown, summarize_projects
+import json
+
+import pytest
+
+from scripts.run_live_context_quality_benchmark import (
+    frozen_case_set_sha256,
+    load_frozen_cases,
+    render_markdown,
+    summarize_projects,
+    write_frozen_cases,
+)
 
 
 def test_summarize_projects_averages_live_scores() -> None:
@@ -99,3 +109,23 @@ def test_render_markdown_includes_live_repro_command() -> None:
     assert "The JSON report contains the full per-case scoring output and is intended as a local artifact." in markdown
     assert "Project ID" not in markdown
     assert "D:/Repos/ProjectA" not in markdown
+
+
+def test_frozen_cases_are_immutable_by_default(tmp_path) -> None:
+    path = tmp_path / "cases.jsonl"
+    cases = [{"id": "case-1", "project": "ProjectA", "query": "Where?"}]
+
+    digest = write_frozen_cases(path, cases)
+
+    assert load_frozen_cases(path) == cases
+    assert digest == frozen_case_set_sha256(cases)
+    assert json.loads(path.read_text(encoding="utf-8")) == cases[0]
+    with pytest.raises(FileExistsError, match="refresh-frozen-cases"):
+        write_frozen_cases(path, cases)
+
+
+def test_frozen_case_hash_changes_with_case_content() -> None:
+    first = frozen_case_set_sha256([{"id": "case-1"}])
+    second = frozen_case_set_sha256([{"id": "case-2"}])
+
+    assert first != second

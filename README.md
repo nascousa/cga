@@ -1,15 +1,15 @@
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.111
+- **Version:** 1.30.112
 - **Status:** Published
 - **Author:** Nate Scott
-- **Date:** 2026-07-10 (CGA-Relay branch graphs)
+- **Date:** 2026-07-14 (Answer-quality benchmarks and Azure Policy monitoring)
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
 CGA is dedicated to AI-FIRST engineering teams that want local, evidence-backed context for agentic development workflows.
 
-In the current live multi-project benchmark, CGA reduced prompt tokens by **90.44%** on average while lowering Hallucination Pressure Score by **13.34%** across **102 real-code cases**.
+In the published 2026-06-02 live multi-project benchmark, CGA reduced prompt tokens by **90.44%** on average while lowering Hallucination Pressure Score by **13.34%** across **102 real-code cases**. This is a historical pre-answer HPS snapshot; it is not a model task-completion result.
 
 ![CGA 3D graph viewer rotating project relationships](docs/site/cga-ui-3d-graph-rotating.png)
 
@@ -93,9 +93,9 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 |---|---|
 | ![CGA graph viewer layout settings over the graph canvas](docs/site/cga-ui-viewer-layout-settings.png) | ![CGA graph canvas focused on projected relationships](docs/site/cga-ui-3d-graph-stage.png) |
 
-## Benchmark Snapshot
+## Historical Benchmark Snapshot
 
-The latest live database-backed run selected three active projects from CGA, generated 34 deterministic symbol-level cases per project, and compared broad source context against graph-scoped CG context.
+The published 2026-06-02 database-backed run selected three active projects from CGA, generated 34 deterministic symbol-level cases per project, and compared broad source context against graph-scoped CG context.
 
 | Metric | Result |
 |---|---:|
@@ -109,7 +109,7 @@ The latest live database-backed run selected three active projects from CGA, gen
 | Average CG tokens | 483.29 |
 | Average token reduction | 90.44% |
 
-The run is intentionally reported with nuance: one project's HPS increased under the conservative neighboring-context setup, while the cross-project average improved. See [docs/benchmarks/live-context-quality.md](docs/benchmarks/live-context-quality.md) for the full table, methodology, and reproduction command.
+The run is intentionally reported with nuance: one project's HPS increased under the conservative neighboring-context setup, while the cross-project average improved. This is a pre-answer 2026-06-02 snapshot, not evidence of model task completion. The current benchmark also supports frozen graph expansion, controlled model answers, citation scoring, and per-project regression gates; no answer-level result is claimed until that runner completes. See [docs/benchmarks/live-context-quality.md](docs/benchmarks/live-context-quality.md) for the historical table and [docs/benchmarks/README.md](docs/benchmarks/README.md) for the current workflow.
 
 ## Documentation
 

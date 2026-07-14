@@ -97,6 +97,81 @@ async def test_extension_config_update_persists(auth_pg_pool, tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_extension_config_rejects_inline_secrets(auth_pg_pool, tmp_path) -> None:
+    async with auth_pg_pool.acquire() as db:
+        await _seed_project(db, str(tmp_path))
+
+        with pytest.raises(ValueError, match="notification_webhook_url"):
+            await update_extension_config(
+                db,
+                AZURE_POLICY_EXTENSION_ID,
+                1,
+                ExtensionConfigUpdate(
+                    enabled=True,
+                    config={"notification_webhook_url": "https://alerts.example/secret-hook"},
+                ),
+            )
+
+        with pytest.raises(ValueError, match="client_secret"):
+            await run_project_extension(
+                db,
+                AZURE_POLICY_EXTENSION_ID,
+                config_override={"client_secret": "never-persist-client-secret"},
+            )
+
+        with pytest.raises(ValueError, match="model_endpoint"):
+            await update_extension_config(
+                db,
+                AZURE_POLICY_EXTENSION_ID,
+                1,
+                ExtensionConfigUpdate(
+                    enabled=True,
+                    config={
+                        "model_summary_enabled": True,
+                        "model_endpoint": "https://model.example/v1?api_key=never-persist-api-key",
+                    },
+                ),
+            )
+
+        with pytest.raises(ValueError, match="notification channel"):
+            await update_extension_config(
+                db,
+                AZURE_POLICY_EXTENSION_ID,
+                1,
+                ExtensionConfigUpdate(enabled=True, config={"notifications_enabled": True}),
+            )
+
+        with pytest.raises(ValueError, match="valid email"):
+            await update_extension_config(
+                db,
+                AZURE_POLICY_EXTENSION_ID,
+                1,
+                ExtensionConfigUpdate(
+                    enabled=True,
+                    config={
+                        "notifications_enabled": True,
+                        "notification_email_recipients": ["not-an-email"],
+                    },
+                ),
+            )
+
+        with pytest.raises(ValueError, match="activity_subscription_ids"):
+            await update_extension_config(
+                db,
+                AZURE_POLICY_EXTENSION_ID,
+                1,
+                ExtensionConfigUpdate(
+                    enabled=True,
+                    config={
+                        "azure_monitor_enabled": True,
+                        "management_group_id": "platform",
+                        "include_activity": True,
+                    },
+                ),
+            )
+
+
+@pytest.mark.asyncio
 async def test_run_project_extension_records_scan_result(auth_pg_pool, tmp_path) -> None:
     _write_policy_fixture(tmp_path)
 
@@ -131,6 +206,7 @@ async def test_run_platform_extension_records_scan_result(auth_pg_pool, tmp_path
                 },
             ),
         )
+
         run = await run_project_extension(db, AZURE_POLICY_EXTENSION_ID)
         runs = await list_extension_runs(db, AZURE_POLICY_EXTENSION_ID)
 
@@ -196,3 +272,137 @@ async def test_execute_platform_extension_schedule_task_runs_internal_extension(
     assert run.response["extension_id"] == AZURE_POLICY_EXTENSION_ID
     assert run.response["project_id"] is None
     assert run.response["summary"]["finding_count"] == 0
+
+
+@pytest.mark.asyncio
+async def test_live_monitor_persists_scoped_snapshots_and_loads_baseline(auth_pg_pool, monkeypatch) -> None:
+    scope = "/subscriptions/00000000-0000-0000-0000-000000000001"
+    captured_snapshots = [
+        {"schema_version": 1, "scope": scope, "captured_at": "2026-07-14T08:00:00Z", "assignments": {}},
+        {"schema_version": 1, "scope": scope, "captured_at": "2026-07-14T09:00:00Z", "assignments": {}},
+    ]
+    previous_snapshots = []
+
+    def fake_run_extension(extension_id, config, *, previous_snapshot=None):
+        previous_snapshots.append(previous_snapshot)
+        snapshot = captured_snapshots[len(previous_snapshots) - 1]
+        return {
+            "extension_id": extension_id,
+            "status": "completed",
+            "severity": "info",
+            "summary": {"finding_count": 0, "severity_counts": {}},
+            "findings": [],
+            "_snapshot": snapshot,
+            "_snapshot_scope": scope,
+        }
+
+    monkeypatch.setattr("backend.extensions.service.run_extension", fake_run_extension)
+
+    async with auth_pg_pool.acquire() as db:
+        await update_extension_config(
+            db,
+            AZURE_POLICY_EXTENSION_ID,
+            None,
+            ExtensionConfigUpdate(
+                enabled=True,
+                config={
+                    "repo_scan_enabled": False,
+                    "azure_monitor_enabled": True,
+                    "subscription_id": "00000000-0000-0000-0000-000000000001",
+                    "snapshot_retention_count": 30,
+                },
+            ),
+        )
+        first = await run_project_extension(db, AZURE_POLICY_EXTENSION_ID)
+        second = await run_project_extension(db, AZURE_POLICY_EXTENSION_ID)
+        async with db.execute(
+            "SELECT scope_key, snapshot_json FROM extension_snapshots ORDER BY captured_at, id"
+        ) as cur:
+            rows = await cur.fetchall()
+
+    assert previous_snapshots == [None, captured_snapshots[0]]
+    assert len(rows) == 2
+    assert rows[0]["scope_key"] == scope
+    assert json.loads(rows[1]["snapshot_json"]) == captured_snapshots[1]
+    assert "_snapshot" not in first.result
+    assert "_snapshot" not in second.result
+
+
+@pytest.mark.asyncio
+async def test_notification_failure_does_not_fail_run_or_snapshot(auth_pg_pool, monkeypatch) -> None:
+    scope = "/subscriptions/00000000-0000-0000-0000-000000000001"
+    snapshot = {
+        "schema_version": 1,
+        "scope": scope,
+        "captured_at": "2026-07-14T10:00:00Z",
+        "assignments": {},
+    }
+
+    def fake_run_extension(extension_id, config, *, previous_snapshot=None):
+        return {
+            "extension_id": extension_id,
+            "status": "completed",
+            "severity": "critical",
+            "summary": {"finding_count": 1, "severity_counts": {"critical": 1}},
+            "findings": [{"check": "assignment_drift", "severity": "critical", "message": "Changed."}],
+            "_snapshot": snapshot,
+            "_snapshot_scope": scope,
+        }
+
+    def fail_notifications(extension_id, result, config, *, smtp_config):
+        raise RuntimeError("webhook URL must never be persisted in this failure")
+
+    monkeypatch.setattr("backend.extensions.service.run_extension", fake_run_extension)
+    monkeypatch.setattr(
+        "backend.extensions.service.deliver_extension_notifications",
+        fail_notifications,
+        raising=False,
+    )
+
+    async with auth_pg_pool.acquire() as db:
+        await update_extension_config(
+            db,
+            AZURE_POLICY_EXTENSION_ID,
+            None,
+            ExtensionConfigUpdate(
+                enabled=True,
+                config={
+                    "repo_scan_enabled": False,
+                    "azure_monitor_enabled": True,
+                    "subscription_id": "00000000-0000-0000-0000-000000000001",
+                    "notifications_enabled": True,
+                    "notification_webhook_env": "POLICY_WEBHOOK_URL",
+                },
+            ),
+        )
+        run = await run_project_extension(db, AZURE_POLICY_EXTENSION_ID)
+        async with db.execute("SELECT COUNT(*) AS count FROM extension_snapshots") as cur:
+            row = await cur.fetchone()
+
+    assert run.status == "success"
+    assert run.result["outputs"]["notifications"] == {
+        "status": "failed",
+        "channels": {},
+        "error_type": "RuntimeError",
+    }
+    assert "webhook" not in json.dumps(run.result["outputs"]["notifications"], sort_keys=True)
+    assert row["count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_extension_failure_persists_only_error_type(auth_pg_pool, tmp_path, monkeypatch) -> None:
+    _write_policy_fixture(tmp_path)
+
+    def fail_run(*args, **kwargs):
+        raise RuntimeError("access token never-persist-this-token")
+
+    monkeypatch.setattr("backend.extensions.service.run_extension", fail_run)
+
+    async with auth_pg_pool.acquire() as db:
+        await _seed_project(db, str(tmp_path))
+        run = await run_project_extension(db, AZURE_POLICY_EXTENSION_ID, 1)
+
+    assert run.status == "failed"
+    assert run.summary == {"error_type": "RuntimeError"}
+    assert run.result["findings"][0]["evidence"] == {"error_type": "RuntimeError"}
+    assert "never-persist" not in run.model_dump_json()

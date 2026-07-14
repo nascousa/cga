@@ -105,6 +105,8 @@ async def run_admin_platform_extension(
         return await run_project_extension(db, extension_id, config_override=(body or ExtensionRunRequest()).config_override)
     except ExtensionNotFoundError as exc:
         raise _not_found(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/{extension_id}/runs", response_model=list[ExtensionRunOut])
@@ -161,6 +163,8 @@ async def run_admin_extension(
         return await run_project_extension(db, extension_id, project_id, config_override=(body or ExtensionRunRequest()).config_override)
     except (ExtensionNotFoundError, ExtensionProjectNotFoundError) as exc:
         raise _not_found(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.get("/{extension_id}/projects/{project_id}/runs", response_model=list[ExtensionRunOut])
