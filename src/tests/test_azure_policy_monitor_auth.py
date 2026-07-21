@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from subprocess import CompletedProcess
 from typing import Any
 
 
@@ -10,6 +11,7 @@ EXTENSION_SRC = Path(__file__).resolve().parents[2] / "extensions" / "azure-poli
 if str(EXTENSION_SRC) not in sys.path:
     sys.path.insert(0, str(EXTENSION_SRC))
 
+from policy_monitor import azure_auth
 from policy_monitor.azure_auth import AzureTokenHttpResponse, DefaultAzureAccessTokenProvider
 
 
@@ -88,4 +90,28 @@ def test_environment_federated_identity_reads_assertion_file(tmp_path) -> None:
         "client_id": "client-id",
         "grant_type": "client_credentials",
         "scope": "https://management.azure.com/.default",
+    }
+
+
+def test_default_command_runner_resolves_windows_command_shim(monkeypatch) -> None:
+    observed: dict[str, Any] = {}
+
+    monkeypatch.setattr(azure_auth.shutil, "which", lambda name: "C:\\AzureCLI\\az.cmd")
+
+    def fake_run(command: list[str], **kwargs: Any) -> CompletedProcess[str]:
+        observed["command"] = command
+        observed["kwargs"] = kwargs
+        return CompletedProcess(command, 0, stdout="output", stderr="")
+
+    monkeypatch.setattr(azure_auth.subprocess, "run", fake_run)
+
+    result = azure_auth._run_command(["az", "account", "show"], 12.0)
+
+    assert result == (0, "output", "")
+    assert observed["command"] == ["C:\\AzureCLI\\az.cmd", "account", "show"]
+    assert observed["kwargs"] == {
+        "capture_output": True,
+        "text": True,
+        "timeout": 12.0,
+        "check": False,
     }

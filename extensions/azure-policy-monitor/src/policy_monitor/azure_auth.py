@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import time
 import urllib.error
@@ -247,8 +248,11 @@ class DefaultAzureAccessTokenProvider:
 
 
 def _run_command(command: list[str], timeout_seconds: float) -> tuple[int, str, str]:
+    executable = shutil.which(command[0])
+    if not executable:
+        raise FileNotFoundError(command[0])
     completed = subprocess.run(
-        command,
+        [executable, *command[1:]],
         capture_output=True,
         text=True,
         timeout=timeout_seconds,

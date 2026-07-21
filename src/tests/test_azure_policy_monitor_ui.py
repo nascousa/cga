@@ -11,16 +11,20 @@ class IdCollector(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.ids: set[str] = set()
+        self.footer_styles: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attributes = dict(attrs)
         if attributes.get("id"):
             self.ids.add(str(attributes["id"]))
+        if tag == "footer" and "footer" in str(attributes.get("class") or "").split():
+            self.footer_styles.append(str(attributes.get("style") or ""))
 
 
 def test_policy_monitor_admin_has_live_monitor_and_output_controls() -> None:
+    markup = FRONTEND.read_text(encoding="utf-8")
     parser = IdCollector()
-    parser.feed(FRONTEND.read_text(encoding="utf-8"))
+    parser.feed(markup)
 
     required_ids = {
         "extension-config-repo-enabled",
@@ -50,3 +54,7 @@ def test_policy_monitor_admin_has_live_monitor_and_output_controls() -> None:
     }
 
     assert required_ids <= parser.ids
+    assert '.topbar-spacer { display: none; }' in markup
+    assert '.topbar-nav::-webkit-scrollbar { display: none; }' in markup
+    assert parser.footer_styles
+    assert "position:fixed" not in parser.footer_styles[-1].replace(" ", "").lower()

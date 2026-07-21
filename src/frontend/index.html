@@ -2626,6 +2626,21 @@
     .user-dropdown-item:hover { background: rgba(255,255,255,.05); }
     .user-dropdown-item.danger { color: var(--danger); }
     .user-dropdown-divider { height: 1px; background: var(--border); margin: 2px 0; }
+    @media (max-width: 640px) {
+      .topbar { gap: 8px; padding-inline: 12px; }
+      .topbar .logo-text,
+      #app-version,
+      #topbar-user { display: none; }
+      .topbar-spacer { display: none; }
+      .topbar-nav {
+        flex: 1 1 auto;
+        min-width: 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+      }
+      .topbar-nav::-webkit-scrollbar { display: none; }
+      .topbar .user-badge { flex: 0 0 auto; }
+    }
   </style>
 </head>
 <body>
@@ -2667,7 +2682,7 @@
       <span class="logo-text">CONTEXT GRAPH AGENT</span>
     </a>
     <span id="app-version" style="font-size:11px;color:var(--muted);padding-left:6px;align-self:center">v…</span>
-    <div style="flex:1"></div>
+    <div class="topbar-spacer" style="flex:1"></div>
     <div class="topbar-nav">
       <button class="tab-btn" id="tab-briefing-btn" style="display:none" onclick="switchTab('briefing',this)">Dashboard</button>
       <button class="tab-btn" id="tab-report-btn" style="display:none" onclick="switchTab('report',this)">Report</button>
@@ -2682,7 +2697,7 @@
     </div>
     <div class="user-badge">
       <div class="user-menu-wrap" id="user-menu-wrap">
-        <button class="user-menu-btn" id="user-menu-btn" onclick="toggleUserMenu()">
+        <button class="user-menu-btn" id="user-menu-btn" onclick="toggleUserMenu()" aria-label="Open user menu" title="User menu">
           <span id="topbar-user"></span>
           <span id="topbar-role" class="role-tag"></span>
           <span class="chevron">&#9660;</span>
@@ -4011,7 +4026,7 @@
     </div>
   </div>
 
-  <footer class="footer" style="position:fixed;left:0;right:0;bottom:0;background:rgba(10,14,29,.92);backdrop-filter:blur(4px);">Created by Nate Scott (NASCO)</footer>
+  <footer class="footer" style="background:rgba(10,14,29,.92);backdrop-filter:blur(4px);">Created by Nate Scott (NASCO)</footer>
 </div>
 
 <!-- MODAL: New / Edit Project -->
@@ -7013,7 +7028,7 @@ async function triggerProjectIndex(projectId, btn) {
   } catch (e) {
     toast(e.message, 'error');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Reindex'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Incremental Index'; }
   }
 }
 
@@ -7342,7 +7357,7 @@ function filterProjects(q) {
           <button class="btn btn-sm btn-ghost" onclick="openGenerateToken(${p.id})">+ Token</button>
           ${_me?.role==='admin'?`
             ${isStale ? `<button class="btn btn-sm btn-danger" onclick="recoverStaleIndexJob(${p.id})" title="Mark stale index job failed and unlock this project">Recover</button>` : ''}
-            <button class="btn btn-sm btn-ghost" onclick="triggerProjectIndex(${p.id},this)" ${isProcessing ? 'disabled title="Index job already running"' : ''}>Reindex</button>
+            <button class="btn btn-sm btn-ghost" onclick="triggerProjectIndex(${p.id},this)" ${isProcessing ? 'disabled title="Index job already running"' : ''}>Incremental Index</button>
             <button class="btn btn-sm btn-ghost" onclick="triggerProjectFullIndex(${p.id},this)" ${isProcessing ? 'disabled title="Index job already running"' : ''}>Full Index</button>
             <button class="btn btn-sm" onclick="openEditProject(${p.id})">Edit</button>
             ${p.is_active

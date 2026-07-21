@@ -81,7 +81,7 @@ from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.113"
+APP_VERSION = "1.30.114"
 AUTH_SCHEMA_VERSION = 1
 GRAPH_SCHEMA_VERSION = 1
 RUNTIME_CONFIG_VERSION = 1

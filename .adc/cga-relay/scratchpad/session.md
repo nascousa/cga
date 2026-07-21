@@ -4,10 +4,17 @@
 Write down exactly what you are currently doing, the last known successful step, and any immediate blockers.
 This ensures the NEXT agent handling this repository knows exactly where you left off.
 
-- **Current Task:** 
-- **Last Action Taken:** 
-- **Failing Tests / Errors:** 
-- **Next Steps:** 
+- **Current Task:** Finalize the CGA `1.30.114` Azure CLI authentication and Admin Projects UI update.
+- **Last Action Taken:** Validated the focused Python and Rust suites, full Python suite, isolated Rust release build, version consistency, diff hygiene, and shared-browser desktop/mobile behavior before commit.
+- **Failing Tests / Errors:** Official `cga-relay` indexing and sync are blocked by stale project/account authentication. The full Python suite also has two unrelated baseline failures in unchanged README/query-strategy paths.
+- **Next Steps:** Refresh the `cga-relay` project or account credential and retry official change aggregation; do not count fallback indexing as completion.
+
+## 2026-07-21 CGA 1.30.114 Commit Validation
+
+- **Current Task:** Commit the Windows Azure CLI shim resolution, responsive Admin UI adjustments, explicit `Incremental Index` project action label, regression tests, and synchronized `1.30.114` metadata.
+- **Last Action Taken:** Focused Python tests passed (`5 passed`), CGA-Relay tests passed (`32 passed`), Rust formatting passed, Python compileall passed, `git diff --check` passed, and the isolated release build succeeded. Shared-browser validation confirmed `v1.30.114`, `Incremental Index` actions, no 390 px horizontal overflow, responsive topbar hiding, accessible user-menu labeling, and a non-fixed footer.
+- **Failing Tests / Errors:** The full Python suite reported two failures outside this diff: `test_readme_uses_live_multi_project_benchmark_results` expects a `Benchmark Snapshot` heading already absent in `HEAD`, and `test_cg_first_query_strategy_class_run` targets unchanged query-strategy code. The standard release executable remained locked by the active tray process, so release validation used `tmp/cga-relay-target-commit`. Official `cga-relay` incremental indexing and account sync were attempted and failed: project-token requests returned `403 Token is not valid for this project_id`, while the account-token path returned `401 Not authenticated`.
+- **Next Steps:** Commit the validated source changes. Refresh relay authentication and retry `account/ContextGraphAgent` indexing and change aggregation separately; no direct API or `cga-mcp-server` fallback counts as official completion.
 
 ## 2026-07-10 CGA-Relay Branch Graph Support
 
