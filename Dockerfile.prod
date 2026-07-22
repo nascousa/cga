@@ -19,7 +19,7 @@ COPY extensions/ ./extensions/
 
 # Entrypoint: init DB then start server
 COPY docker-entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 ENV PYTHONPATH=/app/src
 EXPOSE 8000

@@ -11,7 +11,20 @@ CGA is dedicated to AI-FIRST engineering teams that want local, evidence-backed 
 
 In the published 2026-06-02 live multi-project benchmark, CGA reduced prompt tokens by **90.44%** on average while lowering Hallucination Pressure Score by **13.34%** across **102 real-code cases**. This is a historical pre-answer HPS snapshot; it is not a model task-completion result.
 
-![CGA 3D graph viewer rotating project relationships](docs/site/cga-ui-3d-graph-rotating.png)
+## For AI Coding Agents
+
+CGA is related to a knowledge graph, but it is narrower and more execution-oriented: it parses source code into an AST-backed graph of files, symbols, imports, calls, definitions, containment, dependencies, and lightweight data flow. The agent queries that graph before opening raw files, then expands only the few excerpts needed for the task.
+
+That makes CGA different from embedding-only RAG or broad text search:
+
+- **Graph first:** retrieve connected symbols, dependency paths, and evidence-bearing excerpts before generation.
+- **File reads second:** open raw source only when exact line-level context is needed.
+- **Local-first:** keep repository context, indexes, and operational evidence under the developer or team runtime.
+- **Measurable:** compare broad source context against graph-scoped context with deterministic context-quality benchmarks.
+
+For the short answers to common questions from agent builders, see [docs/faq.md](docs/faq.md).
+
+![CGA graph viewer rotating project relationships](docs/cga_dvd.webp)
 
 ## Why CGA
 
@@ -117,7 +130,9 @@ The run is intentionally reported with nuance: one project's HPS increased under
 - [Runtime operations](docs/runtime-operations.md) - work briefing, schedules, persistence, backup, and default local runtimes.
 - [AI-first readiness](docs/ai-first-readiness.md) - readiness snapshots and observe-only evidence packs for AI-first team planning.
 - [AI-first correlation contract](docs/ai-first-correlation-contract.md) - standard task, issue, PR, and activity ids for evidence packs and traces.
+- [How CGA works](docs/how-it-works.md) - compact deep dive on graph-first retrieval, agent flow, LSPs, AST-Grep, and quality controls.
 - [MCP query quickstart](docs/mcp-agent-query-quickstart.md) - endpoint discovery, query clients, batch mode, and CG-first strategy.
+- [FAQ](docs/faq.md) - short answers on knowledge graphs, RAG, token reduction, MCP, and benchmarks.
 - [Benchmark guide](docs/benchmarks/README.md) - deterministic context-quality benchmark model and commands.
 - [Live benchmark report](docs/benchmarks/live-context-quality.md) - current live multi-project benchmark summary.
 - [ADC framework notes](docs/adc-framework.md) - project context governance and AI-agent operating model.

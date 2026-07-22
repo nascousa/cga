@@ -78,6 +78,44 @@ def _normalize_repo_path(repo_path: str) -> str:
     return repo_path
 
 
+def _resolve_repo_root(repo_path: str) -> Path:
+    resolved = Path(_normalize_repo_path(repo_path))
+    if not resolved.is_dir():
+        raise FileNotFoundError(
+            f"Repository path is not visible to the CGA indexer: {repo_path}. "
+            "Mount the repository into the API/indexer runtime or trigger indexing through a local cga-relay."
+        )
+    return resolved
+
+
+def _looks_like_windows_absolute_path(path: str) -> bool:
+    normalized = path.replace("\\", "/")
+    return len(normalized) >= 3 and normalized[1:3] == ":/" and normalized[0].isalpha()
+
+
+def _resolve_changed_path(repo_path: str, resolved_repo_path: Path, changed_path: str) -> str:
+    candidate = Path(changed_path)
+    if candidate.exists():
+        return str(candidate)
+
+    normalized = changed_path.replace("\\", "/")
+    original_repo = repo_path.replace("\\", "/").rstrip("/")
+    resolved_repo = resolved_repo_path.as_posix().rstrip("/")
+
+    relative_path: str | None = None
+    if original_repo and normalized.startswith(f"{original_repo}/"):
+        relative_path = normalized[len(original_repo) + 1:]
+    elif resolved_repo and normalized.startswith(f"{resolved_repo}/"):
+        return normalized
+    elif not Path(normalized).is_absolute() and not _looks_like_windows_absolute_path(normalized):
+        relative_path = normalized
+
+    if relative_path is not None:
+        return str(resolved_repo_path / Path(*relative_path.split("/")))
+
+    return str(candidate)
+
+
 def _resolve_import_path(source_file: str, imported_module: str, repo_path: str) -> str | None:
     """Resolve relative import to actual file path (best effort).
     
@@ -128,10 +166,10 @@ class IndexPipeline:
         self._graph_lock = threading.Lock()
 
     def index_full(self, repo_path: str) -> dict:
-        resolved_repo_path = _normalize_repo_path(repo_path)
-        files = list(discover_files(resolved_repo_path))
+        resolved_repo_path = _resolve_repo_root(repo_path)
+        files = list(discover_files(str(resolved_repo_path)))
         workers = _adaptive_workers(len(files))
-        log.info("pipeline.full.start", repo_path=repo_path, resolved_repo_path=resolved_repo_path, files=len(files), workers=workers)
+        log.info("pipeline.full.start", repo_path=repo_path, resolved_repo_path=str(resolved_repo_path), files=len(files), workers=workers)
         self._delete_repo_subgraph(repo_path)
         self._upsert_repo(repo_path)
         stats: dict = {"files": 0, "skipped": 0, "symbols": 0, "calls": 0, "imports": 0, "variables": 0, "variable_flows": 0, "errors": 0}
@@ -155,21 +193,15 @@ class IndexPipeline:
         return stats
 
     def index_incremental(self, repo_path: str, changed_paths: list[str]) -> dict:
-        resolved_repo_path = _normalize_repo_path(repo_path)
-        log.info("pipeline.incremental.start", changed=len(changed_paths), repo_path=repo_path, resolved_repo_path=resolved_repo_path)
+        resolved_repo_path = _resolve_repo_root(repo_path)
+        log.info("pipeline.incremental.start", changed=len(changed_paths), repo_path=repo_path, resolved_repo_path=str(resolved_repo_path))
         self._upsert_repo(repo_path)
         stats: dict = {"files": 0, "skipped": 0, "symbols": 0, "calls": 0, "imports": 0, "variables": 0, "variable_flows": 0, "errors": 0}
         symbol_map = self._load_symbol_map()
 
         valid_paths: list[str] = []
         for fpath in changed_paths:
-            normalized_fpath = fpath
-            if not Path(normalized_fpath).exists():
-                rel = Path(fpath).as_posix().replace("\\", "/")
-                if rel.startswith("D:/Repos/"):
-                    rel = rel[len("D:/Repos/"):]
-                mapped_file = Path("/repos") / rel
-                normalized_fpath = str(mapped_file)
+            normalized_fpath = _resolve_changed_path(repo_path, resolved_repo_path, fpath)
             if Path(normalized_fpath).suffix.lower() not in SUPPORTED_EXTENSIONS:
                 continue
             valid_paths.append(normalized_fpath)

@@ -28,12 +28,14 @@ from pathlib import Path
 
 import structlog
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
 
 from backend import runtime_config
 from backend.auth.context import _current_project_external_id
 from backend.agent.query_strategy import run_cg_first_strategy
 from backend.graph.registry import GraphRegistry
 from backend.graph import schema as S
+from backend.indexer.pipeline import _normalize_repo_path, _resolve_repo_root
 from backend.perf.context_quality import benchmark_context_quality as run_context_quality_benchmark
 from backend.perf.token_efficiency import benchmark_token_efficiency as run_token_efficiency_benchmark
 from backend.tools.producer import MCPProducer
@@ -42,7 +44,18 @@ from backend.workbriefing.service import WorkActivityValidationError, WorkBriefi
 
 log = structlog.get_logger()
 
-mcp = FastMCP("cga-mcp-server")
+def _csv_env(name: str) -> list[str]:
+    return [part.strip() for part in os.getenv(name, "").split(",") if part.strip()]
+
+
+mcp = FastMCP(
+    "cga-mcp-server",
+    transport_security=TransportSecuritySettings(
+        enable_dns_rebinding_protection=True,
+        allowed_hosts=["127.0.0.1:*", "localhost:*"] + _csv_env("CGA_MCP_ALLOWED_HOSTS"),
+        allowed_origins=["http://127.0.0.1:*", "http://localhost:*"] + _csv_env("CGA_MCP_ALLOWED_ORIGINS"),
+    ),
+)
 
 _registry: GraphRegistry | None = None
 _producer: MCPProducer | None = None
@@ -91,9 +104,10 @@ async def _collect_git_changed_paths(repo_path: str, include_untracked: bool = T
     We classify deletes and renames as destructive because the current incremental
     pipeline does not remove stale symbols for files that disappeared from disk.
     """
+    resolved_repo_path = _normalize_repo_path(repo_path)
     untracked_flag = "--untracked-files=all" if include_untracked else "--untracked-files=no"
     proc = await asyncio.create_subprocess_exec(
-        "git", "-C", repo_path, "status", "--porcelain=v1", untracked_flag,
+        "git", "-C", resolved_repo_path, "status", "--porcelain=v1", untracked_flag,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -346,6 +360,23 @@ async def index_full(repo_path: str, project_name: str | None = None) -> dict:
     """Enqueue a full index job for the given repository path."""
     if not _producer:
         raise RuntimeError("MCP server not initialized")
+    try:
+        _resolve_repo_root(repo_path)
+    except FileNotFoundError:
+        log.warning(
+            "index_full.repo_unavailable",
+            repo_path=repo_path,
+            fallback_mode="cga_relay_or_mount_required",
+        )
+        return {
+            "status": "relay_required",
+            "mode": "relay",
+            "reason": "repo_path_unavailable",
+            "changed_count": 0,
+            "destructive_count": 0,
+            "repo_path": repo_path,
+            "message": "The CGA indexer cannot read this repository path. Mount the checkout into the API/indexer runtime or run a local cga-relay configured for this project.",
+        }
     resolved_project_name = _resolve_project_name(project_name)
     submitted = await _producer.submit_full_index(repo_path, project_name=resolved_project_name)
     # Invalidate cache so stale reads are avoided after re-index
@@ -409,45 +440,33 @@ async def index_repo_changes(
         log.warning(
             "index_repo_changes.git_unavailable",
             repo_path=repo_path,
-            fallback_mode="full",
+            fallback_mode="cga_relay_required",
         )
-        submitted = await _producer.submit_full_index(repo_path, project_name=resolved_project_name)
-        if _cache:
-            _cache.invalidate_all()
-        base_response = {
-            "status": "queued",
-            "mode": "full",
+        return {
+            "status": "relay_required",
+            "mode": "relay",
             "reason": "git_unavailable",
-            "stream_id": submitted["stream_id"],
-            "job_id": submitted["job_id"],
             "changed_count": 0,
             "destructive_count": 0,
             "repo_path": repo_path,
+            "message": "Use cga-relay index_git_incremental so git changes are collected on the developer machine.",
         }
-        # Enrich with queue position and ETA
-        return await _enrich_job_response(submitted["job_id"], base_response)
     except RuntimeError as exc:
         log.warning(
             "index_repo_changes.git_status_failed",
             repo_path=repo_path,
             error=str(exc),
-            fallback_mode="full",
+            fallback_mode="cga_relay_required",
         )
-        submitted = await _producer.submit_full_index(repo_path, project_name=resolved_project_name)
-        if _cache:
-            _cache.invalidate_all()
-        base_response = {
-            "status": "queued",
-            "mode": "full",
+        return {
+            "status": "relay_required",
+            "mode": "relay",
             "reason": "git_status_failed",
-            "stream_id": submitted["stream_id"],
-            "job_id": submitted["job_id"],
             "changed_count": 0,
             "destructive_count": 0,
             "repo_path": repo_path,
+            "message": "Use cga-relay index_git_incremental so git changes are collected on the developer machine.",
         }
-        # Enrich with queue position and ETA
-        return await _enrich_job_response(submitted["job_id"], base_response)
 
     changed_paths = discovered["changed_paths"]
     destructive_paths = discovered["destructive_paths"]

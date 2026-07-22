@@ -48,9 +48,40 @@ Current transport:
 
 ## 3.1) Register MCP in VS Code
 
-The repository includes `.vscode/mcp.json` with placeholder inputs for the CGA token and project id. After starting the desktop stack on port `18001`, use the `cga-mcp-server` entry in VS Code and provide those two values when prompted.
+For local-only development you can still use the SSE endpoints above, but the recommended VS Code setup is `cga-relay` over stdio. This is required when the CGA backend runs somewhere other than the machine that owns the git worktree, such as a remote Docker host on your LAN.
 
-The shared config does not store secrets. It sends the same protected transport headers used by the CLI examples. When VS Code launches `cga-relay` over stdio, that hop is local IPC; relay-to-CGA HTTP requests add the CRYSTALS/CNSA 2.0 profile headers automatically and reject non-loopback plaintext HTTP.
+Install or build `cga-relay` on the developer machine:
+
+```powershell
+Push-Location src/cga-relay
+cargo install --path . --force
+Pop-Location
+cga-relay --help
+```
+
+Use `docs/examples/cga-relay.env.example` to create a machine-local config file under `%USERPROFILE%\.cga\`. Store only environment variable names in that file, never token values. For each project, set `PROJECT_ID` to the CGA project id and `PROJECT_ROOT` to the local checkout path.
+
+Point VS Code at the local relay executable, not the remote SSE endpoint:
+
+```json
+{
+    "servers": {
+        "cga-relay": {
+            "type": "stdio",
+            "command": "cga-relay",
+            "args": ["mcp", "--config", "%USERPROFILE%\\.cga\\my-project.env"],
+            "env": {
+                "CGA_COMMUNICATION_PROFILE": "CRYSTALS-CNSA-2.0",
+                "CGA_TRANSPORT_SCOPE": "local-ipc"
+            }
+        }
+    }
+}
+```
+
+The shared config does not store secrets. When VS Code launches `cga-relay` over stdio, that hop is local IPC; relay-to-CGA HTTP requests add the CRYSTALS/CNSA 2.0 profile headers automatically and reject non-loopback plaintext HTTP.
+
+For cross-LAN setups, expose the remote CGA service through an approved local loopback proxy or a deployment-approved PQC/hybrid-PQC TLS endpoint, then set `API_BASE_URL` and `CONTROL_API_BASE_URL` in the relay env file to that local/protected endpoint. If the Admin page is served from a LAN URL, add that exact origin to `BROWSER_ALLOWED_ORIGINS`, such as `http://<cga-admin-host>:18091`. Keep `cga-relay tray --config ...` running for the project: when Admin Reindex returns `relay_required`, the browser probes the local relay status endpoint on `127.0.0.1:17860-17879` and triggers `index_git_incremental` through the matching relay. The same operation remains available as the relay MCP tool `index_git_incremental` for agents.
 
 ## 4) Run minimal query client
 

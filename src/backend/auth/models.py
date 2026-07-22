@@ -47,6 +47,10 @@ def _unique_positive_ids(values: list[int]) -> list[int]:
     return unique_values
 
 
+def _normalize_repo_path(value: str) -> str:
+    return value.strip().replace("\\", "/")
+
+
 class UserGroupSummary(BaseModel):
     id: int
     group_name: str
@@ -184,6 +188,11 @@ class ProjectCreate(BaseModel):
             raise ValueError("upstream_url must start with http:// or https://")
         return v
 
+    @field_validator("repo_path")
+    @classmethod
+    def normalize_repo_path(cls, v: str) -> str:
+        return _normalize_repo_path(v)
+
 
 class ProjectUpdate(BaseModel):
     project_name: str | None = Field(default=None, min_length=3, max_length=64)
@@ -208,6 +217,13 @@ class ProjectUpdate(BaseModel):
         if not (v.startswith("http://") or v.startswith("https://")):
             raise ValueError("upstream_url must start with http:// or https://")
         return v
+
+    @field_validator("repo_path")
+    @classmethod
+    def normalize_optional_repo_path(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return _normalize_repo_path(v)
 
 
 class ProjectOut(BaseModel):
@@ -300,6 +316,7 @@ class ProjectIndexTriggerOut(BaseModel):
     changed_count: int = 0
     destructive_count: int = 0
     reason: str | None = None
+    message: str | None = None
 
 
 class ProjectIndexRecoveryOut(BaseModel):

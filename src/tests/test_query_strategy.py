@@ -177,28 +177,24 @@ def test_cg_first_query_strategy_class_run(monkeypatch, tmp_path: Path):
         )
     )
 
-    monkeypatch.setattr(strategy, "_read_message_endpoint", lambda base_url: "http://fake-endpoint")
-    monkeypatch.setattr(
-        strategy,
-        "_retrieve_graph_hits",
-        lambda endpoint, query, limit: [
-            {
-                "qualified_name": "pkg.mod.fn",
-                "symbol_type": "function",
-                "file_path": "sample.py",
-                "line_start": 1,
-                "line_end": 2,
-                "summary": "function pkg.mod.fn at sample.py:1-2",
-                "snippet": "def fn(): pass",
-            }
-        ],
-    )
-    monkeypatch.setattr(
-        strategy,
-        "_get_call_graph",
-        lambda endpoint, qualified_name, depth: {"callers": ["a"], "callees": ["b"]},
-    )
+    seen_query: list[str] = []
+
+    async def fake_run_async(query: str):
+        seen_query.append(query)
+        return {
+            "strategy": "cg-first",
+            "source": "contextgraph-client",
+            "used_fallback": False,
+        }
+
+    monkeypatch.setattr(strategy, "run_async", fake_run_async)
 
     result = strategy.run("pkg fn")
+    assert seen_query == ["pkg fn"]
     assert result["source"] == "contextgraph-client"
     assert result["used_fallback"] is False
+
+
+def test_cg_first_query_strategy_message_endpoint_compat(tmp_path: Path):
+    strategy = CGFirstQueryStrategy(StrategyConfig(repo_root=tmp_path, base_url="http://127.0.0.1:8011/"))
+    assert strategy._read_message_endpoint("http://127.0.0.1:8011/") == "http://127.0.0.1:8011/mcp/sse"

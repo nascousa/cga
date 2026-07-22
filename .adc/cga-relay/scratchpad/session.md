@@ -4,10 +4,17 @@
 Write down exactly what you are currently doing, the last known successful step, and any immediate blockers.
 This ensures the NEXT agent handling this repository knows exactly where you left off.
 
-- **Current Task:** Complete the secure standalone CGA-Relay `1.30.117` source check-in while preserving the signed-release publication gate.
-- **Last Action Taken:** Fixed nested MCP JSON field injection, bounded and same-origin-protected the local Settings listener, added Relay assets to the unified release checksum manifest, regression-tested its flat GitHub Release asset names, documented end-user checksum/signature verification, rebuilt and installed the hardened Relay, passed runtime security smoke tests, and completed official `account/ContextGraphAgent` aggregation for five changed snapshots.
-- **Failing Tests / Errors:** None. The local release artifact is intentionally unsigned and therefore cannot be published. The first two target replacement attempts failed closed while Windows retained the exited tray image handle; the later checksum-gated retry succeeded without terminating any non-Relay process. The scoped Python tests retain one existing Starlette/httpx deprecation warning.
-- **Next Steps:** Configure `CGA_RELAY_SIGNING_CERT_BASE64` and `CGA_RELAY_SIGNING_CERT_PASSWORD`, run the release workflow with required Authenticode and RFC 3161 verification, then publish the signed GitHub Release. Never publish the current unsigned local artifact.
+- **Current Task:** Resolve PR #41 against current `origin/main`, validate the semantic conflict resolution, and push the merge commit.
+- **Last Action Taken:** Preserved both the hardened local Settings listener and branch/ref CLI support, separated direct CLI tool forwarding from MCP-local git inspection, resolved the Admin footer in normal document flow, added the required cross-origin relay intent header plus a regression assertion, and passed all 54 Relay tests and 3 focused Admin frontend tests.
+- **Failing Tests / Errors:** None remain. The first Rust compile exposed a missing shared `call_cga_tool` helper; the first full Relay run then exposed an incorrect merged dispatch boundary, and the first frontend run rejected a fixed footer. Each failure was corrected at its owning boundary and the focused checks passed before broader validation.
+- **Next Steps:** Stage the resolved files, run final merge checks, create a signed merge commit, push `dev/readme-docs-restructure-20260603`, run official `account/ContextGraphAgent` change aggregation, and verify PR #41 is mergeable.
+
+## 2026-07-22 PR #41 Merge Conflict Resolution
+
+- **Root Cause:** PR #41 and `origin/main` both changed Relay tool dispatch and the Admin footer. A whole-side conflict choice would either remove branch/ref CLI support or remove local git-aware Admin/MCP indexing and its request hardening.
+- **Fix:** Kept `call_cga_tool` as the authenticated direct CLI forwarding path, retained local `run_index_git_incremental` execution for MCP and the loopback Admin endpoint, used the validated Origin field for CORS decisions, required `X-CGA-Relay-Intent: index-git-incremental` for the cross-origin Admin action, and retained the linked `Nate Scott (NASCO)` footer without fixed positioning.
+- **Validation:** ContextGraph full indexing completed with zero errors before conflict resolution. `cargo test --locked` passed 8 unit and 46 integration tests; focused Admin UI pytest passed 3 tests; rustfmt, editor diagnostics, and `git diff --check` passed; no conflict markers remain.
+- **Security Check:** Same-origin login/logout behavior remains strict, cross-origin indexing requires both an allowlisted Origin and explicit intent, duplicate/ambiguous Origin input still fails closed, and CLI/MCP authentication continues through the existing account/project credential policy.
 
 ## 2026-07-22 CGA-Relay 1.30.117 Secure Standalone Release
 

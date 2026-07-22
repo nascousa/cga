@@ -342,12 +342,15 @@ class CGFirstQueryStrategy:
     def run(self, query: str) -> dict[str, Any]:
         return asyncio.run(self.run_async(query))
 
+    def _read_message_endpoint(self, base_url: str) -> str:
+        return f"{base_url.rstrip('/')}/mcp/sse"
+
     async def run_async(self, query: str) -> dict[str, Any]:
         if not self._cfg.base_url:
             raise RuntimeError("StrategyConfig.base_url is required for CGFirstQueryStrategy")
 
         async with sse_client(
-            f"{self._cfg.base_url.rstrip('/')}/mcp/sse",
+            self._read_message_endpoint(self._cfg.base_url),
             headers=self._headers,
             timeout=20,
             sse_read_timeout=60,

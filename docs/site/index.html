@@ -9,13 +9,15 @@
   <meta property="og:description" content="Lower-token, evidence-first codebase context for AI coding agents." />
   <meta property="og:type" content="website" />
   <meta property="og:url" content="https://nascousa.github.io/cga/" />
+  <meta property="og:image" content="https://nascousa.github.io/cga/cga-demo-poster.png" />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:image" content="https://nascousa.github.io/cga/cga-demo-poster.png" />
   <title>CGA | Context Graph Agent</title>
   <link rel="preconnect" href="https://cdnjs.cloudflare.com" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" />
   <link rel="preconnect" href="https://unpkg.com" />
   <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="./styles.css?v=20260706-webp-scale" />
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -38,6 +40,7 @@
         <span class="brand-copy">CONTEXT GRAPH AGENT</span>
       </a>
       <nav class="nav-links" aria-label="Site sections">
+        <a href="#demo">Demo</a>
         <a href="#engine">Engine</a>
         <a href="#desktop">Desktop</a>
         <a href="#open-source">Open Source</a>
@@ -71,6 +74,18 @@
           <div class="hero-proof"><strong>Faster lookup</strong><span>Find relevant files, symbols, calls, and dependencies faster.</span></div>
           <div class="hero-proof"><strong>Precise targets</strong><span>Send focused evidence packs instead of broad file dumps.</span></div>
         </div>
+      </section>
+
+      <section id="demo" class="section band demo-band" aria-labelledby="demo-title">
+        <div class="section-heading compact">
+          <p class="eyebrow">Live surface</p>
+          <h2 id="demo-title">Graph context you can inspect</h2>
+          <p>The admin graph view shows repository relationships as traversable evidence instead of dumping broad source into a prompt.</p>
+        </div>
+        <figure class="demo-frame">
+          <img class="demo-media" src="./docs/cga_fhd.webp" alt="CGA graph viewer rotating project relationships" loading="lazy" decoding="async" fetchpriority="low" />
+          <figcaption>Graph traversal stays outside the context window; only the pruned evidence packet is sent back to the agent.</figcaption>
+        </figure>
       </section>
 
       <section id="engine" class="section band dark-band" aria-labelledby="engine-title">

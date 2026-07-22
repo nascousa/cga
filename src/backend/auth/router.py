@@ -1496,6 +1496,7 @@ async def trigger_project_index(
         changed_count=int(result.get("changed_count") or 0),
         destructive_count=int(result.get("destructive_count") or 0),
         reason=result.get("reason"),
+        message=result.get("message"),
     )
 
 
@@ -1520,12 +1521,13 @@ async def trigger_project_full_index(
         project_name=project["project_name"],
         repo_path=repo_path,
         status=result.get("status", "queued"),
-        mode="full",
+        mode=result.get("mode", "full"),
         job_id=result.get("job_id"),
         stream_id=result.get("stream_id"),
         changed_count=0,
         destructive_count=0,
-        reason="admin_triggered_full",
+        reason=result.get("reason") or "admin_triggered_full",
+        message=result.get("message"),
     )
 
 

@@ -205,6 +205,11 @@ a { color: inherit; text-decoration: none; }
 .feature-card h3 { margin: 30px 0 10px; font-size: 22px; }
 .feature-card p { margin: 0; }
 
+.demo-band { display: grid; grid-template-columns: minmax(0, 0.7fr) minmax(360px, 1fr); gap: 28px; align-items: center; }
+.demo-frame { margin: 0; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; background: rgba(2, 6, 12, 0.9); box-shadow: var(--shadow); }
+.demo-media { display: block; width: 100%; max-width: 100%; height: auto; background: #05070d; object-fit: contain; }
+.demo-frame figcaption { padding: 14px 16px 16px; color: var(--muted); font-size: 14px; line-height: 1.5; }
+
 .split-band { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(320px, 0.8fr); gap: 28px; align-items: center; }
 .terminal-panel { overflow: hidden; background: rgba(2, 6, 12, 0.9); }
 .terminal-chrome { display: flex; gap: 7px; padding: 15px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
@@ -231,7 +236,7 @@ pre { margin: 0; padding: 24px; overflow-x: auto; color: #dffcf3; font-size: 17p
   .hero h1 { font-size: 112px; }
   .hero-subtitle { font-size: 24px; }
   .section { padding: 68px 28px; }
-  .feature-grid, .split-band, .hero-proof-grid { grid-template-columns: 1fr; }
+  .feature-grid, .demo-band, .split-band, .hero-proof-grid { grid-template-columns: 1fr; }
   .section-heading h2 { font-size: 44px; }
   .footer { padding: 12px 28px; margin-top: auto; }
 }
