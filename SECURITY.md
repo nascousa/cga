@@ -33,4 +33,20 @@ CGA beyond localhost.
 - Keep MCP access protected by project-scoped tokens.
 - Do not commit `.env`, runtime databases, backups, deploy keys, or generated
   local artifacts.
+- Use only Authenticode-signed CGA-Relay release artifacts and verify the
+  published SHA-256 file before execution. Windows account sessions are
+  protected for the current user with DPAPI.
+- Keep credential values out of Relay config files. The Relay accepts only
+  documented non-secret config keys, rejects unknown or duplicate assignments,
+  and validates credential environment variable names.
+- Relay loopback HTTP responses are capped at 8 MiB with 30-second read and
+  write timeouts. The local Settings listener separately caps request headers
+  and bodies at 64 KiB each, applies the same timeouts, rejects ambiguous body
+  framing, and validates state-changing POST requests against its exact
+  loopback Host and browser Origin. MCP payloads, settings request bodies,
+  backend HTTP payloads, and untrusted response headers are logged only as byte
+  counts and status codes where available; payload content and payload hashes
+  are not stored.
+- Treat binary hardening and symbol stripping as defense in depth, not as a
+  guarantee that native code cannot be analyzed or decompiled.
 - Run dependency and container vulnerability checks before public releases.

@@ -6,9 +6,11 @@ use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const VERSION: &str = "1.30.114";
+mod secret_store;
+
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SERVER_NAME: &str = "cga-relay";
 const TRAY_ICON_LOGGED_IN_RESOURCE_ID: u16 = 1;
 const TRAY_ICON_LOGGED_OUT_RESOURCE_ID: u16 = 4;
@@ -21,6 +23,29 @@ const CRYSTALS_PROFILE: &str = "CRYSTALS-CNSA-2.0";
 const CRYSTALS_KEM: &str = "ML-KEM-1024";
 const CRYSTALS_SIGNATURE: &str = "ML-DSA-87";
 const CRYSTALS_TRANSPORT_SCOPE: &str = "local-ipc";
+const MAX_SYNC_ITEMS_PER_BATCH: usize = 500;
+const DEFAULT_MAX_BATCH_BYTES: usize = 8 * 1024 * 1024;
+const MAX_HTTP_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_SETTINGS_REQUEST_HEADER_BYTES: usize = 64 * 1024;
+const MAX_SETTINGS_REQUEST_BODY_BYTES: usize = 64 * 1024;
+const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(30);
+const SCAN_PROGRESS_INTERVAL: usize = 500;
+const CONFIG_KEYS: &[&str] = &[
+    "AGENT_ID",
+    "API_BASE_URL",
+    "CONTROL_API_BASE_URL",
+    "API_KEY_ENV",
+    "ACCOUNT_EMAIL",
+    "ACCOUNT_TOKEN_ENV",
+    "PROJECT_ID",
+    "PROJECT_ROOT",
+    "STATE_DIR",
+    "LOG_DIR",
+    "INCLUDE_GLOBS",
+    "EXCLUDE_GLOBS",
+    "MAX_FILE_BYTES",
+    "MAX_BATCH_BYTES",
+];
 
 #[derive(Debug)]
 struct AgentError(String);
@@ -42,6 +67,7 @@ struct AgentConfig {
     include_globs: Vec<String>,
     exclude_globs: Vec<String>,
     max_file_bytes: u64,
+    max_batch_bytes: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,7 +121,16 @@ struct Snapshot {
     path: String,
     sha256: String,
     bytes: u64,
-    content: String,
+    json_bytes: usize,
+}
+
+#[derive(Clone, Debug)]
+struct SyncBatchPlan {
+    snapshot_start: usize,
+    snapshot_end: usize,
+    tombstone_start: usize,
+    tombstone_end: usize,
+    body_bytes: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -183,6 +218,7 @@ fn cmd_login(args: &[String]) -> AgentResult<()> {
     let config = load_config(required_arg(args, "--config")?)?;
     let email = required_arg(args, "--email")?;
     let token_env = required_arg(args, "--token-env")?;
+    validate_env_var_name(token_env, "--token-env")?;
     ensure_state_dirs(&config)?;
     let profile = format!(
         "{{\"account_email\":\"{}\",\"account_token_env\":\"{}\"}}\n",
@@ -194,7 +230,7 @@ fn cmd_login(args: &[String]) -> AgentResult<()> {
         "{{\"account_email\":\"{}\",\"token\":{{\"env_var\":\"{}\",\"configured\":{}}}}}",
         json_escape(email),
         json_escape(token_env),
-        env::var(token_env).is_ok()
+        nonempty_env(token_env).is_some()
     );
     Ok(())
 }
@@ -247,20 +283,47 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
     let token_env = profile.get("account_token_env").ok_or_else(|| {
         AgentError("login profile does not contain account_token_env".to_string())
     })?;
-    let developer_token = env::var(token_env).ok();
-    let account_token = read_account_session(&config)
-        .ok()
-        .and_then(|session| session.get("access_token").cloned());
+    let developer_token = nonempty_env(token_env);
+    let account_session = read_account_session(&config).unwrap_or_default();
+    let mut account_token = current_account_access_token(&account_session);
+    let projects = select_projects(&config, all, project_tag, namespace)?;
+    if account_token.is_none()
+        && account_session_token_expired(&account_session)
+        && projects
+            .iter()
+            .any(|project| project.namespace == "account")
+    {
+        return Err(AgentError(
+            "CGA account login expired; sign in again before syncing account projects".to_string(),
+        ));
+    }
     if developer_token.is_none() && account_token.is_none() {
+        if account_session_token_expired(&account_session) {
+            return Err(AgentError(
+                "CGA account login expired; sign in again before syncing".to_string(),
+            ));
+        }
         return Err(AgentError(format!(
             "developer token env var {token_env} is not set and CGA account login is missing"
         )));
     }
-    let projects = select_projects(&config, all, project_tag, namespace)?;
     let mut project_payloads = Vec::new();
     let mut submitted = 0_u64;
     for project in projects {
+        eprintln!(
+            "sync {}: scanning {}",
+            project.locator,
+            display_path(&project.root)
+        );
         let result = scan_project(&config, &project.root, &project.locator, true)?;
+        eprintln!(
+            "sync {}: scan complete (scanned={}, changed={}, tombstones={}, bytes={})",
+            project.locator,
+            result.counts.scanned,
+            result.counts.changed,
+            result.counts.tombstone,
+            result.counts.bytes_scanned
+        );
         let mut submission = String::from("null");
         if !dry_run && (!result.snapshots.is_empty() || !result.tombstones.is_empty()) {
             submission = submit_sync(
@@ -268,7 +331,7 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
                 &project,
                 &result,
                 developer_token.as_deref(),
-                account_token.as_deref(),
+                &mut account_token,
             )?;
             persist_scan_result(&config, &result)?;
             submitted += 1;
@@ -403,9 +466,9 @@ fn cmd_mcp(args: &[String]) -> AgentResult<()> {
     std::io::stdin()
         .read_to_string(&mut input)
         .map_err(|err| AgentError(format!("failed to read stdin: {err}")))?;
-    log_communication(&config, "mcp.stdin", &input);
+    log_communication(&config, "mcp.stdin", &payload_log_metadata(&input));
     let responses = handle_mcp_session(&config, &input)?;
-    log_communication(&config, "mcp.stdout", &responses);
+    log_communication(&config, "mcp.stdout", &payload_log_metadata(&responses));
     print!("{responses}");
     Ok(())
 }
@@ -442,10 +505,7 @@ fn tray_status_json(config: &AgentConfig) -> String {
 
 fn tray_login_status(config: &AgentConfig) -> TrayLoginStatus {
     let session = read_account_session(config).unwrap_or_default();
-    let logged_in = session
-        .get("access_token")
-        .map(|token| !token.trim().is_empty())
-        .unwrap_or(false);
+    let logged_in = current_account_access_token(&session).is_some();
     let username = if logged_in {
         session
             .get("username")
@@ -593,6 +653,24 @@ fn has_flag(args: &[String], name: &str) -> bool {
     args.iter().any(|arg| arg == name)
 }
 
+fn nonempty_env(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.trim().is_empty())
+}
+
+fn validate_env_var_name(name: &str, source: &str) -> AgentResult<()> {
+    let mut chars = name.chars();
+    let starts_valid = chars
+        .next()
+        .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_');
+    if starts_valid && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
+        Ok(())
+    } else {
+        Err(AgentError(format!(
+            "invalid environment variable name for {source}: expected [A-Za-z_][A-Za-z0-9_]*"
+        )))
+    }
+}
+
 fn load_config(path: &str) -> AgentResult<AgentConfig> {
     let text =
         fs::read_to_string(path).map_err(|err| AgentError(format!("cannot read config: {err}")))?;
@@ -615,6 +693,18 @@ fn load_config(path: &str) -> AgentResult<AgentConfig> {
         {
             return Err(AgentError(format!(
                 "invalid config key on line {}",
+                index + 1
+            )));
+        }
+        if !CONFIG_KEYS.contains(&key) {
+            return Err(AgentError(format!(
+                "unsupported config key: {key} (line {})",
+                index + 1
+            )));
+        }
+        if values.contains_key(key) {
+            return Err(AgentError(format!(
+                "duplicate config key: {key} (line {})",
                 index + 1
             )));
         }
@@ -649,6 +739,19 @@ fn load_config(path: &str) -> AgentResult<AgentConfig> {
             "MAX_FILE_BYTES must be greater than zero".to_string(),
         ));
     }
+    let max_batch_bytes = match values.get("MAX_BATCH_BYTES") {
+        Some(value) => value
+            .parse::<usize>()
+            .map_err(|_| AgentError("MAX_BATCH_BYTES must be an integer".to_string()))?,
+        None => DEFAULT_MAX_BATCH_BYTES,
+    };
+    if max_batch_bytes == 0 {
+        return Err(AgentError(
+            "MAX_BATCH_BYTES must be greater than zero".to_string(),
+        ));
+    }
+    validate_env_var_name(&values["API_KEY_ENV"], "API_KEY_ENV")?;
+    validate_env_var_name(&values["ACCOUNT_TOKEN_ENV"], "ACCOUNT_TOKEN_ENV")?;
 
     Ok(AgentConfig {
         agent_id: values["AGENT_ID"].clone(),
@@ -664,6 +767,7 @@ fn load_config(path: &str) -> AgentResult<AgentConfig> {
         include_globs: split_globs(&values["INCLUDE_GLOBS"]),
         exclude_globs: split_globs(&values["EXCLUDE_GLOBS"]),
         max_file_bytes,
+        max_batch_bytes,
     })
 }
 
@@ -716,6 +820,10 @@ fn log_communication(config: &AgentConfig, event: &str, detail: &str) {
     if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(path) {
         let _ = file.write_all(line.as_bytes());
     }
+}
+
+fn payload_log_metadata(payload: &str) -> String {
+    format!("bytes={}", payload.len())
 }
 
 fn unix_timestamp_seconds() -> u64 {
@@ -853,7 +961,7 @@ fn redact_json_field(detail: &str, field: &str) -> String {
         } else {
             output.push_str("<redacted>");
             cursor = detail[value_start..]
-                .find(|ch| matches!(ch, ',' | '}' | ']' | '\n' | '\r'))
+                .find([',', '}', ']', '\n', '\r'])
                 .map_or(detail.len(), |offset| value_start + offset);
         }
     }
@@ -898,7 +1006,7 @@ fn redact_form_field(detail: &str, field: &str) -> String {
         output.push_str(&detail[cursor..value_start]);
         output.push_str("<redacted>");
         cursor = detail[value_start..]
-            .find(|ch: char| matches!(ch, '&' | ' ' | '\n' | '\r' | '\t'))
+            .find(['&', ' ', '\n', '\r', '\t'])
             .map_or(detail.len(), |offset| value_start + offset);
     }
     output.push_str(&detail[cursor..]);
@@ -970,23 +1078,66 @@ fn write_file(path: &Path, text: &str) -> AgentResult<()> {
         .map_err(|err| AgentError(format!("cannot write {}: {err}", path.display())))
 }
 
+fn write_private_file(path: &Path, text: &str) -> AgentResult<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| AgentError(format!("cannot create private parent dir: {err}")))?;
+    }
+    let mut options = fs::OpenOptions::new();
+    options.create(true).truncate(true).write(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(path).map_err(|err| {
+        AgentError(format!(
+            "cannot open private file {}: {err}",
+            path.display()
+        ))
+    })?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).map_err(|err| {
+            AgentError(format!(
+                "cannot secure private file permissions for {}: {err}",
+                path.display()
+            ))
+        })?;
+    }
+    file.write_all(text.as_bytes()).map_err(|err| {
+        AgentError(format!(
+            "cannot write private file {}: {err}",
+            path.display()
+        ))
+    })?;
+    file.sync_all().map_err(|err| {
+        AgentError(format!(
+            "cannot sync private file {}: {err}",
+            path.display()
+        ))
+    })
+}
+
 fn doctor_json(config: &AgentConfig) -> String {
     format!(
-        "{{\"agent_id\":\"{}\",\"api_base_url\":{{\"configured\":{}}},\"control_api_base_url\":{{\"configured\":{}}},\"api_key\":{{\"env_var\":\"{}\",\"configured\":{}}},\"account_token\":{{\"env_var\":\"{}\",\"configured\":{}}},\"account_email\":{{\"configured\":{}}},\"project\":{{\"project_id\":\"{}\",\"project_root\":\"{}\",\"root_exists\":{}}},\"state\":{{\"state_dir\":\"{}\",\"log_dir\":\"{}\"}},\"limits\":{{\"max_file_bytes\":{}}}}}",
+        "{{\"agent_id\":\"{}\",\"api_base_url\":{{\"configured\":{}}},\"control_api_base_url\":{{\"configured\":{}}},\"api_key\":{{\"env_var\":\"{}\",\"configured\":{}}},\"account_token\":{{\"env_var\":\"{}\",\"configured\":{}}},\"account_email\":{{\"configured\":{}}},\"project\":{{\"project_id\":\"{}\",\"project_root\":\"{}\",\"root_exists\":{}}},\"state\":{{\"state_dir\":\"{}\",\"log_dir\":\"{}\"}},\"limits\":{{\"max_file_bytes\":{},\"max_batch_bytes\":{}}}}}",
         json_escape(&config.agent_id),
         !config.api_base_url.is_empty(),
         !config.control_api_base_url.is_empty(),
         json_escape(&config.api_key_env),
-        env::var(&config.api_key_env).is_ok(),
+        nonempty_env(&config.api_key_env).is_some(),
         json_escape(&config.account_token_env),
-        env::var(&config.account_token_env).is_ok(),
+        nonempty_env(&config.account_token_env).is_some(),
         !config.account_email.is_empty(),
         json_escape(&config.project_id),
         json_escape(&display_path(&config.project_root)),
         config.project_root.exists(),
         json_escape(&display_path(&config.state_dir)),
         json_escape(&display_path(&config.log_dir)),
-        config.max_file_bytes
+        config.max_file_bytes,
+        config.max_batch_bytes
     )
 }
 
@@ -997,7 +1148,7 @@ fn settings_status_json(config: &AgentConfig) -> String {
     let settings_url = fs::read_to_string(settings_url_path(config)).unwrap_or_default();
     format!(
         "{{\"enabled\":true,\"page\":\"local-account-settings\",\"login_endpoint\":\"/login\",\"projects_endpoint\":\"/api/auth/me/groups\",\"session_configured\":{},\"username\":\"{}\",\"project_count\":{},\"settings_url\":\"{}\"}}",
-        session.contains_key("access_token"),
+        current_account_access_token(&session).is_some(),
         json_escape(session.get("username").map(String::as_str).unwrap_or("")),
         projects.len(),
         json_escape(settings_url.trim())
@@ -1027,33 +1178,49 @@ fn start_settings_server(config: AgentConfig) -> AgentResult<String> {
 }
 
 fn handle_settings_connection(config: &AgentConfig, mut stream: TcpStream) -> AgentResult<()> {
+    stream
+        .set_read_timeout(Some(HTTP_IO_TIMEOUT))
+        .map_err(|err| AgentError(format!("cannot set settings read timeout: {err}")))?;
+    stream
+        .set_write_timeout(Some(HTTP_IO_TIMEOUT))
+        .map_err(|err| AgentError(format!("cannot set settings write timeout: {err}")))?;
+    let expected_host = stream
+        .local_addr()
+        .map_err(|err| AgentError(format!("cannot resolve settings listener address: {err}")))?
+        .to_string();
     let request = read_http_request(&mut stream)?;
     log_communication(
         config,
         "settings.request",
         &format!(
-            "method={}\npath={}\nbody:\n{}",
-            request.method, request.path, request.body
+            "method={}\npath={}\n{}",
+            request.method,
+            request.path,
+            payload_log_metadata(&request.body)
         ),
     );
-    let response = match (request.method.as_str(), request.path.as_str()) {
-        ("GET", "/") | ("GET", "/settings") => html_response(&settings_page_html(config, None)),
-        ("POST", "/login") => match handle_settings_login(config, &request.body) {
-            Ok(message) => html_response(&settings_page_html(config, Some(&message))),
-            Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
-        },
-        ("POST", "/refresh") => match handle_settings_refresh(config) {
-            Ok(message) => html_response(&settings_page_html(config, Some(&message))),
-            Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
-        },
-        ("POST", "/logout") => {
-            let _ = fs::remove_file(account_session_path(config));
-            let _ = fs::remove_file(account_projects_path(config));
-            let _ = fs::remove_file(account_groups_path(config));
-            html_response(&settings_page_html(config, Some("Signed out.")))
+    let response = if !settings_post_is_same_origin(&request, &expected_host) {
+        plain_response(403, "Forbidden")
+    } else {
+        match (request.method.as_str(), request.path.as_str()) {
+            ("GET", "/") | ("GET", "/settings") => html_response(&settings_page_html(config, None)),
+            ("POST", "/login") => match handle_settings_login(config, &request.body) {
+                Ok(message) => html_response(&settings_page_html(config, Some(&message))),
+                Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
+            },
+            ("POST", "/refresh") => match handle_settings_refresh(config) {
+                Ok(message) => html_response(&settings_page_html(config, Some(&message))),
+                Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
+            },
+            ("POST", "/logout") => {
+                let _ = fs::remove_file(account_session_path(config));
+                let _ = fs::remove_file(account_projects_path(config));
+                let _ = fs::remove_file(account_groups_path(config));
+                html_response(&settings_page_html(config, Some("Signed out.")))
+            }
+            ("GET", "/status.json") => json_response(&settings_status_json(config)),
+            _ => plain_response(404, "Not Found"),
         }
-        ("GET", "/status.json") => json_response(&settings_status_json(config)),
-        _ => plain_response(404, "Not Found"),
     };
     stream
         .write_all(response.as_bytes())
@@ -1064,6 +1231,25 @@ struct LocalHttpRequest {
     method: String,
     path: String,
     body: String,
+    host: Option<String>,
+    origin: Option<String>,
+}
+
+fn settings_post_is_same_origin(request: &LocalHttpRequest, expected_host: &str) -> bool {
+    if request.method != "POST" {
+        return true;
+    }
+    let Some(host) = request.host.as_deref() else {
+        return false;
+    };
+    if !host.eq_ignore_ascii_case(expected_host) {
+        return false;
+    }
+    let expected_origin = format!("http://{expected_host}");
+    request
+        .origin
+        .as_deref()
+        .is_none_or(|origin| origin.eq_ignore_ascii_case(&expected_origin))
 }
 
 fn read_http_request(stream: &mut TcpStream) -> AgentResult<LocalHttpRequest> {
@@ -1079,11 +1265,18 @@ fn read_http_request(stream: &mut TcpStream) -> AgentResult<LocalHttpRequest> {
         }
         buffer.extend_from_slice(&temp[..read]);
         if let Some(position) = find_bytes(&buffer, b"\r\n\r\n") {
+            if position > MAX_SETTINGS_REQUEST_HEADER_BYTES {
+                return Err(AgentError(
+                    "settings request header is too large".to_string(),
+                ));
+            }
             header_end = position;
             break;
         }
-        if buffer.len() > 64 * 1024 {
-            return Err(AgentError("settings request is too large".to_string()));
+        if buffer.len() > MAX_SETTINGS_REQUEST_HEADER_BYTES {
+            return Err(AgentError(
+                "settings request header is too large".to_string(),
+            ));
         }
     }
     let header_text = String::from_utf8_lossy(&buffer[..header_end]).into_owned();
@@ -1095,14 +1288,44 @@ fn read_http_request(stream: &mut TcpStream) -> AgentResult<LocalHttpRequest> {
     let method = request_parts.next().unwrap_or("").to_string();
     let raw_path = request_parts.next().unwrap_or("/");
     let path = raw_path.split('?').next().unwrap_or("/").to_string();
-    let mut content_length = 0_usize;
+    let mut content_length = None;
+    let mut host = None;
+    let mut origin = None;
     for line in lines {
         if let Some((name, value)) = line.split_once(':') {
             if name.eq_ignore_ascii_case("content-length") {
-                content_length = value.trim().parse::<usize>().unwrap_or(0);
+                if content_length.is_some() {
+                    return Err(AgentError(
+                        "settings request has duplicate Content-Length headers".to_string(),
+                    ));
+                }
+                let parsed = value.trim().parse::<usize>().map_err(|_| {
+                    AgentError("settings request has invalid Content-Length".to_string())
+                })?;
+                if parsed > MAX_SETTINGS_REQUEST_BODY_BYTES {
+                    return Err(AgentError("settings request body is too large".to_string()));
+                }
+                content_length = Some(parsed);
+            } else if name.eq_ignore_ascii_case("transfer-encoding") {
+                return Err(AgentError(
+                    "settings request does not support Transfer-Encoding".to_string(),
+                ));
+            } else if name.eq_ignore_ascii_case("host") {
+                if host.replace(value.trim().to_string()).is_some() {
+                    return Err(AgentError(
+                        "settings request has duplicate Host headers".to_string(),
+                    ));
+                }
+            } else if name.eq_ignore_ascii_case("origin")
+                && origin.replace(value.trim().to_string()).is_some()
+            {
+                return Err(AgentError(
+                    "settings request has duplicate Origin headers".to_string(),
+                ));
             }
         }
     }
+    let content_length = content_length.unwrap_or(0);
     let body_start = header_end + 4;
     while buffer.len().saturating_sub(body_start) < content_length {
         let read = stream
@@ -1115,7 +1338,13 @@ fn read_http_request(stream: &mut TcpStream) -> AgentResult<LocalHttpRequest> {
     }
     let body_end = body_start + content_length.min(buffer.len().saturating_sub(body_start));
     let body = String::from_utf8_lossy(&buffer[body_start..body_end]).into_owned();
-    Ok(LocalHttpRequest { method, path, body })
+    Ok(LocalHttpRequest {
+        method,
+        path,
+        body,
+        host,
+        origin,
+    })
 }
 
 fn handle_settings_login(config: &AgentConfig, body: &str) -> AgentResult<String> {
@@ -1196,7 +1425,7 @@ fn settings_page_html(config: &AgentConfig, message: Option<&str>) -> String {
     let groups = refresh_account_groups(config, &session)
         .or_else(|_| load_account_groups(config))
         .unwrap_or_default();
-    let signed_in = session.contains_key("access_token");
+    let signed_in = current_account_access_token(&session).is_some();
     let username = session.get("username").map(String::as_str).unwrap_or("");
     let message_html = message
         .map(|text| format!("<div class=\"notice\">{}</div>", html_escape(text)))
@@ -1276,9 +1505,13 @@ fn refresh_account_groups(
     config: &AgentConfig,
     session: &BTreeMap<String, String>,
 ) -> AgentResult<Vec<AccountGroup>> {
-    let access_token = session
-        .get("access_token")
-        .ok_or_else(|| AgentError("not signed in".to_string()))?;
+    let access_token = current_account_access_token(session).ok_or_else(|| {
+        if account_session_token_expired(session) {
+            AgentError("CGA account login expired; sign in again".to_string())
+        } else {
+            AgentError("not signed in".to_string())
+        }
+    })?;
     let auth = [("Authorization", format!("Bearer {access_token}"))];
     let groups_json = http_get_json_with_headers(
         config,
@@ -1456,11 +1689,12 @@ fn plain_response(status: u16, body: &str) -> String {
 fn http_response(status: u16, content_type: &str, body: &str) -> String {
     let reason = match status {
         200 => "OK",
+        403 => "Forbidden",
         404 => "Not Found",
         _ => "OK",
     };
     format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
 }
@@ -1637,8 +1871,17 @@ fn scan_project(
     files.sort_by(|left, right| {
         normalized_relative(root, left).cmp(&normalized_relative(root, right))
     });
+    let candidate_total = files.len();
 
-    for path in files {
+    for (index, path) in files.into_iter().enumerate() {
+        if index > 0 && index % SCAN_PROGRESS_INTERVAL == 0 {
+            eprintln!(
+                "scan {state_key}: processed {index}/{candidate_total} candidates (scanned={}, changed={}, bytes={})",
+                result.counts.scanned,
+                result.counts.changed,
+                result.counts.bytes_scanned
+            );
+        }
         let rel_path = normalized_relative(root, &path);
         result.counts.candidate += 1;
         if !included(config, &rel_path) || excluded(config, root, &rel_path) {
@@ -1676,13 +1919,22 @@ fn scan_project(
         } else {
             result.counts.changed += 1;
             result.changed_paths.push(rel_path.clone());
+            let json_bytes = snapshot_json_values(&rel_path, &digest, byte_count, &content).len();
             result.snapshots.push(Snapshot {
                 path: rel_path,
                 sha256: digest,
                 bytes: byte_count,
-                content,
+                json_bytes,
             });
         }
+    }
+    if candidate_total > 0 {
+        eprintln!(
+            "scan {state_key}: processed {candidate_total}/{candidate_total} candidates (scanned={}, changed={}, bytes={})",
+            result.counts.scanned,
+            result.counts.changed,
+            result.counts.bytes_scanned
+        );
     }
 
     for rel_path in previous.keys() {
@@ -1765,6 +2017,7 @@ fn always_excluded(rel_path: &str) -> bool {
             ".git"
                 | "node_modules"
                 | ".venv"
+                | "venv"
                 | "__pycache__"
                 | "target"
                 | "dist"
@@ -1866,6 +2119,76 @@ mod tests {
             "src/cga-relay/target/debug/object.o"
         ));
     }
+
+    #[test]
+    fn payload_log_metadata_does_not_include_payload() {
+        let marker = "PRIVATE_PAYLOAD_MARKER_SHOULD_NEVER_LEAK";
+        let metadata = payload_log_metadata(marker);
+
+        assert_eq!(metadata, format!("bytes={}", marker.len()));
+        assert!(!metadata.contains(marker));
+    }
+
+    #[test]
+    fn insert_json_field_preserves_nested_objects() {
+        assert_eq!(
+            insert_json_field(
+                r#"{"params":{"query":"status"}}"#,
+                "project_id",
+                "PROJECT123"
+            ),
+            r#"{"params":{"query":"status"},"project_id":"PROJECT123"}"#
+        );
+    }
+
+    #[test]
+    fn settings_request_rejects_oversized_body_before_reading_it() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener should bind");
+        let address = listener
+            .local_addr()
+            .expect("listener should have an address");
+        let sender = thread::spawn(move || {
+            let mut client = TcpStream::connect(address).expect("client should connect");
+            write!(
+                client,
+                "POST /login HTTP/1.1\r\nHost: {address}\r\nContent-Length: {}\r\n\r\n",
+                64 * 1024 + 1
+            )
+            .expect("request headers should be written");
+            client
+                .shutdown(std::net::Shutdown::Write)
+                .expect("client write side should close");
+        });
+        let (mut stream, _) = listener.accept().expect("server should accept");
+
+        let error = read_http_request(&mut stream)
+            .err()
+            .expect("oversized body should be rejected");
+
+        assert!(error.0.contains("body is too large"));
+        sender.join().expect("sender should finish");
+    }
+
+    #[test]
+    fn settings_post_requires_the_listener_host_and_same_origin() {
+        let mut request = LocalHttpRequest {
+            method: "POST".to_string(),
+            path: "/logout".to_string(),
+            body: String::new(),
+            host: Some("127.0.0.1:17860".to_string()),
+            origin: None,
+        };
+
+        assert!(settings_post_is_same_origin(&request, "127.0.0.1:17860"));
+        request.origin = Some("http://127.0.0.1:17860".to_string());
+        assert!(settings_post_is_same_origin(&request, "127.0.0.1:17860"));
+
+        request.origin = Some("https://attacker.example".to_string());
+        assert!(!settings_post_is_same_origin(&request, "127.0.0.1:17860"));
+        request.host = Some("attacker.example".to_string());
+        request.origin = Some("http://attacker.example".to_string());
+        assert!(!settings_post_is_same_origin(&request, "127.0.0.1:17860"));
+    }
 }
 
 fn load_scan_state(
@@ -1891,12 +2214,18 @@ fn load_scan_state(
 }
 
 fn persist_scan_result(config: &AgentConfig, result: &ScanResult) -> AgentResult<()> {
+    persist_scan_state(config, &result.root, &result.state_key, &result.state)
+}
+
+fn persist_scan_state(
+    config: &AgentConfig,
+    root: &Path,
+    state_key: &str,
+    state: &BTreeMap<String, (String, u64)>,
+) -> AgentResult<()> {
     ensure_state_dirs(config)?;
-    let mut text = format!(
-        "version\t1\nroot\t{}\n",
-        escape_field(&display_path(&result.root))
-    );
-    for (path, (hash, bytes)) in &result.state {
+    let mut text = format!("version\t1\nroot\t{}\n", escape_field(&display_path(root)));
+    for (path, (hash, bytes)) in state {
         text.push_str(&format!(
             "file\t{}\t{}\t{}\n",
             escape_field(path),
@@ -1904,7 +2233,7 @@ fn persist_scan_result(config: &AgentConfig, result: &ScanResult) -> AgentResult
             bytes
         ));
     }
-    write_file(&scan_state_path(config, &result.state_key), &text)
+    write_file(&scan_state_path(config, state_key), &text)
 }
 
 fn scan_json(result: &ScanResult) -> String {
@@ -1958,12 +2287,89 @@ fn read_account_session(config: &AgentConfig) -> AgentResult<BTreeMap<String, St
     let text = fs::read_to_string(&path)
         .map_err(|err| AgentError(format!("cannot read account session: {err}")))?;
     let mut values = BTreeMap::new();
-    for key in ["username", "role", "access_token", "token_type"] {
+    for key in ["username", "role", "token_type"] {
         if let Some(value) = json_string_field(&text, key) {
             values.insert(key.to_string(), value);
         }
     }
+    if let Some(protected) = json_string_field(&text, "access_token_dpapi") {
+        let access_token = secret_store::unprotect_access_token(&protected)?;
+        values.insert("access_token".to_string(), access_token);
+    } else if let Some(access_token) = json_string_field(&text, "access_token") {
+        values.insert("access_token".to_string(), access_token.clone());
+        #[cfg(windows)]
+        write_account_session(
+            config,
+            values.get("username").map(String::as_str).unwrap_or(""),
+            values.get("role").map(String::as_str).unwrap_or(""),
+            &access_token,
+        )?;
+    }
     Ok(values)
+}
+
+fn current_account_access_token(session: &BTreeMap<String, String>) -> Option<&str> {
+    session
+        .get("access_token")
+        .map(String::as_str)
+        .filter(|token| !token.trim().is_empty())
+        .filter(|token| !jwt_expired(token))
+}
+
+fn account_session_token_expired(session: &BTreeMap<String, String>) -> bool {
+    session
+        .get("access_token")
+        .map(String::as_str)
+        .is_some_and(jwt_expired)
+}
+
+fn jwt_expired(token: &str) -> bool {
+    jwt_expiration(token).is_some_and(|expiration| {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|now| now.as_secs() >= expiration)
+            .unwrap_or(true)
+    })
+}
+
+fn jwt_expiration(token: &str) -> Option<u64> {
+    let mut segments = token.split('.');
+    segments.next()?;
+    let payload = segments.next()?;
+    segments.next()?;
+    if segments.next().is_some() {
+        return None;
+    }
+    let decoded = decode_base64_url(payload)?;
+    let claims = std::str::from_utf8(&decoded).ok()?;
+    json_field(claims, "exp")?.parse().ok()
+}
+
+fn decode_base64_url(encoded: &str) -> Option<Vec<u8>> {
+    let mut decoded = Vec::with_capacity(encoded.len() * 3 / 4);
+    let mut accumulator = 0_u32;
+    let mut bit_count = 0_u8;
+    for byte in encoded.bytes() {
+        let value = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'-' => 62,
+            b'_' => 63,
+            _ => return None,
+        };
+        accumulator = (accumulator << 6) | u32::from(value);
+        bit_count += 6;
+        if bit_count >= 8 {
+            bit_count -= 8;
+            decoded.push((accumulator >> bit_count) as u8);
+            accumulator &= (1_u32 << bit_count) - 1;
+        }
+    }
+    if accumulator != 0 {
+        return None;
+    }
+    Some(decoded)
 }
 
 fn write_account_session(
@@ -1972,13 +2378,15 @@ fn write_account_session(
     role: &str,
     access_token: &str,
 ) -> AgentResult<()> {
+    let persisted = secret_store::protect_access_token(access_token)?;
     let body = format!(
-        "{{\"username\":\"{}\",\"role\":\"{}\",\"token_type\":\"bearer\",\"access_token\":\"{}\"}}\n",
+        "{{\"username\":\"{}\",\"role\":\"{}\",\"token_type\":\"bearer\",\"{}\":\"{}\"}}\n",
         json_escape(username),
         json_escape(role),
-        json_escape(access_token)
+        persisted.field,
+        json_escape(&persisted.value)
     );
-    write_file(&account_session_path(config), &body)
+    write_private_file(&account_session_path(config), &body)
 }
 
 fn write_account_projects(config: &AgentConfig, projects: &[AccountProject]) -> AgentResult<()> {
@@ -2086,25 +2494,228 @@ fn submit_sync(
     project: &ProjectEntry,
     result: &ScanResult,
     developer_token: Option<&str>,
-    account_token: Option<&str>,
+    account_token: &mut Option<&str>,
 ) -> AgentResult<String> {
-    let snapshots_json = result
-        .snapshots
-        .iter()
-        .map(snapshot_json)
-        .collect::<Vec<_>>()
-        .join(",");
-    let body = format!(
-        "{{\"agent_id\":\"{}\",\"project_id\":\"{}\",\"namespace\":\"{}\",\"project_tag\":\"{}\",\"root\":\"{}\",\"counts\":{},\"snapshots\":[{}],\"tombstones\":{}}}",
+    let plans = plan_sync_batches(config, project, result)?;
+    let mut checkpoint = load_scan_state(config, &result.state_key)?;
+    let mut responses = Vec::new();
+
+    for (index, plan) in plans.iter().enumerate() {
+        eprintln!(
+            "sync {}: submitting batch {}/{} (snapshots={}, tombstones={}, bytes={})",
+            project.locator,
+            index + 1,
+            plans.len(),
+            plan.snapshot_end - plan.snapshot_start,
+            plan.tombstone_end - plan.tombstone_start,
+            plan.body_bytes
+        );
+        let snapshots_json = result.snapshots[plan.snapshot_start..plan.snapshot_end]
+            .iter()
+            .map(|snapshot| snapshot_json(&result.root, snapshot))
+            .collect::<AgentResult<Vec<_>>>()?;
+        let tombstones_json = result.tombstones[plan.tombstone_start..plan.tombstone_end]
+            .iter()
+            .map(|path| format!("\"{}\"", json_escape(path)))
+            .collect::<Vec<_>>();
+        let body = sync_body(config, project, result, &snapshots_json, &tombstones_json);
+        if body.len() != plan.body_bytes || body.len() > config.max_batch_bytes {
+            return Err(AgentError(format!(
+                "sync batch body is {} bytes; planned {} bytes with MAX_BATCH_BYTES={}",
+                body.len(),
+                plan.body_bytes,
+                config.max_batch_bytes
+            )));
+        }
+        let response = post_sync_body(config, project, developer_token, account_token, &body)?;
+        responses.push(if response.trim().is_empty() {
+            "null".to_string()
+        } else {
+            response
+        });
+
+        for snapshot in &result.snapshots[plan.snapshot_start..plan.snapshot_end] {
+            checkpoint.insert(
+                snapshot.path.clone(),
+                (snapshot.sha256.clone(), snapshot.bytes),
+            );
+        }
+        for path in &result.tombstones[plan.tombstone_start..plan.tombstone_end] {
+            checkpoint.remove(path);
+        }
+        persist_scan_state(config, &result.root, &result.state_key, &checkpoint)?;
+    }
+
+    Ok(format!(
+        "{{\"batch_count\":{},\"responses\":[{}]}}",
+        plans.len(),
+        responses.join(",")
+    ))
+}
+
+fn plan_sync_batches(
+    config: &AgentConfig,
+    project: &ProjectEntry,
+    result: &ScanResult,
+) -> AgentResult<Vec<SyncBatchPlan>> {
+    let fixed_bytes = sync_body(config, project, result, &[], &[]).len();
+    if fixed_bytes > config.max_batch_bytes {
+        return Err(AgentError(format!(
+            "sync metadata is {fixed_bytes} bytes, exceeding MAX_BATCH_BYTES={}",
+            config.max_batch_bytes
+        )));
+    }
+
+    let mut plans = Vec::new();
+    let mut current = SyncBatchPlan {
+        snapshot_start: 0,
+        snapshot_end: 0,
+        tombstone_start: 0,
+        tombstone_end: 0,
+        body_bytes: fixed_bytes,
+    };
+    let mut item_count = 0_usize;
+
+    for (index, snapshot) in result.snapshots.iter().enumerate() {
+        let separator_bytes = usize::from(current.snapshot_end > current.snapshot_start);
+        let item_bytes = separator_bytes + snapshot.json_bytes;
+        if item_count == MAX_SYNC_ITEMS_PER_BATCH
+            || current.body_bytes.saturating_add(item_bytes) > config.max_batch_bytes
+        {
+            if item_count == 0 {
+                return Err(AgentError(format!(
+                    "snapshot {} cannot fit within MAX_BATCH_BYTES={}",
+                    snapshot.path, config.max_batch_bytes
+                )));
+            }
+            plans.push(current);
+            current = SyncBatchPlan {
+                snapshot_start: index,
+                snapshot_end: index,
+                tombstone_start: 0,
+                tombstone_end: 0,
+                body_bytes: fixed_bytes,
+            };
+            item_count = 0;
+        }
+        let separator_bytes = usize::from(current.snapshot_end > current.snapshot_start);
+        let item_bytes = separator_bytes + snapshot.json_bytes;
+        if current.body_bytes.saturating_add(item_bytes) > config.max_batch_bytes {
+            return Err(AgentError(format!(
+                "snapshot {} cannot fit within MAX_BATCH_BYTES={}",
+                snapshot.path, config.max_batch_bytes
+            )));
+        }
+        current.body_bytes += item_bytes;
+        current.snapshot_end = index + 1;
+        item_count += 1;
+    }
+
+    for (index, path) in result.tombstones.iter().enumerate() {
+        let encoded_bytes = json_escape(path).len() + 2;
+        let separator_bytes = usize::from(current.tombstone_end > current.tombstone_start);
+        let item_bytes = separator_bytes + encoded_bytes;
+        if item_count == MAX_SYNC_ITEMS_PER_BATCH
+            || current.body_bytes.saturating_add(item_bytes) > config.max_batch_bytes
+        {
+            if item_count == 0 {
+                return Err(AgentError(format!(
+                    "tombstone {path} cannot fit within MAX_BATCH_BYTES={}",
+                    config.max_batch_bytes
+                )));
+            }
+            plans.push(current);
+            current = SyncBatchPlan {
+                snapshot_start: result.snapshots.len(),
+                snapshot_end: result.snapshots.len(),
+                tombstone_start: index,
+                tombstone_end: index,
+                body_bytes: fixed_bytes,
+            };
+            item_count = 0;
+        }
+        let separator_bytes = usize::from(current.tombstone_end > current.tombstone_start);
+        let item_bytes = separator_bytes + encoded_bytes;
+        if current.body_bytes.saturating_add(item_bytes) > config.max_batch_bytes {
+            return Err(AgentError(format!(
+                "tombstone {path} cannot fit within MAX_BATCH_BYTES={}",
+                config.max_batch_bytes
+            )));
+        }
+        current.body_bytes += item_bytes;
+        current.tombstone_end = index + 1;
+        item_count += 1;
+    }
+
+    if item_count > 0 {
+        plans.push(current);
+    }
+    Ok(plans)
+}
+
+fn sync_body(
+    config: &AgentConfig,
+    project: &ProjectEntry,
+    result: &ScanResult,
+    snapshots_json: &[String],
+    tombstones_json: &[String],
+) -> String {
+    format!(
+        "{{\"agent_id\":\"{}\",\"project_id\":\"{}\",\"namespace\":\"{}\",\"project_tag\":\"{}\",\"root\":\"{}\",\"counts\":{},\"snapshots\":[{}],\"tombstones\":[{}]}}",
         json_escape(&config.agent_id),
         json_escape(&project.project_id),
         json_escape(&project.namespace),
         json_escape(&project.project_tag),
         json_escape(&display_path(&project.root)),
         counts_json(&result.counts),
-        snapshots_json,
-        string_array_json(&result.tombstones),
-    );
+        snapshots_json.join(","),
+        tombstones_json.join(","),
+    )
+}
+
+fn post_sync_body(
+    config: &AgentConfig,
+    project: &ProjectEntry,
+    developer_token: Option<&str>,
+    account_token: &mut Option<&str>,
+    body: &str,
+) -> AgentResult<String> {
+    if project.namespace == "account" {
+        if let Some(current_account_token) = *account_token {
+            let response = http_post_json_response(
+                config,
+                &format!("{}/api/auth/cga-relay/sync", config.control_api_base_url),
+                &[("Authorization", format!("Bearer {current_account_token}"))],
+                body,
+            )?;
+            if response.is_success() {
+                return Ok(response.body);
+            }
+            if response.status_code != 401 {
+                return Err(response.into_error());
+            }
+            *account_token = None;
+            match fs::remove_file(account_session_path(config)) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(AgentError(format!(
+                        "CGA account login was rejected, but its local session could not be removed: {error}"
+                    )));
+                }
+            }
+            if developer_token.is_none() {
+                return Err(AgentError(
+                    "CGA account login is no longer valid; sign in again before syncing"
+                        .to_string(),
+                ));
+            }
+            eprintln!(
+                "sync {}: account login rejected; retrying with project token",
+                project.locator
+            );
+        }
+    }
     if let Some(developer_token) = developer_token {
         http_post_json(
             config,
@@ -2113,14 +2724,14 @@ fn submit_sync(
                 ("Authorization", format!("Bearer {developer_token}")),
                 ("X-Project-ID", project.project_id.clone()),
             ],
-            &body,
+            body,
         )
-    } else if let Some(account_token) = account_token {
+    } else if let Some(account_token) = *account_token {
         http_post_json(
             config,
             &format!("{}/api/auth/cga-relay/sync", config.control_api_base_url),
             &[("Authorization", format!("Bearer {account_token}"))],
-            &body,
+            body,
         )
     } else {
         Err(AgentError(
@@ -2129,13 +2740,37 @@ fn submit_sync(
     }
 }
 
-fn snapshot_json(snapshot: &Snapshot) -> String {
+fn snapshot_json(root: &Path, snapshot: &Snapshot) -> AgentResult<String> {
+    let path = root.join(&snapshot.path);
+    let bytes = fs::read(&path)
+        .map_err(|err| AgentError(format!("cannot read {} for sync: {err}", path.display())))?;
+    if bytes.len() as u64 != snapshot.bytes || sha256_hex(&bytes) != snapshot.sha256 {
+        return Err(AgentError(format!(
+            "file changed during sync scan: {}",
+            path.display()
+        )));
+    }
+    let content = String::from_utf8(bytes).map_err(|_| {
+        AgentError(format!(
+            "file became non-UTF-8 during sync scan: {}",
+            path.display()
+        ))
+    })?;
+    Ok(snapshot_json_values(
+        &snapshot.path,
+        &snapshot.sha256,
+        snapshot.bytes,
+        &content,
+    ))
+}
+
+fn snapshot_json_values(path: &str, sha256: &str, bytes: u64, content: &str) -> String {
     format!(
         "{{\"path\":\"{}\",\"sha256\":\"{}\",\"bytes\":{},\"content\":\"{}\"}}",
-        json_escape(&snapshot.path),
-        json_escape(&snapshot.sha256),
-        snapshot.bytes,
-        json_escape(&snapshot.content)
+        json_escape(path),
+        json_escape(sha256),
+        bytes,
+        json_escape(content)
     )
 }
 
@@ -2307,7 +2942,7 @@ fn call_cga_tool(config: &AgentConfig, tool_name: &str, arguments: &str) -> Agen
         arguments,
         json_escape(&project_id)
     );
-    if let Ok(api_key) = env::var(&config.api_key_env) {
+    if let Some(api_key) = nonempty_env(&config.api_key_env) {
         return http_post_json(
             config,
             &format!("{}/api/project/cga-relay/mcp-tool", config.api_base_url),
@@ -2319,7 +2954,7 @@ fn call_cga_tool(config: &AgentConfig, tool_name: &str, arguments: &str) -> Agen
         );
     }
     if let Ok(session) = read_account_session(config) {
-        if let Some(access_token) = session.get("access_token") {
+        if let Some(access_token) = current_account_access_token(&session) {
             return http_post_json(
                 config,
                 &format!("{}/api/auth/cga-relay/mcp-tool", config.api_base_url),
@@ -2361,8 +2996,7 @@ fn http_get_json_with_headers(
     headers: &[(&str, String)],
 ) -> AgentResult<String> {
     let parsed = parse_http_url(url)?;
-    let mut stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
-        .map_err(|err| AgentError(format!("connect failed: {err}")))?;
+    let mut stream = connect_http_stream(&parsed)?;
     let crystals = crystals_headers();
     log_http_request(config, "GET", url, headers, &crystals, "");
     let mut request = format!(
@@ -2375,7 +3009,7 @@ fn http_get_json_with_headers(
     stream
         .write_all(request.as_bytes())
         .map_err(|err| AgentError(format!("request failed: {err}")))?;
-    read_http_response(config, "GET", url, stream)
+    read_http_response(config, "GET", url, stream)?.into_success_body()
 }
 
 fn http_post_json(
@@ -2384,9 +3018,17 @@ fn http_post_json(
     headers: &[(&str, String)],
     body: &str,
 ) -> AgentResult<String> {
+    http_post_json_response(config, url, headers, body)?.into_success_body()
+}
+
+fn http_post_json_response(
+    config: &AgentConfig,
+    url: &str,
+    headers: &[(&str, String)],
+    body: &str,
+) -> AgentResult<HttpResponse> {
     let parsed = parse_http_url(url)?;
-    let mut stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
-        .map_err(|err| AgentError(format!("connect failed: {err}")))?;
+    let mut stream = connect_http_stream(&parsed)?;
     let crystals = crystals_headers();
     log_http_request(config, "POST", url, headers, &crystals, body);
     let mut request = format!(
@@ -2426,8 +3068,7 @@ fn log_http_request(
         detail.push_str(&format!("{name}: {value}\n"));
     }
     if !body.is_empty() {
-        detail.push_str("body:\n");
-        detail.push_str(body);
+        detail.push_str(&format!("body_bytes={}\n", body.len()));
     }
     log_communication(config, "http.request", &detail);
 }
@@ -2465,6 +3106,18 @@ struct ParsedUrl {
     path: String,
 }
 
+fn connect_http_stream(parsed: &ParsedUrl) -> AgentResult<TcpStream> {
+    let stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
+        .map_err(|err| AgentError(format!("connect failed: {err}")))?;
+    stream
+        .set_read_timeout(Some(HTTP_IO_TIMEOUT))
+        .map_err(|err| AgentError(format!("cannot set HTTP read timeout: {err}")))?;
+    stream
+        .set_write_timeout(Some(HTTP_IO_TIMEOUT))
+        .map_err(|err| AgentError(format!("cannot set HTTP write timeout: {err}")))?;
+    Ok(stream)
+}
+
 fn parse_http_url(url: &str) -> AgentResult<ParsedUrl> {
     let Some(rest) = url.strip_prefix("http://") else {
         return Err(AgentError(
@@ -2495,35 +3148,87 @@ fn is_loopback_host(host: &str) -> bool {
     matches!(host, "localhost" | "127.0.0.1" | "::1" | "[::1]")
 }
 
+struct HttpResponse {
+    status_code: u16,
+    body: String,
+}
+
+impl HttpResponse {
+    fn is_success(&self) -> bool {
+        (200..300).contains(&self.status_code)
+    }
+
+    fn into_success_body(self) -> AgentResult<String> {
+        if self.is_success() {
+            Ok(self.body)
+        } else {
+            Err(self.into_error())
+        }
+    }
+
+    fn into_error(self) -> AgentError {
+        AgentError(format!(
+            "HTTP request failed with status {}",
+            self.status_code
+        ))
+    }
+}
+
 fn read_http_response(
     config: &AgentConfig,
     method: &str,
     url: &str,
-    mut stream: TcpStream,
-) -> AgentResult<String> {
+    stream: TcpStream,
+) -> AgentResult<HttpResponse> {
     let mut response = Vec::new();
     stream
+        .take((MAX_HTTP_RESPONSE_BYTES + 1) as u64)
         .read_to_end(&mut response)
         .map_err(|err| AgentError(format!("response failed: {err}")))?;
+    if response.len() > MAX_HTTP_RESPONSE_BYTES {
+        log_communication(
+            config,
+            "http.response",
+            &format!(
+                "method={method}\nurl={url}\nresponse_limit_bytes={MAX_HTTP_RESPONSE_BYTES}\nresponse_prefix_bytes={}",
+                response.len()
+            ),
+        );
+        return Err(AgentError(format!(
+            "HTTP response exceeds {MAX_HTTP_RESPONSE_BYTES}-byte limit"
+        )));
+    }
     let text = String::from_utf8_lossy(&response);
     let Some((head, body)) = text.split_once("\r\n\r\n") else {
         log_communication(
             config,
             "http.response",
-            &format!("method={method}\nurl={url}\ninvalid_response:\n{text}"),
+            &format!(
+                "method={method}\nurl={url}\ninvalid_response_bytes={}",
+                response.len()
+            ),
         );
         return Err(AgentError("invalid HTTP response".to_string()));
     };
     let status = head.lines().next().unwrap_or("HTTP response");
+    let status_code = status
+        .split_whitespace()
+        .nth(1)
+        .and_then(|value| value.parse::<u16>().ok())
+        .ok_or_else(|| AgentError("invalid HTTP response status".to_string()))?;
     log_communication(
         config,
         "http.response",
-        &format!("method={method}\nurl={url}\nstatus={status}\nheaders:\n{head}\nbody:\n{body}"),
+        &format!(
+            "method={method}\nurl={url}\nstatus_code={status_code}\nheader_bytes={}\nbody_bytes={}",
+            head.len(),
+            body.len()
+        ),
     );
-    if !head.starts_with("HTTP/1.1 2") && !head.starts_with("HTTP/1.0 2") {
-        return Err(AgentError("HTTP request failed".to_string()));
-    }
-    Ok(body.to_string())
+    Ok(HttpResponse {
+        status_code,
+        body: body.to_string(),
+    })
 }
 
 fn json_string_field(text: &str, field: &str) -> Option<String> {
@@ -2655,7 +3360,7 @@ fn insert_json_field(object: &str, key: &str, value: &str) -> String {
     if trimmed == "{}" {
         return format!("{{\"{}\":\"{}\"}}", json_escape(key), json_escape(value));
     }
-    let without_end = trimmed.trim_end_matches('}');
+    let without_end = trimmed.strip_suffix('}').unwrap_or(trimmed);
     format!(
         "{},\"{}\":\"{}\"}}",
         without_end,

@@ -5,7 +5,8 @@ This guide covers the public GitHub release path for CGA, aka Context Graph Agen
 ## Release Channels
 
 - Source download: GitHub automatically provides zip/tarball downloads for every release tag.
-- Runtime bundle: the release workflow attaches `cga-<version>.tar.gz`, `docker-compose.release.yml`, and `SHA256SUMS.txt`.
+- Runtime bundle: the release workflow attaches `cga-<version>.tar.gz`, `docker-compose.release.yml`, and `SHA256SUMS.txt`. The unified checksum manifest covers the source bundle, runtime files, signed Relay executable, and versioned Relay ZIP using their flat release asset names.
+- Windows relay: the release workflow builds, Authenticode-signs, verifies, and attaches `cga-relay.exe`, `cga-relay-<version>-windows-x64.zip`, and matching SHA-256 files.
 - One-click Docker Desktop zip: `deploy/docker-desktop/build-release-bundle.ps1` creates `CGA-Docker-Desktop-<version>.zip` with Windows launchers and `cga-desktop-api-image.tar` for fast local startup. Attach the zip and a matching `.zip.sha256` file to the GitHub Release after the tag workflow completes.
 - Container image: tag pushes publish the API/runtime image to GitHub Container Registry:
   - `ghcr.io/nascousa/cga-api:<tag>`
@@ -20,7 +21,14 @@ Before the first public release:
 4. Review `THIRD_PARTY_NOTICES.md` against the exact dependency set, browser assets, fonts/icons/images, and container images used by the release.
 5. Confirm `.env`, `.deploy-keys/`, `data/`, `tmp/`, logs, local databases, and private keys are not tracked.
 6. Update `README.md` version and date.
-7. Run local validation from the repository root:
+7. Configure `CGA_RELAY_SIGNING_CERT_BASE64` and `CGA_RELAY_SIGNING_CERT_PASSWORD` as GitHub Actions secrets. The certificate must be a trusted Windows code-signing PFX; never commit it or print either secret. The release script removes both values from the child-process environment before running Cargo, imports the certificate temporarily, signs by thumbprint so the password is not passed to `signtool.exe`, removes the imported certificate, and requires a valid RFC 3161 timestamp.
+8. Build and inspect the unsigned local relay candidate. Formal tag builds repeat this check after signing:
+
+```powershell
+.\src\cga-relay\scripts\build-secure-release.ps1
+```
+
+9. Run local service validation from the repository root:
 
 ```bash
 docker compose --profile dev config
@@ -41,12 +49,12 @@ git tag -a v1.29.85 -m "CGA v1.29.85"
 git push origin v1.29.85
 ```
 
-Pushing the tag runs `.github/workflows/release.yml`, which builds and publishes GHCR images and creates a GitHub Release.
+Pushing the tag runs `.github/workflows/release.yml`, which builds and publishes GHCR images and creates a GitHub Release. The workflow fails closed before publication if the Relay signing secrets are absent, Authenticode validation fails, PE mitigations are missing, debug symbols or build paths remain, or artifact generation fails.
 
 After the workflow succeeds, upload the locally built Docker Desktop zip and checksum to the same release:
 
 ```powershell
-$version = "1.30.113"
+$version = "1.30.117"
 $zip = "deploy/docker-desktop/dist/releases/CGA-Docker-Desktop-$version.zip"
 $checksum = "$zip.sha256"
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash

@@ -11,6 +11,10 @@ const APP_ICON_GRAY_LARGE_ID: u16 = 6;
 const RT_ICON: u16 = 3;
 const RT_GROUP_ICON: u16 = 14;
 
+type IconResource<'a> = (u16, &'a [u8]);
+type GroupIconEntry = (u8, u16, u32);
+type GroupIconResource<'a> = (u16, &'a [GroupIconEntry]);
+
 #[derive(Clone, Copy)]
 enum IconVariant {
     Color,
@@ -81,7 +85,7 @@ fn make_icon_image(size: u8, variant: IconVariant) -> Vec<u8> {
             image.extend_from_slice(&[blue, green, red, alpha]);
         }
     }
-    let mask_stride = ((width + 31) / 32) * 4;
+    let mask_stride = width.div_ceil(32) * 4;
     image.resize(image.len() + mask_stride * height, 0);
     image
 }
@@ -197,7 +201,7 @@ fn make_ico(images: &[(u8, &[u8])]) -> Vec<u8> {
     out
 }
 
-fn make_res(images: &[(u16, &[u8])], groups: &[(u16, &[(u8, u16, u32)])]) -> Vec<u8> {
+fn make_res(images: &[IconResource<'_>], groups: &[GroupIconResource<'_>]) -> Vec<u8> {
     let mut out = Vec::new();
     append_res_entry(&mut out, 0, 0, &[]);
     for (id, data) in images {
@@ -214,7 +218,7 @@ fn make_res(images: &[(u16, &[u8])], groups: &[(u16, &[(u8, u16, u32)])]) -> Vec
     out
 }
 
-fn make_group_icon(images: &[(u8, u16, u32)]) -> Vec<u8> {
+fn make_group_icon(images: &[GroupIconEntry]) -> Vec<u8> {
     let mut out = Vec::new();
     write_u16(&mut out, 0);
     write_u16(&mut out, 1);
@@ -257,7 +261,7 @@ fn write_numeric_resource_id(out: &mut Vec<u8>, id: u16) {
 }
 
 fn align4(out: &mut Vec<u8>) {
-    while out.len() % 4 != 0 {
+    while !out.len().is_multiple_of(4) {
         out.push(0);
     }
 }

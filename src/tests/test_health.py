@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from backend.main import APP_VERSION, _upgrade_status_payload, app
+from backend.main import APP_VERSION, MIN_RELAY_VERSION, _upgrade_status_payload, app
 
 
 client = TestClient(app)
@@ -31,6 +31,8 @@ def test_upgrade_status_payload_contains_local_readiness_contract() -> None:
     payload = _upgrade_status_payload()
 
     assert payload["app_version"] == APP_VERSION
+    assert MIN_RELAY_VERSION == "1.30.117"
+    assert payload["compatibility"]["min_relay_version"] == MIN_RELAY_VERSION
     assert payload["backup"]["backup_dir"]
     assert payload["schema"] == {
         "auth": 1,
