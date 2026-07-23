@@ -104,11 +104,12 @@ mod platform {
     }
 
     pub(super) fn try_acquire(name: &str) -> io::Result<Option<Guard>> {
-        let path = std::env::temp_dir().join(format!("{name}.lock"));
+        let path = std::path::Path::new("/tmp").join(format!("{name}.lock"));
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
+            .truncate(false)
             .open(path)?;
         if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } == 0 {
             return Ok(Some(Guard { _file: file }));
