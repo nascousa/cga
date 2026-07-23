@@ -12,6 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::os::windows::process::CommandExt;
 
 mod secret_store;
+mod single_instance;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -157,13 +158,14 @@ struct ScanResult {
 }
 
 fn main() {
-    let code = match run(env::args().skip(1).collect()) {
-        Ok(()) => 0,
-        Err(error) => {
-            eprintln!("error: {}", error.0);
-            2
-        }
-    };
+    let code =
+        match single_instance::acquire().and_then(|_guard| run(env::args().skip(1).collect())) {
+            Ok(()) => 0,
+            Err(error) => {
+                eprintln!("error: {}", error.0);
+                2
+            }
+        };
     process::exit(code);
 }
 

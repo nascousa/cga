@@ -31,7 +31,7 @@ def test_upgrade_status_payload_contains_local_readiness_contract() -> None:
     payload = _upgrade_status_payload()
 
     assert payload["app_version"] == APP_VERSION
-    assert MIN_RELAY_VERSION == "1.30.118"
+    assert MIN_RELAY_VERSION == "1.30.119"
     assert payload["compatibility"]["min_relay_version"] == MIN_RELAY_VERSION
     assert payload["backup"]["backup_dir"]
     assert payload["schema"] == {

@@ -2,6 +2,8 @@
 
 `cga-relay` is the Rust desktop relay for CGA. It is designed as one installed relay per developer machine. Project repositories only need a small MCP pointer that launches the installed relay over stdio; they do not run their own long-lived MCP server.
 
+Every command acquires the same machine-wide OS lock before doing any work: a named global mutex on Windows and a non-blocking file lock on Unix. If another CGA-Relay process already owns that lock, the new process exits with `CGA-Relay is already running` instead of starting a second instance.
+
 ## Install Or Build
 
 For normal developer onboarding, install `cga-relay` on the machine where the repository checkout lives. Coding agents should launch that local executable over stdio instead of connecting directly to a remote `/mcp/sse` endpoint.
@@ -37,7 +39,7 @@ On Windows MSVC targets, the crate config enables static CRT linking, fat LTO, s
 .\src\cga-relay\scripts\build-secure-release.ps1
 ```
 
-The script rejects binaries that retain COFF, CodeView, or embedded PDB symbols; omit required PE mitigations or concrete CFG/CET metadata; contain writable-executable sections; expose common absolute build paths or test secrets; or contain UPX markers. It produces `cga-relay.exe`, a versioned Windows x64 zip, and SHA-256 files. GitHub tag releases additionally require a valid Authenticode signature and RFC 3161 timestamp.
+The script rejects binaries that retain COFF, CodeView, or embedded PDB symbols; omit required PE mitigations or concrete CFG/CET metadata; omit the machine-wide CGA-Relay mutex import or name; contain writable-executable sections; expose common absolute build paths or test secrets; or contain UPX markers. It produces `cga-relay.exe`, a versioned Windows x64 zip, and SHA-256 files. GitHub tag releases additionally require a valid Authenticode signature and RFC 3161 timestamp.
 
 These controls remove routine symbol and path disclosure and raise the cost of static analysis. They do not make native code impossible to disassemble or decompile. CGA-Relay does not use UPX or similar packers because they are reversible and commonly increase endpoint-security false positives.
 
