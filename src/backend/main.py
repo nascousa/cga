@@ -32,7 +32,6 @@ from fastapi import Depends, FastAPI
 from fastapi import HTTPException
 from fastapi import Query
 from fastapi import Request
-from jose import JWTError
 from fastapi.responses import FileResponse
 from fastapi.responses import RedirectResponse
 from fastapi.responses import Response
@@ -44,7 +43,7 @@ from backend.auth.dependencies import get_current_user, require_admin
 from backend.auth.middleware import ProjectTokenMiddleware
 from backend.auth.pgshim import get_pool as get_auth_pool
 from backend.auth.router import router as auth_router
-from backend.auth.security import decode_access_token, hash_token
+from backend.auth.security import JWTError, decode_access_token, hash_token
 from backend.ai_first.service import AiFirstEvidencePackNotFoundError
 from backend.ai_first.service import AiFirstPolicyProfileError
 from backend.ai_first.service import AiFirstProjectNotFoundError
@@ -81,12 +80,12 @@ from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.117"
+APP_VERSION = "1.30.118"
 AUTH_SCHEMA_VERSION = 1
 GRAPH_SCHEMA_VERSION = 1
 RUNTIME_CONFIG_VERSION = 1
 WORK_BRIEFING_SCHEMA_VERSION = 1
-MIN_RELAY_VERSION = "1.30.117"
+MIN_RELAY_VERSION = "1.30.118"
 RECOMMENDED_RELAY_VERSION = os.getenv("CGA_RECOMMENDED_RELAY_VERSION", MIN_RELAY_VERSION)
 
 FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
