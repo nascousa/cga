@@ -79,11 +79,12 @@ def test_runtime_config_rejects_invalid_default_token_budget(
         runtime_config.update_runtime_config({"indexing": {"default_token_budget": True}})
 
 
-def test_runtime_config_persists_modules_and_smtp_without_exposing_password(
+def test_runtime_config_uses_environment_smtp_password_without_persisting_it(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config_path = tmp_path / "runtime-config.json"
     monkeypatch.setattr(runtime_config, "RUNTIME_CONFIG_PATH", config_path)
+    monkeypatch.setenv("CGA_SMTP_PASSWORD", "environment-secret")
 
     saved = runtime_config.update_runtime_config(
         {
@@ -97,7 +98,6 @@ def test_runtime_config_persists_modules_and_smtp_without_exposing_password(
                 "port": 465,
                 "security": "ssl",
                 "username": "mailer@example.com",
-                "password": "local-only-secret",
                 "from_email": "cga@example.com",
                 "from_name": "CGA Mailer",
             },
@@ -115,11 +115,18 @@ def test_runtime_config_persists_modules_and_smtp_without_exposing_password(
     assert "password" not in saved["smtp"]
 
     raw = json.loads(config_path.read_text(encoding="utf-8"))
-    assert raw["smtp"]["password"] == "local-only-secret"
+    assert "password" not in raw["smtp"]
 
     reloaded = runtime_config.get_runtime_config()
     assert reloaded["smtp"]["password_set"] is True
     assert "password" not in reloaded["smtp"]
+
+    delivery = runtime_config.get_smtp_delivery_config()
+    assert delivery["password"] == "environment-secret"
+    assert "environment-secret" not in json.dumps(reloaded)
+
+    with pytest.raises(runtime_config.RuntimeConfigError, match="CGA_SMTP_PASSWORD"):
+        runtime_config.update_runtime_config({"smtp": {"password": "never-persist"}})
 
 
 def test_runtime_config_rejects_unknown_module_and_invalid_smtp(

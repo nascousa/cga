@@ -52,6 +52,15 @@ class GraphRegistry:
         """Return the GraphClient for the project active in the current context."""
         return self.get(_current_project_name.get())
 
+    def delete(self, project_name: str) -> None:
+        """Delete a graph and evict its cached client."""
+        project_name = project_name.strip().lower()
+        graph = self.get(project_name)
+        graph.delete()
+        graph.close()
+        self._graphs.pop(project_name, None)
+        log.info("graph.registry.deleted", project_name=project_name)
+
     def close_all(self) -> None:
         for g in self._graphs.values():
             g.close()

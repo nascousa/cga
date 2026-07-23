@@ -187,6 +187,20 @@ CREATE INDEX IF NOT EXISTS idx_extension_runs_project_started
 CREATE INDEX IF NOT EXISTS idx_extension_runs_extension_started
     ON extension_runs(extension_id, started_at DESC);
 
+CREATE TABLE IF NOT EXISTS extension_snapshots (
+    id            BIGSERIAL PRIMARY KEY,
+    extension_id  TEXT    NOT NULL,
+    project_id    BIGINT  REFERENCES projects(id) ON DELETE CASCADE,
+    run_id        BIGINT  REFERENCES extension_runs(id) ON DELETE SET NULL,
+    scope_key     TEXT    NOT NULL,
+    captured_at   TEXT    NOT NULL,
+    snapshot_json TEXT    NOT NULL,
+    created_at    TEXT    NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS')
+);
+
+CREATE INDEX IF NOT EXISTS idx_extension_snapshots_lookup
+    ON extension_snapshots(extension_id, project_id, scope_key, captured_at DESC, id DESC);
+
 CREATE TABLE IF NOT EXISTS oauth_connections (
     id              BIGSERIAL PRIMARY KEY,
     user_id         BIGINT  NOT NULL REFERENCES users(id) ON DELETE CASCADE,

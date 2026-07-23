@@ -5,7 +5,11 @@
       "url": "http://localhost:18001/mcp/sse",
       "headers": {
         "Authorization": "Bearer ${CONTEXTGRAPH_MCP_TOKEN}",
-        "X-Project-ID": "${CONTEXTGRAPH_PROJECT_ID}"
+        "X-Project-ID": "${CONTEXTGRAPH_PROJECT_ID}",
+        "X-CGA-Communication-Profile": "CRYSTALS-CNSA-2.0",
+        "X-CGA-Key-Establishment": "ML-KEM-1024",
+        "X-CGA-Signature": "ML-DSA-87",
+        "X-CGA-Transport-Scope": "local-ipc"
       },
       "env": {
         "CONTEXTGRAPH_MCP_TOKEN": "${CONTEXTGRAPH_MCP_TOKEN}",
@@ -20,7 +24,11 @@
       "url": "http://localhost:18001/mcp/sse",
       "headers": {
         "Authorization": "Bearer ${CONTEXTGRAPH_MCP_TOKEN}",
-        "X-Project-ID": "${CONTEXTGRAPH_PROJECT_ID}"
+        "X-Project-ID": "${CONTEXTGRAPH_PROJECT_ID}",
+        "X-CGA-Communication-Profile": "CRYSTALS-CNSA-2.0",
+        "X-CGA-Key-Establishment": "ML-KEM-1024",
+        "X-CGA-Signature": "ML-DSA-87",
+        "X-CGA-Transport-Scope": "local-ipc"
       },
       "env": {
         "CONTEXTGRAPH_MCP_TOKEN": "${CONTEXTGRAPH_MCP_TOKEN}",

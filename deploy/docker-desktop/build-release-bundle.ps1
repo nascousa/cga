@@ -46,9 +46,6 @@ if (Test-Path $zipPath) {
 }
 
 & $portableBuilder -OutputFolder $versionedFolder
-if ($LASTEXITCODE -ne 0) {
-    throw "Portable bundle build failed with exit code $LASTEXITCODE"
-}
 
 if (-not $SkipImageBuild) {
     Write-Host "Building prebuilt CGA API image: $imageTag"

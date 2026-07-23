@@ -6,9 +6,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.auth.database import get_db
 from backend.auth.pgshim import Connection
-from backend.auth.security import decode_access_token
-
-from jose import JWTError
+from backend.auth.security import JWTError, decode_access_token
 
 _bearer = HTTPBearer(auto_error=False)
 

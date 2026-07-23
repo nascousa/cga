@@ -1,15 +1,15 @@
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.110
+- **Version:** 1.30.118
 - **Status:** Published
 - **Author:** Nate Scott
-- **Date:** 2026-07-01 (Section collapse controls)
+- **Date:** 2026-07-22 (CGA-Relay hardening and JWT dependency security update)
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
 CGA is dedicated to AI-FIRST engineering teams that want local, evidence-backed context for agentic development workflows.
 
-In the current live multi-project benchmark, CGA reduced prompt tokens by **90.44%** on average while lowering Hallucination Pressure Score by **13.34%** across **102 real-code cases**.
+In the published 2026-06-02 live multi-project benchmark, CGA reduced prompt tokens by **90.44%** on average while lowering Hallucination Pressure Score by **13.34%** across **102 real-code cases**. This is a historical pre-answer HPS snapshot; it is not a model task-completion result.
 
 ## For AI Coding Agents
 
@@ -84,7 +84,7 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 - **Admin Dashboard:** project registration, user access groups, indexing status, settings, schedules, and operational views.
 - **3D Graph Viewer:** visual exploration of repository relationships and graph layout controls.
 - **MCP-compatible API:** agent-facing retrieval tools for symbols, files, dependencies, imports, variable flow, and architecture queries.
-- **CGA-Relay:** one developer-machine `cga-relay` with stdio MCP gateway, local scan/sync, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
+- **CGA-Relay:** one developer-machine `cga-relay` with stdio MCP gateway, local scan/sync, branch/ref graph routing and promotion, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
 - **Work Briefing Aggregation:** WA-compatible activity capture and briefing summaries inside CGA.
 - **AI-First Readiness And Evidence:** Admin APIs for readiness snapshots, GitHub/Azure DevOps/verification signals, evidence packs, PR evidence links, and policy-derived gates that combine graph, indexing, ADC, governance, and work activity signals.
 - **Schedule Automation:** admin-defined recurring jobs for BrowserAgent page tests, agent activation calls, generic HTTP tasks, and project extensions.
@@ -106,9 +106,9 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 |---|---|
 | ![CGA graph viewer layout settings over the graph canvas](docs/site/cga-ui-viewer-layout-settings.png) | ![CGA graph canvas focused on projected relationships](docs/site/cga-ui-3d-graph-stage.png) |
 
-## Benchmark Snapshot
+## Historical Benchmark Snapshot
 
-The latest live database-backed run selected three active projects from CGA, generated 34 deterministic symbol-level cases per project, and compared broad source context against graph-scoped CG context.
+The published 2026-06-02 database-backed run selected three active projects from CGA, generated 34 deterministic symbol-level cases per project, and compared broad source context against graph-scoped CG context.
 
 | Metric | Result |
 |---|---:|
@@ -122,7 +122,7 @@ The latest live database-backed run selected three active projects from CGA, gen
 | Average CG tokens | 483.29 |
 | Average token reduction | 90.44% |
 
-The run is intentionally reported with nuance: one project's HPS increased under the conservative neighboring-context setup, while the cross-project average improved. See [docs/benchmarks/live-context-quality.md](docs/benchmarks/live-context-quality.md) for the full table, methodology, and reproduction command.
+The run is intentionally reported with nuance: one project's HPS increased under the conservative neighboring-context setup, while the cross-project average improved. This is a pre-answer 2026-06-02 snapshot, not evidence of model task completion. The current benchmark also supports frozen graph expansion, controlled model answers, citation scoring, and per-project regression gates; no answer-level result is claimed until that runner completes. See [docs/benchmarks/live-context-quality.md](docs/benchmarks/live-context-quality.md) for the historical table and [docs/benchmarks/README.md](docs/benchmarks/README.md) for the current workflow.
 
 ## Documentation
 

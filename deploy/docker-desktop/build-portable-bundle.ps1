@@ -16,6 +16,7 @@ if (Test-Path $portableRoot) {
 New-Item -ItemType Directory -Path $portableRoot | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $portableRoot 'repos') | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $portableRoot 'src') -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $portableRoot 'extensions') -Force | Out-Null
 
 $filesToCopy = @(
     @{ Source = Join-Path $repoRoot 'Dockerfile.dev'; Target = Join-Path $portableRoot 'Dockerfile.dev' },
@@ -87,6 +88,7 @@ function Copy-SourceTreeExcludingGenerated {
 }
 
 Copy-SourceTreeExcludingGenerated -Source (Join-Path $repoRoot 'src') -Destination (Join-Path $portableRoot 'src')
+Copy-SourceTreeExcludingGenerated -Source (Join-Path $repoRoot 'extensions') -Destination (Join-Path $portableRoot 'extensions')
 
 $generatedSourcePaths = @(
   'src\cga-relay\target',
@@ -103,6 +105,9 @@ foreach ($relativePath in $generatedSourcePaths) {
 
 if (-not (Test-Path (Join-Path $portableRoot 'src\scripts\init_auth_db.py'))) {
   throw 'Portable bundle source copy failed: src\scripts\init_auth_db.py is missing.'
+}
+if (-not (Get-ChildItem -LiteralPath (Join-Path $portableRoot 'extensions') -Directory)) {
+  throw 'Portable bundle extension copy failed: no extensions were copied.'
 }
 
 # The backup sidecar mounts this script directly; make sure it lives at the

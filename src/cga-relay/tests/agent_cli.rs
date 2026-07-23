@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const TEST_SECRET: &str = "TEST_SECRET_VALUE_SHOULD_NEVER_LEAK";
+const RESPONSE_HEADER_MARKER: &str = "PRIVATE_RESPONSE_HEADER_MARKER";
 
 struct TestDir {
     path: PathBuf,
@@ -106,16 +107,393 @@ fn read_log_files(base: &Path) -> (Vec<String>, String) {
     (names, combined)
 }
 
+fn read_http_request(stream: &mut TcpStream) -> String {
+    let mut bytes = Vec::new();
+    let mut expected_len = None;
+    loop {
+        let mut buffer = [0_u8; 8192];
+        let read = std::io::Read::read(stream, &mut buffer).expect("request should be readable");
+        if read == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        if expected_len.is_none() {
+            if let Some(header_end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+                let header_len = header_end + 4;
+                let headers = String::from_utf8_lossy(&bytes[..header_len]);
+                let content_len = headers
+                    .lines()
+                    .find_map(|line| {
+                        let (name, value) = line.split_once(':')?;
+                        name.eq_ignore_ascii_case("content-length")
+                            .then(|| value.trim().parse::<usize>().ok())
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                expected_len = Some(header_len + content_len);
+            }
+        }
+        if expected_len.is_some_and(|length| bytes.len() >= length) {
+            break;
+        }
+    }
+    String::from_utf8(bytes).expect("request should be UTF-8")
+}
+
+fn request_body(request: &str) -> &str {
+    request
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .unwrap_or("")
+}
+
+fn snapshot_count(request: &str) -> usize {
+    request_body(request).matches("\"path\":").count()
+}
+
+fn write_http_response(stream: &mut TcpStream, status: u16) {
+    let (reason, body) = match status {
+        202 => ("Accepted", "{\"accepted\":true}"),
+        401 => ("Unauthorized", "{\"detail\":\"invalid account session\"}"),
+        403 => ("Forbidden", "{\"detail\":\"project mismatch\"}"),
+        413 => ("Payload Too Large", "{\"detail\":\"batch limit exceeded\"}"),
+        _ => ("Internal Server Error", "{\"detail\":\"test failure\"}"),
+    };
+    let response = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nX-Test-Marker: {RESPONSE_HEADER_MARKER}\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(response.as_bytes())
+        .expect("response should be writable");
+}
+
+fn spawn_checkpoint_server() -> (u16, thread::JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut requests = Vec::new();
+        let mut first = listener.accept().unwrap().0;
+        let first_request = read_http_request(&mut first);
+        let first_count = snapshot_count(&first_request);
+        requests.push(first_request);
+        if first_count > 500 {
+            write_http_response(&mut first, 413);
+            return requests;
+        }
+        write_http_response(&mut first, 202);
+        drop(first);
+
+        let mut second = listener.accept().unwrap().0;
+        requests.push(read_http_request(&mut second));
+        write_http_response(&mut second, 500);
+        requests
+    });
+    (port, server)
+}
+
+fn spawn_accepting_sync_server(
+    max_body_bytes: usize,
+    expected_snapshots: usize,
+) -> (u16, thread::JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut requests = Vec::new();
+        let mut received_snapshots = 0;
+        loop {
+            let mut stream = listener.accept().unwrap().0;
+            let request = read_http_request(&mut stream);
+            let body_len = request_body(&request).len();
+            let count = snapshot_count(&request);
+            requests.push(request);
+            if body_len > max_body_bytes || count > 500 {
+                write_http_response(&mut stream, 413);
+                break;
+            }
+            received_snapshots += count;
+            write_http_response(&mut stream, 202);
+            if received_snapshots >= expected_snapshots {
+                break;
+            }
+        }
+        requests
+    });
+    (port, server)
+}
+
+fn spawn_account_rejection_then_project_acceptance_server(
+    expected_project_requests: usize,
+) -> (u16, thread::JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut requests = Vec::new();
+        let mut account_stream = listener.accept().unwrap().0;
+        requests.push(read_http_request(&mut account_stream));
+        write_http_response(&mut account_stream, 401);
+        drop(account_stream);
+
+        for _ in 0..expected_project_requests {
+            let mut project_stream = listener.accept().unwrap().0;
+            requests.push(read_http_request(&mut project_stream));
+            write_http_response(&mut project_stream, 202);
+        }
+        requests
+    });
+    (port, server)
+}
+
+fn spawn_sync_status_server(statuses: Vec<u16>) -> (u16, thread::JoinHandle<Vec<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for status in statuses {
+            let mut stream = listener.accept().unwrap().0;
+            requests.push(read_http_request(&mut stream));
+            write_http_response(&mut stream, status);
+        }
+        requests
+    });
+    (port, server)
+}
+
+fn spawn_malformed_sync_server(response_marker: &'static str) -> (u16, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut stream = listener.accept().unwrap().0;
+        let _ = read_http_request(&mut stream);
+        stream
+            .write_all(response_marker.as_bytes())
+            .expect("malformed response should be writable");
+    });
+    (port, server)
+}
+
+fn spawn_oversized_sync_response_server() -> (u16, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut stream = listener.accept().unwrap().0;
+        let _ = read_http_request(&mut stream);
+        let body_bytes = 8 * 1024 * 1024;
+        let header = format!(
+            "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\nContent-Length: {body_bytes}\r\n\r\n"
+        );
+        if stream.write_all(header.as_bytes()).is_err() {
+            return;
+        }
+        let chunk = [b'x'; 8192];
+        for _ in 0..(body_bytes / chunk.len()) {
+            if stream.write_all(&chunk).is_err() {
+                break;
+            }
+        }
+    });
+    (port, server)
+}
+
 #[test]
 fn help_output_lists_required_commands() {
     let output = run_agent(&["--help"]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let text = stdout(&output);
     for command in [
-        "doctor", "login", "projects", "scan", "sync", "settings", "tray", "mcp",
+        "doctor", "login", "projects", "scan", "sync", "index", "refs", "settings", "tray", "mcp",
     ] {
         assert!(text.contains(command), "help missing {command}: {text}");
     }
+}
+
+fn assert_cli_tool_request(
+    expected_tool: &'static str,
+    expected_fragments: &'static [&'static str],
+) -> (u16, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut stream = listener.accept().unwrap().0;
+        let mut buffer = [0_u8; 8192];
+        let read = stream.read(&mut buffer).unwrap();
+        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+        assert!(request.contains("POST /api/project/cga-relay/mcp-tool HTTP/1.1"));
+        assert!(request.contains(expected_tool));
+        for fragment in expected_fragments {
+            assert!(
+                request.contains(fragment),
+                "request missing {fragment}: {request}"
+            );
+        }
+        let body = format!("{{\"ok\":true,\"tool\":\"{expected_tool}\"}}");
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    (port, server)
+}
+
+#[test]
+fn index_git_cli_forwards_branch_and_parent_ref() {
+    let (port, server) = assert_cli_tool_request(
+        "index_git_incremental",
+        &[
+            "feature/client-menu-order",
+            "parent_ref",
+            "include_untracked",
+        ],
+    );
+    let tmp = TestDir::new("index-git-cli");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+
+    let output = Command::new(agent_bin())
+        .args([
+            "index",
+            "git",
+            "--config",
+            config.to_str().unwrap(),
+            "--repo-path",
+            repo.to_str().unwrap(),
+            "--branch",
+            "feature/client-menu-order",
+            "--parent-ref",
+            "main",
+            "--no-include-untracked",
+        ])
+        .env("CGA_TEST_API_KEY", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("index_git_incremental"));
+    assert!(!stdout(&output).contains(TEST_SECRET));
+    server.join().unwrap();
+}
+
+#[test]
+fn index_incremental_cli_forwards_multiple_changed_paths() {
+    let (port, server) = assert_cli_tool_request(
+        "index_incremental",
+        &["src/a.py", "src/b.py", "bugfix/cache-key", "changed_paths"],
+    );
+    let tmp = TestDir::new("index-incremental-cli");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+
+    let output = Command::new(agent_bin())
+        .args([
+            "index",
+            "incremental",
+            "--config",
+            config.to_str().unwrap(),
+            "--repo-path",
+            repo.to_str().unwrap(),
+            "--changed-path",
+            "src/a.py",
+            "--changed-path",
+            "src/b.py",
+            "--ref",
+            "bugfix/cache-key",
+        ])
+        .env("CGA_TEST_API_KEY", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("index_incremental"));
+    server.join().unwrap();
+}
+
+#[test]
+fn refs_promote_cli_forwards_delete_option() {
+    let (port, server) = assert_cli_tool_request(
+        "promote_ref",
+        &[
+            "feature/client-menu-order",
+            "parent_ref",
+            "delete_ref_graph",
+        ],
+    );
+    let tmp = TestDir::new("refs-promote-cli");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+
+    let output = Command::new(agent_bin())
+        .args([
+            "refs",
+            "promote",
+            "--config",
+            config.to_str().unwrap(),
+            "--repo-path",
+            repo.to_str().unwrap(),
+            "--ref",
+            "feature/client-menu-order",
+            "--parent-ref",
+            "main",
+            "--delete-ref-graph",
+        ])
+        .env("CGA_TEST_API_KEY", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("promote_ref"));
+    server.join().unwrap();
+}
+
+#[test]
+fn index_incremental_cli_requires_changed_path() {
+    let tmp = TestDir::new("index-incremental-missing-path");
+    let config = write_safe_config(tmp.path(), tmp.path(), &[]);
+
+    let output = Command::new(agent_bin())
+        .args([
+            "index",
+            "incremental",
+            "--config",
+            config.to_str().unwrap(),
+            "--ref",
+            "feature/example",
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("requires at least one --changed-path"));
+}
+
+#[test]
+fn refs_promote_cli_requires_ref() {
+    let tmp = TestDir::new("refs-promote-missing-ref");
+    let config = write_safe_config(tmp.path(), tmp.path(), &[]);
+
+    let output = Command::new(agent_bin())
+        .args(["refs", "promote", "--config", config.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("missing required option: --ref"));
 }
 
 #[test]
@@ -174,6 +552,71 @@ fn config_parser_accepts_safe_config_and_rejects_invalid_lines() {
     let bad = run_agent(&["doctor", "--config", invalid.to_str().unwrap(), "--json"]);
     assert!(!bad.status.success());
     assert!(stderr(&bad).contains("invalid config line"));
+
+    let mut unknown_text = fs::read_to_string(&config).unwrap();
+    unknown_text.push_str(&format!("CGA_DEVELOPER_TOKEN={TEST_SECRET}\n"));
+    let unknown = tmp.path().join("unknown.env");
+    fs::write(&unknown, unknown_text).unwrap();
+    let rejected = run_agent(&["doctor", "--config", unknown.to_str().unwrap(), "--json"]);
+    assert!(!rejected.status.success());
+    assert!(stderr(&rejected).contains("unsupported config key: CGA_DEVELOPER_TOKEN"));
+    assert!(!stdout(&rejected).contains(TEST_SECRET));
+    assert!(!stderr(&rejected).contains(TEST_SECRET));
+}
+
+#[test]
+fn config_parser_rejects_duplicate_keys() {
+    let tmp = TestDir::new("duplicate-config-key");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[]);
+    let mut text = fs::read_to_string(&config).unwrap();
+    text.push_str("PROJECT_ID=OVERRIDE\n");
+    fs::write(&config, text).unwrap();
+
+    let output = run_agent(&["doctor", "--config", config.to_str().unwrap(), "--json"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("duplicate config key: PROJECT_ID"));
+}
+
+#[test]
+fn config_parser_rejects_invalid_environment_variable_names() {
+    let tmp = TestDir::new("invalid-config-env-name");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("API_KEY_ENV", "not-an-env-name".to_string())],
+    );
+
+    let output = run_agent(&["doctor", "--config", config.to_str().unwrap(), "--json"]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("invalid environment variable name for API_KEY_ENV"));
+}
+
+#[test]
+fn login_rejects_invalid_token_environment_variable_name() {
+    let tmp = TestDir::new("invalid-login-env-name");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[]);
+
+    let output = run_agent(&[
+        "login",
+        "--config",
+        config.to_str().unwrap(),
+        "--email",
+        "dev@example.test",
+        "--token-env",
+        "not-an-env-name",
+    ]);
+
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("invalid environment variable name for --token-env"));
+    assert!(!tmp.path().join("state").join("profile.json").exists());
 }
 
 #[test]
@@ -231,7 +674,9 @@ fn tray_status_reports_notification_area_mode_without_starting_loop() {
     assert!(out.contains("\"author\":\"Nate Scott\""));
     assert!(out.contains("\"repository\":\"https://github.com/nascousa/cga\""));
     assert!(out.contains("\"support\":\"https://github.com/nascousa/cga/issues\""));
-    assert!(out.contains("\"menu_events\":[\"WM_CONTEXTMENU\",\"WM_RBUTTONUP\",\"WM_TIMER\"]"));
+    assert!(out.contains(
+        "\"menu_events\":[\"WM_LBUTTONDBLCLK\",\"WM_CONTEXTMENU\",\"WM_RBUTTONUP\",\"WM_TIMER\"]"
+    ));
     if cfg!(windows) {
         assert!(out.contains("\"supported\":true"));
         assert!(out.contains("\"icon_loaded\":true"));
@@ -288,6 +733,55 @@ fn tray_status_uses_color_icon_and_username_when_signed_in() {
     assert!(out.contains("signed in as dev@example.com"));
     assert!(!out.contains(TEST_SECRET));
     assert!(!stderr(&output).contains(TEST_SECRET));
+    if cfg!(windows) {
+        let persisted_session = fs::read_to_string(state.join("account-session.json")).unwrap();
+        assert!(persisted_session.contains("\"access_token_dpapi\":"));
+        assert!(!persisted_session.contains("\"access_token\":"));
+        assert!(!persisted_session.contains(TEST_SECRET));
+    }
+}
+
+#[test]
+fn tray_status_treats_expired_account_jwt_as_signed_out() {
+    let tmp = TestDir::new("tray-status-expired");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let state = tmp.path().join("state");
+    fs::create_dir_all(&state).unwrap();
+    fs::write(
+        state.join("account-session.json"),
+        "{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"e30.eyJzdWIiOiJkZXYiLCJleHAiOjF9.sig\"}\n",
+    )
+    .unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[]);
+
+    let output = run_agent(&[
+        "tray",
+        "--config",
+        config.to_str().unwrap(),
+        "--status",
+        "--json",
+    ]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("\"logged_in\":false"), "stdout: {out}");
+    assert!(out.contains("\"icon_variant\":\"gray\""), "stdout: {out}");
+    assert!(out.contains("\"username\":\"\""), "stdout: {out}");
+
+    let settings = run_agent(&[
+        "settings",
+        "--config",
+        config.to_str().unwrap(),
+        "--status",
+        "--json",
+    ]);
+    assert!(settings.status.success(), "stderr: {}", stderr(&settings));
+    assert!(
+        stdout(&settings).contains("\"session_configured\":false"),
+        "stdout: {}",
+        stdout(&settings)
+    );
 }
 
 #[test]
@@ -452,6 +946,39 @@ fn scanner_skips_excluded_oversized_binary_and_reports_tombstones() {
 }
 
 #[test]
+fn scanner_prunes_nested_venv_directories_before_counting_candidates() {
+    let tmp = TestDir::new("scanner-nested-venv");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join("tools").join("worker").join("venv")).unwrap();
+    fs::write(repo.join("keep.py"), "print('ok')\n").unwrap();
+    fs::write(
+        repo.join("tools")
+            .join("worker")
+            .join("venv")
+            .join("ignored.py"),
+        "print('dependency')\n",
+    )
+    .unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[]);
+
+    let output = run_agent(&[
+        "scan",
+        "--config",
+        config.to_str().unwrap(),
+        "--dry-run",
+        "--json",
+    ]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("\"candidate\":1"), "unexpected scan: {out}");
+    assert!(
+        !out.contains("ignored.py"),
+        "venv file leaked into scan: {out}"
+    );
+}
+
+#[test]
 fn login_persists_profile_without_token_value() {
     let tmp = TestDir::new("login");
     let repo = tmp.path().join("repo");
@@ -611,6 +1138,679 @@ fn sync_fails_when_developer_token_env_is_missing() {
     assert!(!output.status.success());
     assert!(stderr(&output).contains("MISSING_TOKEN_ENV"));
     assert!(!stderr(&output).contains(TEST_SECRET));
+
+    let empty = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--all",
+            "--dry-run",
+            "--json",
+        ])
+        .env("MISSING_TOKEN_ENV", "")
+        .output()
+        .unwrap();
+    assert!(!empty.status.success());
+    assert!(stderr(&empty).contains("MISSING_TOKEN_ENV"));
+}
+
+#[test]
+fn sync_reports_expired_account_login_before_scanning() {
+    let tmp = TestDir::new("sync-expired-account");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[]);
+    let login = run_agent(&[
+        "login",
+        "--config",
+        config.to_str().unwrap(),
+        "--email",
+        "dev@example.test",
+        "--token-env",
+        "MISSING_TOKEN_ENV",
+    ]);
+    assert!(login.status.success(), "stderr: {}", stderr(&login));
+    fs::write(
+        tmp.path().join("state").join("account-session.json"),
+        "{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"e30.eyJzdWIiOiJkZXYiLCJleHAiOjF9.sig\"}\n",
+    )
+    .unwrap();
+    let add = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "repo",
+        "--namespace",
+        "account",
+        "--root",
+        repo.to_str().unwrap(),
+    ]);
+    assert!(add.status.success(), "stderr: {}", stderr(&add));
+
+    let output = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--namespace",
+            "account",
+            "--project-tag",
+            "repo",
+            "--json",
+        ])
+        .env("MISSING_TOKEN_ENV", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        stderr(&output).contains("CGA account login expired; sign in again"),
+        "stderr: {}",
+        stderr(&output)
+    );
+    assert!(
+        !stderr(&output).contains("scanning"),
+        "stderr: {}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn sync_prefers_valid_account_session_for_account_namespace_project() {
+    let tmp = TestDir::new("sync-account-namespace");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("account.txt"), "account route\n").unwrap();
+    let account_token = "e30.eyJzdWIiOiJkZXYiLCJleHAiOjQxMDI0NDQ4MDB9.sig";
+    let (port, server) = spawn_accepting_sync_server(8 * 1024 * 1024, 1);
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+    let login = Command::new(agent_bin())
+        .args([
+            "login",
+            "--config",
+            config.to_str().unwrap(),
+            "--email",
+            "dev@example.test",
+            "--token-env",
+            "CGA_TEST_DEVELOPER_TOKEN",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(login.status.success(), "stderr: {}", stderr(&login));
+    let state = tmp.path().join("state");
+    fs::write(
+        state.join("account-session.json"),
+        format!(
+            "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{account_token}\"}}\n"
+        ),
+    )
+    .unwrap();
+    let add = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "repo",
+        "--namespace",
+        "account",
+        "--root",
+        repo.to_str().unwrap(),
+    ]);
+    assert!(add.status.success(), "stderr: {}", stderr(&add));
+
+    let output = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--namespace",
+            "account",
+            "--project-tag",
+            "repo",
+            "--json",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with("POST /api/auth/cga-relay/sync HTTP/1.1"));
+    assert!(requests[0].contains(&format!("Authorization: Bearer {account_token}")));
+    assert!(!requests[0].contains(TEST_SECRET));
+}
+
+#[test]
+fn sync_falls_back_to_project_token_when_account_session_is_rejected() {
+    let tmp = TestDir::new("sync-account-fallback");
+    let first_repo = tmp.path().join("first-repo");
+    let second_repo = tmp.path().join("second-repo");
+    fs::create_dir_all(&first_repo).unwrap();
+    fs::create_dir_all(&second_repo).unwrap();
+    fs::write(first_repo.join("account.txt"), "first account route\n").unwrap();
+    fs::write(second_repo.join("account.txt"), "second account route\n").unwrap();
+    let account_token = "e30.eyJzdWIiOiJkZXYiLCJleHAiOjQxMDI0NDQ4MDB9.sig";
+    let (port, server) = spawn_account_rejection_then_project_acceptance_server(2);
+    let config = write_safe_config(
+        tmp.path(),
+        &first_repo,
+        &[("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+    let login = Command::new(agent_bin())
+        .args([
+            "login",
+            "--config",
+            config.to_str().unwrap(),
+            "--email",
+            "dev@example.test",
+            "--token-env",
+            "CGA_TEST_DEVELOPER_TOKEN",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(login.status.success(), "stderr: {}", stderr(&login));
+    fs::write(
+        tmp.path().join("state").join("account-session.json"),
+        format!(
+            "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{account_token}\"}}\n"
+        ),
+    )
+    .unwrap();
+    let add_first = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "first",
+        "--namespace",
+        "account",
+        "--root",
+        first_repo.to_str().unwrap(),
+    ]);
+    assert!(add_first.status.success(), "stderr: {}", stderr(&add_first));
+    let add_second = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "second",
+        "--namespace",
+        "account",
+        "--root",
+        second_repo.to_str().unwrap(),
+    ]);
+    assert!(
+        add_second.status.success(),
+        "stderr: {}",
+        stderr(&add_second)
+    );
+
+    let output = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--all",
+            "--json",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    let requests = server.join().unwrap();
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert_eq!(requests.len(), 3);
+    assert!(requests[0].starts_with("POST /api/auth/cga-relay/sync HTTP/1.1"));
+    assert!(requests[0].contains(&format!("Authorization: Bearer {account_token}")));
+    assert!(requests[1].starts_with("POST /api/project/cga-relay/sync HTTP/1.1"));
+    assert!(requests[1].contains(&format!("Authorization: Bearer {TEST_SECRET}")));
+    assert!(requests[1].contains("X-Project-ID: PROJECT123"));
+    assert!(requests[2].starts_with("POST /api/project/cga-relay/sync HTTP/1.1"));
+    assert!(requests[2].contains(&format!("Authorization: Bearer {TEST_SECRET}")));
+    assert!(requests[2].contains("X-Project-ID: PROJECT123"));
+    assert!(!stdout(&output).contains(account_token));
+    assert!(!stderr(&output).contains(account_token));
+    assert!(!stdout(&output).contains(TEST_SECRET));
+    assert!(!stderr(&output).contains(TEST_SECRET));
+    assert!(!tmp
+        .path()
+        .join("state")
+        .join("account-session.json")
+        .exists());
+}
+
+#[test]
+fn sync_does_not_fallback_or_delete_account_session_on_forbidden() {
+    let tmp = TestDir::new("sync-account-forbidden");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("account.txt"), "account route\n").unwrap();
+    let account_token = "e30.eyJzdWIiOiJkZXYiLCJleHAiOjQxMDI0NDQ4MDB9.sig";
+    let (port, server) = spawn_sync_status_server(vec![403]);
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+    let login = Command::new(agent_bin())
+        .args([
+            "login",
+            "--config",
+            config.to_str().unwrap(),
+            "--email",
+            "dev@example.test",
+            "--token-env",
+            "CGA_TEST_DEVELOPER_TOKEN",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(login.status.success(), "stderr: {}", stderr(&login));
+    let session_path = tmp.path().join("state").join("account-session.json");
+    fs::write(
+        &session_path,
+        format!(
+            "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{account_token}\"}}\n"
+        ),
+    )
+    .unwrap();
+    let add = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "repo",
+        "--namespace",
+        "account",
+        "--root",
+        repo.to_str().unwrap(),
+    ]);
+    assert!(add.status.success(), "stderr: {}", stderr(&add));
+
+    let output = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--namespace",
+            "account",
+            "--project-tag",
+            "repo",
+            "--json",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    let requests = server.join().unwrap();
+    assert!(!output.status.success());
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with("POST /api/auth/cga-relay/sync HTTP/1.1"));
+    assert!(stderr(&output).contains("HTTP request failed with status 403"));
+    assert!(!stderr(&output).contains("retrying with project token"));
+    assert!(session_path.exists());
+}
+
+#[test]
+fn sync_rejected_account_session_without_project_token_requires_login() {
+    let tmp = TestDir::new("sync-account-unauthorized-no-fallback");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("account.txt"), "account route\n").unwrap();
+    let account_token = "e30.eyJzdWIiOiJkZXYiLCJleHAiOjQxMDI0NDQ4MDB9.sig";
+    let (port, server) = spawn_sync_status_server(vec![401]);
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+    let login = Command::new(agent_bin())
+        .args([
+            "login",
+            "--config",
+            config.to_str().unwrap(),
+            "--email",
+            "dev@example.test",
+            "--token-env",
+            "CGA_TEST_DEVELOPER_TOKEN",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(login.status.success(), "stderr: {}", stderr(&login));
+    let session_path = tmp.path().join("state").join("account-session.json");
+    fs::write(
+        &session_path,
+        format!(
+            "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{account_token}\"}}\n"
+        ),
+    )
+    .unwrap();
+    let add = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "repo",
+        "--namespace",
+        "account",
+        "--root",
+        repo.to_str().unwrap(),
+    ]);
+    assert!(add.status.success(), "stderr: {}", stderr(&add));
+
+    let output = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--namespace",
+            "account",
+            "--project-tag",
+            "repo",
+            "--json",
+        ])
+        .env_remove("CGA_TEST_DEVELOPER_TOKEN")
+        .output()
+        .unwrap();
+
+    let requests = server.join().unwrap();
+    assert!(!output.status.success());
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with("POST /api/auth/cga-relay/sync HTTP/1.1"));
+    assert!(stderr(&output).contains("account login is no longer valid"));
+    assert!(!session_path.exists());
+}
+
+#[test]
+fn sync_fails_when_project_token_fallback_is_forbidden() {
+    let tmp = TestDir::new("sync-project-fallback-forbidden");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("account.txt"), "account route\n").unwrap();
+    let account_token = "e30.eyJzdWIiOiJkZXYiLCJleHAiOjQxMDI0NDQ4MDB9.sig";
+    let (port, server) = spawn_sync_status_server(vec![401, 403]);
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+    let login = Command::new(agent_bin())
+        .args([
+            "login",
+            "--config",
+            config.to_str().unwrap(),
+            "--email",
+            "dev@example.test",
+            "--token-env",
+            "CGA_TEST_DEVELOPER_TOKEN",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(login.status.success(), "stderr: {}", stderr(&login));
+    let session_path = tmp.path().join("state").join("account-session.json");
+    fs::write(
+        &session_path,
+        format!(
+            "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{account_token}\"}}\n"
+        ),
+    )
+    .unwrap();
+    let add = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "repo",
+        "--namespace",
+        "account",
+        "--root",
+        repo.to_str().unwrap(),
+    ]);
+    assert!(add.status.success(), "stderr: {}", stderr(&add));
+
+    let output = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--namespace",
+            "account",
+            "--project-tag",
+            "repo",
+            "--json",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    let requests = server.join().unwrap();
+    assert!(!output.status.success());
+    assert_eq!(requests.len(), 2);
+    assert!(requests[0].starts_with("POST /api/auth/cga-relay/sync HTTP/1.1"));
+    assert!(requests[1].starts_with("POST /api/project/cga-relay/sync HTTP/1.1"));
+    assert!(stderr(&output).contains("HTTP request failed with status 403"));
+    assert!(!session_path.exists());
+}
+
+#[test]
+fn sync_batches_checkpoints_progress_and_metadata_only_logs() {
+    let tmp = TestDir::new("sync-batch-checkpoint");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    for index in 0..501 {
+        fs::write(
+            repo.join(format!("file-{index:03}.txt")),
+            format!("PRIVATE_SOURCE_MARKER_{index:03}\n"),
+        )
+        .unwrap();
+    }
+
+    let (first_port, first_server) = spawn_checkpoint_server();
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[
+            (
+                "CONTROL_API_BASE_URL",
+                format!("http://127.0.0.1:{first_port}"),
+            ),
+            ("MAX_BATCH_BYTES", (8 * 1024 * 1024).to_string()),
+        ],
+    );
+    let login = Command::new(agent_bin())
+        .args([
+            "login",
+            "--config",
+            config.to_str().unwrap(),
+            "--email",
+            "dev@example.test",
+            "--token-env",
+            "CGA_TEST_DEVELOPER_TOKEN",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(login.status.success(), "stderr: {}", stderr(&login));
+    let add = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "repo",
+        "--root",
+        repo.to_str().unwrap(),
+    ]);
+    assert!(add.status.success(), "stderr: {}", stderr(&add));
+
+    let first = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--all",
+            "--json",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(!first.status.success(), "first sync should stop on batch 2");
+    assert!(stderr(&first).contains("scanning"));
+    assert!(stderr(&first).contains("processed 500/501 candidates"));
+    assert!(stderr(&first).contains("scan complete"));
+    assert!(stderr(&first).contains("submitting batch 1/2"));
+    let first_requests = first_server.join().unwrap();
+    assert_eq!(first_requests.len(), 2);
+    assert_eq!(snapshot_count(&first_requests[0]), 500);
+    assert_eq!(snapshot_count(&first_requests[1]), 1);
+
+    let state_file = tmp
+        .path()
+        .join("state")
+        .join("scan-state")
+        .join("default_repo.state");
+    let checkpoint = fs::read_to_string(&state_file).expect("batch 1 should checkpoint state");
+    assert_eq!(
+        checkpoint
+            .lines()
+            .filter(|line| line.starts_with("file\t"))
+            .count(),
+        500
+    );
+
+    let (second_port, second_server) = spawn_accepting_sync_server(8 * 1024 * 1024, 1);
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[
+            (
+                "CONTROL_API_BASE_URL",
+                format!("http://127.0.0.1:{second_port}"),
+            ),
+            ("MAX_BATCH_BYTES", (8 * 1024 * 1024).to_string()),
+        ],
+    );
+    let second = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--all",
+            "--json",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(second.status.success(), "stderr: {}", stderr(&second));
+    assert!(stdout(&second).contains("\"batch_count\":1"));
+    let second_requests = second_server.join().unwrap();
+    assert_eq!(second_requests.len(), 1);
+    assert_eq!(snapshot_count(&second_requests[0]), 1);
+
+    let final_state = fs::read_to_string(state_file).unwrap();
+    assert_eq!(
+        final_state
+            .lines()
+            .filter(|line| line.starts_with("file\t"))
+            .count(),
+        501
+    );
+    let (_, log_text) = read_log_files(tmp.path());
+    assert!(log_text.contains("body_bytes="));
+    assert!(!log_text.contains("body_sha256="));
+    assert!(!log_text.contains("body:\n"));
+    assert!(!log_text.contains("PRIVATE_SOURCE_MARKER_"));
+    assert!(!log_text.contains(RESPONSE_HEADER_MARKER));
+}
+
+#[test]
+fn sync_respects_configured_batch_byte_limit() {
+    let tmp = TestDir::new("sync-batch-bytes");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    for index in 0..4 {
+        fs::write(repo.join(format!("payload-{index}.txt")), "x".repeat(300)).unwrap();
+    }
+    let max_batch_bytes = 1500;
+    let (port, server) = spawn_accepting_sync_server(max_batch_bytes, 4);
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[
+            ("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}")),
+            ("MAX_FILE_BYTES", "1024".to_string()),
+            ("MAX_BATCH_BYTES", max_batch_bytes.to_string()),
+        ],
+    );
+    let login = Command::new(agent_bin())
+        .args([
+            "login",
+            "--config",
+            config.to_str().unwrap(),
+            "--email",
+            "dev@example.test",
+            "--token-env",
+            "CGA_TEST_DEVELOPER_TOKEN",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(login.status.success(), "stderr: {}", stderr(&login));
+    let add = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "repo",
+        "--root",
+        repo.to_str().unwrap(),
+    ]);
+    assert!(add.status.success(), "stderr: {}", stderr(&add));
+
+    let output = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--all",
+            "--json",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let requests = server.join().unwrap();
+    assert!(requests.len() > 1, "expected byte-bounded batches");
+    assert_eq!(
+        requests
+            .iter()
+            .map(|request| snapshot_count(request))
+            .sum::<usize>(),
+        4
+    );
+    assert!(requests
+        .iter()
+        .all(|request| request_body(request).len() <= max_batch_bytes));
 }
 
 fn run_mcp(config: &Path, input: &str, extra_env: &[(&str, &str)]) -> Output {
@@ -674,9 +1874,46 @@ fn mcp_tools_list_exposes_expected_tools() {
         "query_impact_graph",
         "fetch_minimal_code",
         "get_optimized_context",
+        "promote_ref",
     ] {
         assert!(out.contains(tool), "tools/list missing {tool}: {out}");
     }
+}
+
+#[test]
+fn mcp_promote_ref_forwards_branch_arguments() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut stream = listener.accept().unwrap().0;
+        let mut buffer = [0_u8; 4096];
+        let read = stream.read(&mut buffer).unwrap();
+        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+        assert!(request.contains("promote_ref"));
+        assert!(request.contains("feature/client-menu-order"));
+        assert!(request.contains("parent_ref"));
+        assert!(request.contains("delete_ref_graph"));
+        let body = "{\"ok\":true,\"tool\":\"promote_ref\"}";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+
+    let tmp = TestDir::new("mcp-promote-ref");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let api = format!("http://127.0.0.1:{port}");
+    let config = write_safe_config(tmp.path(), &repo, &[("API_BASE_URL", api)]);
+    let input = "{\"jsonrpc\":\"2.0\",\"id\":34,\"method\":\"tools/call\",\"params\":{\"name\":\"promote_ref\",\"arguments\":{\"ref_id\":\"feature/client-menu-order\",\"parent_ref\":\"main\",\"repo_path\":\"C:/repo\",\"delete_ref_graph\":true}}}\n";
+    let output = run_mcp(&config, input, &[("CGA_TEST_API_KEY", TEST_SECRET)]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("promote_ref"));
+    assert!(!stdout(&output).contains(TEST_SECRET));
+    server.join().unwrap();
 }
 
 #[test]
@@ -871,14 +2108,15 @@ fn mcp_accepts_content_length_framing() {
 }
 
 #[test]
-fn communication_logs_redact_sensitive_mcp_payloads() {
+fn communication_logs_store_mcp_payload_metadata_only() {
+    const SOURCE_MARKER: &str = "PRIVATE_SOURCE_MARKER_SHOULD_NEVER_LEAK";
     let tmp = TestDir::new("comm-log-redaction");
     let repo = tmp.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
     let config = write_safe_config(tmp.path(), &repo, &[]);
     let input = format!(
-        "{{\"jsonrpc\":\"2.0\",\"id\":44,\"method\":\"ping\",\"params\":{{\"password\":\"{}\",\"access_token\":\"{}\",\"form\":\"username=dev&password={}&access_token={}\"}}}}\n",
-        TEST_SECRET, TEST_SECRET, TEST_SECRET, TEST_SECRET
+        "{{\"jsonrpc\":\"2.0\",\"id\":44,\"method\":\"ping\",\"params\":{{\"query\":\"{}\",\"password\":\"{}\",\"access_token\":\"{}\",\"form\":\"username=dev&password={}&access_token={}\"}}}}\n",
+        SOURCE_MARKER, TEST_SECRET, TEST_SECRET, TEST_SECRET, TEST_SECRET
     );
 
     let output = run_mcp(&config, &input, &[]);
@@ -891,11 +2129,132 @@ fn communication_logs_redact_sensitive_mcp_payloads() {
         "expected at least one communication log"
     );
     assert!(log_text.contains("mcp.stdin"));
-    assert!(log_text.contains("\"password\":\"<redacted>\""));
-    assert!(log_text.contains("\"access_token\":\"<redacted>\""));
-    assert!(log_text.contains("password=<redacted>"));
-    assert!(log_text.contains("access_token=<redacted>"));
+    assert!(log_text.contains("mcp.stdout"));
+    assert!(log_text.contains("bytes="));
+    assert!(!log_text.contains("sha256="));
+    assert!(!log_text.contains(SOURCE_MARKER));
     assert!(!log_text.contains(TEST_SECRET));
+}
+
+#[test]
+fn malformed_http_responses_are_logged_as_metadata_only() {
+    const RESPONSE_MARKER: &str = "PRIVATE_MALFORMED_RESPONSE_MARKER";
+    let tmp = TestDir::new("malformed-response-log");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("source.txt"), "source\n").unwrap();
+    let (port, server) = spawn_malformed_sync_server(RESPONSE_MARKER);
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+    let login = Command::new(agent_bin())
+        .args([
+            "login",
+            "--config",
+            config.to_str().unwrap(),
+            "--email",
+            "dev@example.test",
+            "--token-env",
+            "CGA_TEST_DEVELOPER_TOKEN",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(login.status.success(), "stderr: {}", stderr(&login));
+    let add = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "repo",
+        "--root",
+        repo.to_str().unwrap(),
+    ]);
+    assert!(add.status.success(), "stderr: {}", stderr(&add));
+
+    let output = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--all",
+            "--json",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    server.join().unwrap();
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("invalid HTTP response"));
+    let (_, log_text) = read_log_files(tmp.path());
+    assert!(log_text.contains("invalid_response_bytes="));
+    assert!(!log_text.contains("invalid_response_sha256="));
+    assert!(!log_text.contains("invalid_response:\n"));
+    assert!(!log_text.contains(RESPONSE_MARKER));
+}
+
+#[test]
+fn oversized_http_responses_are_rejected_with_metadata_only_logs() {
+    let tmp = TestDir::new("oversized-response-log");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("source.txt"), "source\n").unwrap();
+    let (port, server) = spawn_oversized_sync_response_server();
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+    );
+    let login = Command::new(agent_bin())
+        .args([
+            "login",
+            "--config",
+            config.to_str().unwrap(),
+            "--email",
+            "dev@example.test",
+            "--token-env",
+            "CGA_TEST_DEVELOPER_TOKEN",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(login.status.success(), "stderr: {}", stderr(&login));
+    let add = run_agent(&[
+        "projects",
+        "add",
+        "--config",
+        config.to_str().unwrap(),
+        "--project-tag",
+        "repo",
+        "--root",
+        repo.to_str().unwrap(),
+    ]);
+    assert!(add.status.success(), "stderr: {}", stderr(&add));
+
+    let output = Command::new(agent_bin())
+        .args([
+            "sync",
+            "--config",
+            config.to_str().unwrap(),
+            "--all",
+            "--json",
+        ])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+
+    server.join().unwrap();
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("HTTP response exceeds 8388608-byte limit"));
+    let (_, log_text) = read_log_files(tmp.path());
+    assert!(log_text.contains("response_limit_bytes=8388608"));
+    assert!(log_text.contains("response_prefix_bytes="));
+    assert!(!log_text.contains("response_prefix_sha256="));
+    assert!(!log_text.contains("xxxxxxxxxxxxxxxx"));
 }
 
 #[test]

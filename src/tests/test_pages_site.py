@@ -48,7 +48,7 @@ def test_readme_uses_live_multi_project_benchmark_results() -> None:
     readme = _read("README.md")
     live_benchmark = _read("docs/benchmarks/live-context-quality.md")
 
-    assert "## Benchmark Snapshot" in readme
+    assert "## Historical Benchmark Snapshot" in readme
     assert "docs/benchmarks/live-context-quality.md" in readme
     assert "34 deterministic symbol-level cases per project" in live_benchmark
     assert "| Total real-code cases | 102 |" in readme

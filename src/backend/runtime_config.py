@@ -254,7 +254,7 @@ def _public_smtp_config(raw: dict[str, Any]) -> dict[str, Any]:
         "username": _normalize_text(smtp.get("username", ""), "smtp.username", max_length=MAX_SMTP_TEXT_LENGTH),
         "from_email": _normalize_text(smtp.get("from_email", ""), "smtp.from_email", max_length=MAX_SMTP_EMAIL_LENGTH),
         "from_name": _normalize_text(smtp.get("from_name", "Context Graph Agent"), "smtp.from_name", max_length=MAX_SMTP_TEXT_LENGTH),
-        "password_set": bool(smtp.get("password")),
+        "password_set": bool(os.getenv("CGA_SMTP_PASSWORD", "")),
     }
 
 
@@ -262,7 +262,7 @@ def _normalize_smtp_patch(value: Any, existing: dict[str, Any]) -> dict[str, Any
     if not isinstance(value, dict):
         raise RuntimeConfigError("smtp must be an object")
 
-    smtp = dict(existing)
+    smtp = {key: item for key, item in existing.items() if key != "password"}
     if "enabled" in value:
         smtp["enabled"] = _normalize_bool(value.get("enabled"), "smtp.enabled")
     if "host" in value:
@@ -284,7 +284,7 @@ def _normalize_smtp_patch(value: Any, existing: dict[str, Any]) -> dict[str, Any
             value.get("password"), "smtp.password", max_length=MAX_SMTP_SECRET_LENGTH, strip=False
         )
         if password:
-            smtp["password"] = password
+            raise RuntimeConfigError("smtp.password cannot be persisted; set CGA_SMTP_PASSWORD in the environment")
     if _normalize_bool(value.get("clear_password"), "smtp.clear_password") if "clear_password" in value else False:
         smtp.pop("password", None)
 
@@ -343,6 +343,23 @@ def get_runtime_config(default_repos_root: str | Path | None = None) -> dict[str
         "modules": get_module_config(raw),
         "smtp": _public_smtp_config(raw),
         "runtime_config_path": str(RUNTIME_CONFIG_PATH),
+    }
+
+
+def get_smtp_delivery_config() -> dict[str, Any]:
+    """Return internal SMTP delivery settings without exposing them through an API model."""
+    raw = _read_raw_config()
+    public = _public_smtp_config(raw)
+    password = os.getenv("CGA_SMTP_PASSWORD", "")
+    return {
+        "enabled": public["enabled"],
+        "host": public["host"],
+        "port": public["port"],
+        "security": public["security"],
+        "username": public["username"],
+        "password": password,
+        "from_email": public["from_email"],
+        "from_name": public["from_name"],
     }
 
 

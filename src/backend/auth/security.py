@@ -7,9 +7,20 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
-from jose import JWTError, jwt
+import jwt
 
-JWT_SECRET = os.getenv("JWT_SECRET_KEY", "change-me-jwt-secret-key")
+JWTError = jwt.InvalidTokenError
+
+
+def _resolve_jwt_secret(configured: str | None) -> str:
+    if configured:
+        if len(configured.encode("utf-8")) < 32:
+            raise ValueError("JWT_SECRET_KEY must be at least 32 bytes")
+        return configured
+    return secrets.token_urlsafe(32)
+
+
+JWT_SECRET = _resolve_jwt_secret(os.getenv("JWT_SECRET_KEY"))
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_HOURS = int(os.getenv("JWT_EXPIRE_HOURS", "24"))
 

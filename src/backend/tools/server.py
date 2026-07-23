@@ -264,15 +264,16 @@ async def _enrich_job_response(job_id: str, base_response: dict) -> dict:
 
 def _cached_read(tool: str, args: dict, fetch_fn, trace_args: dict | None = None):
     """Check cache → call fetch_fn → store → record trace → return."""
+    cache_args = {**args, "graph_name": _resolve_project_name()}
     if _cache:
-        hit = _cache.get(tool, args)
+        hit = _cache.get(tool, cache_args)
         if hit is not None:
             return hit
     t0 = time.perf_counter()
     result = fetch_fn()
     latency_ms = (time.perf_counter() - t0) * 1000.0
     if _cache:
-        _cache.set(tool, args, result)
+        _cache.set(tool, cache_args, result)
     if _recorder:
         _recorder.record(tool, trace_args or args, result, latency_ms)
     return result

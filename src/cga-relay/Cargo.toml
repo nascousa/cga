@@ -1,12 +1,17 @@
 [package]
 name = "cga-relay"
-version = "1.30.103"
+version = "1.30.118"
 edition = "2021"
 
 [dependencies]
 
 [profile.release]
-lto = true
+opt-level = 3
+lto = "fat"
 codegen-units = 1
 panic = "abort"
+debug = false
+split-debuginfo = "off"
+incremental = false
+overflow-checks = true
 strip = "symbols"

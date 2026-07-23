@@ -1,18 +1,21 @@
 # Source Layout
 
-This folder is reserved for the Azure Policy Monitor extension implementation.
-
-Planned structure:
+This folder contains the dependency-free Azure Policy Change Monitor implementation.
 
 ```text
 src/
   policy_monitor/
     __init__.py
-    config.py
+    azure_auth.py       # Environment, workload, managed identity, and Azure CLI tokens
+    azure_rest.py       # Read-only Azure Management REST transport
+    azure_state.py      # Stable normalization, redaction, and snapshot construction
+    diff.py             # Deterministic deployed-state drift findings
+    notifications.py    # Severity-gated webhook and SMTP adapters
+    runner.py           # Repository/Azure orchestration and optional output boundary
     scanner.py
-    runner.py
-    reports.py
-    cga_adapter.py
+    summary.py          # Evidence-grounded optional model output
 ```
 
-The scanner core should stay independent from CGA-specific APIs. CGA integration should live in adapter code so the extension can remain easy to test and, if needed later, move to a separate package or repository.
+The package does not import CGA backend modules. CGA integration, persistence, scheduling, and runtime SMTP configuration live under `src/backend/extensions/`. This boundary keeps collection and drift logic independently testable.
+
+The package must remain read-only. Add Azure operations only when they collect evidence, and keep all policy decisions deterministic rather than delegating them to the optional model adapter.

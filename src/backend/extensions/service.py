@@ -1,12 +1,14 @@
 """Persistence and execution service for CGA extensions."""
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend import runtime_config
 from backend.auth.pgshim import Connection
 from backend.extensions.models import (
     ExtensionConfigOut,
@@ -16,7 +18,17 @@ from backend.extensions.models import (
     ExtensionProjectOverview,
     ExtensionRunOut,
 )
-from backend.extensions.registry import get_extension_definition, list_extension_definitions, run_extension
+from backend.extensions.registry import (
+    deliver_extension_notifications,
+    get_extension_definition,
+    get_extension_snapshot_scope,
+    list_extension_definitions,
+    run_extension,
+    validate_extension_config,
+)
+
+
+MAX_SNAPSHOT_BYTES = 50 * 1024 * 1024
 
 
 class ExtensionNotFoundError(KeyError):
@@ -52,12 +64,86 @@ def _row_get(row: Any, key: str, default: Any = None) -> Any:
         return default
 
 
+async def _load_latest_snapshot(
+    db: Connection,
+    extension_id: str,
+    project_id: int | None,
+    scope_key: str,
+) -> dict[str, Any] | None:
+    if project_id is None:
+        sql = """
+            SELECT snapshot_json FROM extension_snapshots
+            WHERE extension_id = ? AND project_id IS NULL AND scope_key = ?
+            ORDER BY captured_at DESC, id DESC LIMIT 1
+        """
+        params = (extension_id, scope_key)
+    else:
+        sql = """
+            SELECT snapshot_json FROM extension_snapshots
+            WHERE extension_id = ? AND project_id = ? AND scope_key = ?
+            ORDER BY captured_at DESC, id DESC LIMIT 1
+        """
+        params = (extension_id, project_id, scope_key)
+    async with db.execute(sql, params) as cur:
+        row = await cur.fetchone()
+    return _decode_json(row["snapshot_json"]) if row else None
+
+
+async def _save_snapshot(
+    db: Connection,
+    *,
+    extension_id: str,
+    project_id: int | None,
+    run_id: int,
+    scope_key: str,
+    snapshot: dict[str, Any],
+    retention_count: int,
+) -> None:
+    encoded = _encode_json(snapshot)
+    if len(encoded.encode("utf-8")) > MAX_SNAPSHOT_BYTES:
+        raise ValueError("Extension snapshot exceeds the 50 MiB persistence limit.")
+    captured_at = str(snapshot.get("captured_at") or iso_utc())
+    created_at = iso_utc()
+    await db.execute(
+        """
+        INSERT INTO extension_snapshots(
+            extension_id, project_id, run_id, scope_key, captured_at, snapshot_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (extension_id, project_id, run_id, scope_key, captured_at, encoded, created_at),
+    )
+    keep = max(2, min(1000, int(retention_count)))
+    if project_id is None:
+        await db.execute(
+            """
+            DELETE FROM extension_snapshots WHERE id IN (
+                SELECT id FROM extension_snapshots
+                WHERE extension_id = ? AND project_id IS NULL AND scope_key = ?
+                ORDER BY captured_at DESC, id DESC OFFSET ?
+            )
+            """,
+            (extension_id, scope_key, keep),
+        )
+    else:
+        await db.execute(
+            """
+            DELETE FROM extension_snapshots WHERE id IN (
+                SELECT id FROM extension_snapshots
+                WHERE extension_id = ? AND project_id = ? AND scope_key = ?
+                ORDER BY captured_at DESC, id DESC OFFSET ?
+            )
+            """,
+            (extension_id, project_id, scope_key, keep),
+        )
+
+
 def _merge_config(definition: ExtensionDefinition, project: dict[str, Any] | None, stored: dict[str, Any], override: dict[str, Any] | None = None) -> dict[str, Any]:
     merged = dict(definition.default_config)
     merged.update(stored or {})
     merged.update(override or {})
     if not str(merged.get("repo_path") or "").strip():
         merged["repo_path"] = _default_repo_path(project)
+    validate_extension_config(definition.extension_id, merged, require_complete=True)
     return merged
 
 
@@ -80,13 +166,15 @@ def _default_repo_path(project: dict[str, Any] | None) -> str:
 
 def _config_from_row(row: Any, project: dict[str, Any] | None = None) -> ExtensionConfigOut:
     project_id = row["project_id"]
+    config = _decode_json(row["config_json"])
+    validate_extension_config(row["extension_id"], config)
     return ExtensionConfigOut(
         extension_id=row["extension_id"],
         project_id=int(project_id) if project_id is not None else None,
         project_name=(project or {}).get("project_name") or _row_get(row, "project_name"),
         project_external_id=(project or {}).get("project_id") or _row_get(row, "project_external_id"),
         enabled=bool(row["enabled"]),
-        config=_decode_json(row["config_json"]),
+        config=config,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )
@@ -296,6 +384,7 @@ async def run_project_extension(
     definition = get_extension_definition(extension_id)
     if not definition:
         raise ExtensionNotFoundError(extension_id)
+    validate_extension_config(extension_id, config_override or {})
     project = await get_project(db, project_id) if project_id is not None else None
     config = await get_extension_config(db, extension_id, project_id)
     started = iso_utc()
@@ -303,24 +392,67 @@ async def run_project_extension(
     status = "success"
     severity = "info"
     result: dict[str, Any]
+    snapshot: dict[str, Any] | None = None
+    snapshot_scope = ""
+    effective_config: dict[str, Any] = {}
     try:
         effective_config = _merge_config(definition, project, config.config, config_override)
-        result = run_extension(extension_id, effective_config)
+        configured_scope = get_extension_snapshot_scope(extension_id, effective_config)
+        previous_snapshot = (
+            await _load_latest_snapshot(db, extension_id, project_id, configured_scope)
+            if configured_scope
+            else None
+        )
+        result = await asyncio.to_thread(
+            run_extension,
+            extension_id,
+            effective_config,
+            previous_snapshot=previous_snapshot,
+        )
+        raw_snapshot = result.pop("_snapshot", None)
+        snapshot = raw_snapshot if isinstance(raw_snapshot, dict) else None
+        snapshot_scope = str(result.pop("_snapshot_scope", "") or configured_scope or "").lower()
+        if snapshot and not snapshot_scope:
+            raise ValueError("Extension returned a snapshot without a scope key.")
         severity = str(result.get("severity") or "info")
+        outputs = result.get("outputs") if isinstance(result.get("outputs"), dict) else {}
+        try:
+            notifications_enabled = str(effective_config.get("notifications_enabled") or "").lower() in {
+                "1",
+                "true",
+                "yes",
+                "on",
+            }
+            smtp_config = runtime_config.get_smtp_delivery_config() if notifications_enabled else {}
+            outputs["notifications"] = await asyncio.to_thread(
+                deliver_extension_notifications,
+                extension_id,
+                result,
+                effective_config,
+                smtp_config=smtp_config,
+            )
+        except Exception as exc:
+            outputs["notifications"] = {
+                "status": "failed",
+                "channels": {},
+                "error_type": type(exc).__name__,
+            }
+        result["outputs"] = outputs
     except Exception as exc:
         status = "failed"
         severity = "critical"
+        error_type = type(exc).__name__
         result = {
             "extension_id": extension_id,
             "status": "failed",
             "severity": severity,
-            "summary": {"error": str(exc)},
+            "summary": {"error_type": error_type},
             "findings": [
                 {
                     "check": "extension_run",
                     "severity": "critical",
                     "message": "Extension execution failed.",
-                    "evidence": {"error": str(exc)},
+                    "evidence": {"error_type": error_type},
                 }
             ],
         }
@@ -351,6 +483,16 @@ async def run_project_extension(
         ),
     ) as cur:
         row = await cur.fetchone()
+    if status == "success" and snapshot is not None:
+        await _save_snapshot(
+            db,
+            extension_id=extension_id,
+            project_id=project_id,
+            run_id=int(row["id"]),
+            scope_key=snapshot_scope,
+            snapshot=snapshot,
+            retention_count=int(effective_config.get("snapshot_retention_count") or 90),
+        )
     await db.commit()
     async with db.execute(
         """

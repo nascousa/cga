@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -44,6 +45,42 @@ MAX_GRAPH_SYMBOLS = 2000
 MAX_BASELINE_CHARS = 16000
 MAX_NOISE_CHARS = 8000
 CG_CONTEXT_RADIUS_LINES = 4
+DEFAULT_MAX_EXPANSION_CANDIDATES = 12
+DEFAULT_EXPANSION_CHUNK_BUDGET = 6
+NATURAL_RELATION_FACTS = {
+    "CALLS": "call",
+    "IMPORTS": "import",
+    "FLOWS_TO": "flow",
+}
+
+CALL_EXPANSION_QUERY = """
+MATCH path = (source:Symbol {qualified_name: $qualified_name})-[:CALLS*1..2]-(target:Symbol)
+WHERE source.qualified_name <> target.qualified_name
+RETURN DISTINCT target.qualified_name, target.name, target.file_path,
+       target.line_start, target.line_end, length(path)
+ORDER BY length(path), target.qualified_name
+LIMIT $limit
+"""
+
+IMPORT_EXPANSION_QUERY = """
+MATCH (symbol:Symbol {qualified_name: $qualified_name})
+MATCH (source:File {path: symbol.file_path})
+MATCH path = (source)-[:IMPORTS*1..2]-(target:File)
+WHERE source.path <> target.path
+RETURN DISTINCT target.path, length(path)
+ORDER BY length(path), target.path
+LIMIT $limit
+"""
+
+DATA_FLOW_EXPANSION_QUERY = """
+MATCH (scope:Symbol {qualified_name: $qualified_name})-[:USES_VARIABLE]->(source:Variable)
+MATCH (source)-[flow:FLOWS_TO]->(target:Variable)
+WHERE flow.scope_qname = $qualified_name
+RETURN DISTINCT source.qualified_name, target.qualified_name, target.name,
+       scope.file_path, coalesce(flow.line_number, target.line_number), 1
+ORDER BY coalesce(flow.line_number, target.line_number), target.qualified_name
+LIMIT $limit
+"""
 
 
 @dataclass(frozen=True)
@@ -180,6 +217,211 @@ def _truncate(text: str, max_chars: int) -> str:
     return text[:max_chars]
 
 
+def load_frozen_cases(path: Path) -> list[dict[str, Any]]:
+    """Load a versionable JSONL case set without consulting the live graph."""
+    cases: list[dict[str, Any]] = []
+    with path.open("r", encoding="utf-8") as handle:
+        for line_number, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            try:
+                case = json.loads(line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"invalid frozen case JSON on line {line_number}: {exc}") from exc
+            if not isinstance(case, dict):
+                raise ValueError(f"frozen case line {line_number} must be a JSON object")
+            cases.append(case)
+    return cases
+
+
+def write_frozen_cases(path: Path, cases: list[dict[str, Any]], *, overwrite: bool = False) -> str:
+    """Persist an immutable-by-default JSONL case set and return its content hash."""
+    if path.exists() and not overwrite:
+        raise FileExistsError(
+            f"frozen case set already exists: {path}; use --refresh-frozen-cases to replace it"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = "".join(
+        json.dumps(case, sort_keys=True, ensure_ascii=True) + "\n"
+        for case in cases
+    )
+    path.write_text(content, encoding="utf-8")
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def frozen_case_set_sha256(cases: list[dict[str, Any]]) -> str:
+    """Hash cases in their stored order for cross-run identity checks."""
+    content = "".join(
+        json.dumps(case, sort_keys=True, ensure_ascii=True) + "\n"
+        for case in cases
+    )
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()
+
+
+def load_graph_expansion_candidates(
+    *,
+    project: ProjectRecord,
+    symbol: SymbolRecord,
+    graph_client: FalkorDB,
+    repos_host_root: Path,
+    limit: int = DEFAULT_MAX_EXPANSION_CANDIDATES,
+) -> dict[str, Any]:
+    """Load deterministic CALLS, IMPORTS, and FLOWS_TO evidence for one symbol."""
+    graph = graph_client.select_graph(project.graph_name)
+    query_limit = max(limit * 2, limit)
+    candidates: list[dict[str, Any]] = []
+    diagnostics: list[dict[str, Any]] = []
+
+    def query(relationship_type: str, cypher: str) -> list[Any]:
+        try:
+            result = graph.query(
+                cypher,
+                {"qualified_name": symbol.qualified_name, "limit": query_limit},
+            )
+            rows = list(result.result_set)
+            diagnostics.append(
+                {
+                    "relationshipType": relationship_type,
+                    "status": "ok",
+                    "resultCount": len(rows),
+                }
+            )
+            return rows
+        except Exception as exc:
+            diagnostics.append(
+                {
+                    "relationshipType": relationship_type,
+                    "status": "error",
+                    "error": str(exc),
+                }
+            )
+            return []
+
+    for row in query("CALLS", CALL_EXPANSION_QUERY):
+        target_qname, target_name, file_path, line_start, line_end, depth = row
+        candidate = _make_expansion_candidate(
+            project=project,
+            repos_host_root=repos_host_root,
+            source_qname=symbol.qualified_name,
+            target_qname=str(target_qname),
+            required_fact=str(target_name or target_qname),
+            relationship_type="CALLS",
+            graph_file_path=str(file_path),
+            line_start=int(line_start or 1),
+            line_end=int(line_end or line_start or 1),
+            depth=int(depth or 1),
+        )
+        if candidate:
+            candidates.append(candidate)
+
+    for row in query("IMPORTS", IMPORT_EXPANSION_QUERY):
+        file_path, depth = row
+        normalized_path = str(file_path)
+        candidate = _make_expansion_candidate(
+            project=project,
+            repos_host_root=repos_host_root,
+            source_qname=symbol.qualified_name,
+            target_qname=normalized_path,
+            required_fact=Path(normalized_path.replace("\\", "/")).name,
+            relationship_type="IMPORTS",
+            graph_file_path=normalized_path,
+            line_start=1,
+            line_end=30,
+            depth=int(depth or 1),
+        )
+        if candidate:
+            candidates.append(candidate)
+
+    for row in query("FLOWS_TO", DATA_FLOW_EXPANSION_QUERY):
+        source_qname, target_qname, target_name, file_path, line_number, depth = row
+        candidate = _make_expansion_candidate(
+            project=project,
+            repos_host_root=repos_host_root,
+            source_qname=str(source_qname),
+            target_qname=str(target_qname),
+            required_fact=str(target_name or target_qname),
+            relationship_type="FLOWS_TO",
+            graph_file_path=str(file_path),
+            line_start=int(line_number or symbol.line_start),
+            line_end=int(line_number or symbol.line_start),
+            depth=int(depth or 1),
+        )
+        if candidate:
+            candidates.append(candidate)
+
+    priority = {"CALLS": 0, "IMPORTS": 1, "FLOWS_TO": 2}
+    unique: dict[tuple[str, str, str, int], dict[str, Any]] = {}
+    for candidate in candidates:
+        trace = candidate["trace"]
+        key = (
+            trace["relationshipType"],
+            trace["targetQualifiedName"],
+            trace["sourceFile"],
+            trace["lineRange"][0],
+        )
+        unique.setdefault(key, candidate)
+    ordered = sorted(
+        unique.values(),
+        key=lambda item: (
+            item["trace"]["depth"],
+            priority[item["trace"]["relationshipType"]],
+            item["trace"]["targetQualifiedName"],
+        ),
+    )[:limit]
+    for index, candidate in enumerate(ordered, start=1):
+        candidate["chunk"]["id"] = f"graph-expansion-{index:02d}"
+    return {"candidates": ordered, "queryDiagnostics": diagnostics}
+
+
+def _make_expansion_candidate(
+    *,
+    project: ProjectRecord,
+    repos_host_root: Path,
+    source_qname: str,
+    target_qname: str,
+    required_fact: str,
+    relationship_type: str,
+    graph_file_path: str,
+    line_start: int,
+    line_end: int,
+    depth: int,
+) -> dict[str, Any] | None:
+    host_file_path = _resolve_host_file_path(graph_file_path, project, repos_host_root)
+    if not host_file_path.exists() or not host_file_path.is_file():
+        return None
+    try:
+        text = _read_text(host_file_path)
+    except OSError:
+        return None
+    excerpt = _line_excerpt(text, line_start, line_end, radius=CG_CONTEXT_RADIUS_LINES)
+    if not excerpt.strip():
+        return None
+    evidence_id = (
+        f"relation:{relationship_type}:{source_qname}->{target_qname}"
+    )
+    return {
+        "requiredFact": required_fact,
+        "chunk": {
+            "id": "graph-expansion",
+            "text": excerpt,
+            "evidence": [evidence_id],
+            "symbols": [target_qname],
+            "sourceFile": graph_file_path,
+            "lineRange": [line_start, line_end],
+        },
+        "trace": {
+            "depth": max(1, min(depth, 2)),
+            "relationshipType": relationship_type,
+            "sourceQualifiedName": source_qname,
+            "targetQualifiedName": target_qname,
+            "sourceFile": graph_file_path,
+            "lineRange": [line_start, line_end],
+            "evidenceId": evidence_id,
+        },
+    }
+
+
 def _select_evenly(items: list[SymbolRecord], count: int) -> list[SymbolRecord]:
     if len(items) <= count:
         return list(items)
@@ -216,7 +458,15 @@ def _valid_symbols(symbols: list[SymbolRecord]) -> list[SymbolRecord]:
     return valid
 
 
-def build_cases(project: ProjectRecord, symbols: list[SymbolRecord], cases_per_project: int) -> list[dict[str, Any]]:
+def build_cases(
+    project: ProjectRecord,
+    symbols: list[SymbolRecord],
+    cases_per_project: int,
+    *,
+    graph_client: FalkorDB,
+    repos_host_root: Path,
+    max_expansion_candidates: int = DEFAULT_MAX_EXPANSION_CANDIDATES,
+) -> list[dict[str, Any]]:
     valid = _valid_symbols(symbols)
     if len(valid) < cases_per_project:
         raise SystemExit(
@@ -238,13 +488,36 @@ def build_cases(project: ProjectRecord, symbols: list[SymbolRecord], cases_per_p
         gold_item = f"file:{symbol.graph_file_path}#{symbol.name}"
         target_text = _truncate(source_text, MAX_BASELINE_CHARS)
         cg_text = _line_excerpt(source_text, symbol.line_start, symbol.line_end)
-        neighbor = valid[(valid.index(symbol) + 1) % len(valid)]
-        neighbor_text = _line_excerpt(
-            _read_text(neighbor.host_file_path),
-            neighbor.line_start,
-            neighbor.line_end,
-            radius=2,
+        expansion = load_graph_expansion_candidates(
+            project=project,
+            symbol=symbol,
+            graph_client=graph_client,
+            repos_host_root=repos_host_root,
+            limit=max_expansion_candidates,
         )
+        expansion_candidates = expansion["candidates"]
+        reachable_candidates = expansion_candidates[:DEFAULT_EXPANSION_CHUNK_BUDGET]
+        relationship_gold = reachable_candidates[-1] if reachable_candidates else None
+        gold_items = [gold_item]
+        required_facts = [symbol.name, _source_filename(symbol.graph_file_path)]
+        query = f"Where is {symbol.name} implemented and what local source context supports it?"
+        if relationship_gold:
+            relationship_evidence = relationship_gold["chunk"]["evidence"][0]
+            relationship_trace = relationship_gold["trace"]
+            relationship_type = relationship_trace["relationshipType"]
+            relationship_source = relationship_trace["sourceQualifiedName"]
+            relationship_target = relationship_trace["targetQualifiedName"]
+            gold_items.append(relationship_evidence)
+            required_facts.extend(
+                [
+                    _natural_relation_fact(relationship_type),
+                    _natural_target_fact(relationship_gold["requiredFact"]),
+                ]
+            )
+            query = (
+                f"Where is {symbol.name} implemented, and what evidence supports the indexed "
+                f"{relationship_type} path from {relationship_source} to {relationship_target}?"
+            )
 
         noise_chunks: list[dict[str, Any]] = []
         for noise_path in file_pool:
@@ -261,24 +534,29 @@ def build_cases(project: ProjectRecord, symbols: list[SymbolRecord], cases_per_p
             if len(noise_chunks) == 2:
                 break
 
+        baseline_chunks = [
+            {
+                "id": "broad-target-file",
+                "text": target_text,
+                "evidence": [gold_item],
+                "symbols": [symbol.qualified_name],
+            },
+            *noise_chunks,
+        ]
+        if relationship_gold:
+            baseline_chunks.insert(1, relationship_gold["chunk"])
+
         cases.append(
             {
                 "id": f"{project.graph_name}-live-{index:02d}",
                 "project": project.project_name,
                 "category": "live-database-symbol-context",
-                "query": f"Where is {symbol.name} implemented and what local source context supports it?",
-                "goldItems": [gold_item],
+                "query": query,
+                "goldItems": gold_items,
+                "requiredFacts": required_facts,
                 "targetSymbols": [symbol.qualified_name],
                 "baseline": {
-                    "chunks": [
-                        {
-                            "id": "broad-target-file",
-                            "text": target_text,
-                            "evidence": [gold_item],
-                            "symbols": [symbol.qualified_name],
-                        },
-                        *noise_chunks,
-                    ],
+                    "chunks": baseline_chunks,
                     "symbols": [symbol.qualified_name],
                 },
                 "cg": {
@@ -291,20 +569,43 @@ def build_cases(project: ProjectRecord, symbols: list[SymbolRecord], cases_per_p
                             "sourceFile": symbol.graph_file_path,
                             "lineRange": [symbol.line_start, symbol.line_end],
                         },
-                        {
-                            "id": "graph-neighbor-context",
-                            "text": neighbor_text,
-                            "evidence": [],
-                            "symbols": [neighbor.qualified_name],
-                            "sourceFile": neighbor.graph_file_path,
-                            "lineRange": [neighbor.line_start, neighbor.line_end],
-                        },
                     ],
-                    "symbols": [symbol.qualified_name, neighbor.qualified_name],
+                    "symbols": [symbol.qualified_name],
+                    "retrievalTrace": [
+                        {
+                            "depth": 0,
+                            "relationshipType": "TARGET",
+                            "sourceQualifiedName": symbol.qualified_name,
+                            "targetQualifiedName": symbol.qualified_name,
+                            "sourceFile": symbol.graph_file_path,
+                            "lineRange": [symbol.line_start, symbol.line_end],
+                            "evidenceId": gold_item,
+                        }
+                    ],
                 },
+                "cgExpansionPool": expansion_candidates,
+                "expansionQueryDiagnostics": expansion["queryDiagnostics"],
             }
         )
     return cases
+
+
+def _natural_relation_fact(relationship_type: str) -> str:
+    return NATURAL_RELATION_FACTS.get(relationship_type, relationship_type)
+
+
+def _source_filename(value: str) -> str:
+    return value.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _natural_target_fact(value: str) -> str:
+    if value == "__return__":
+        return "return"
+    assignment_target, separator, _assignment_value = value.partition("=")
+    assignment_target = assignment_target.strip()
+    if separator and assignment_target.isidentifier():
+        return assignment_target
+    return value
 
 
 def _average(values: list[float]) -> float:
@@ -352,7 +653,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "This benchmark uses the currently running CGA runtime instead of a hand-written sample manifest.",
         "It selects active projects from the PostgreSQL `projects` table, reads indexed symbols from each FalkorDB project graph, and extracts context from real local repository files.",
-        "For each project, 34 deterministic symbol-level cases compare broad source context against graph-scoped context made from the target symbol excerpt plus one neighboring graph excerpt.",
+        f"For each project, {metadata['casesPerProject']} deterministic symbol-level cases compare broad source context against target-first graph context.",
+        "Each frozen case also records ordered `CALLS`, `IMPORTS`, and `FLOWS_TO` candidates for the separate answer-level benchmark; those candidates are not included in this pre-answer CG score.",
         "HPS is a deterministic pre-answer context risk score; lower is better.",
         "",
         "## Selected Projects",
@@ -444,15 +746,34 @@ async def build_report(args: argparse.Namespace) -> dict[str, Any]:
     projects = await load_active_projects(args.postgres_dsn, args.projects, repos_host_root)
     graph_client = FalkorDB(host=args.falkordb_host, port=args.falkordb_port)
 
-    all_cases: list[dict[str, Any]] = []
+    frozen_path = Path(args.frozen_cases) if args.frozen_cases else None
+    reused_frozen_cases = bool(
+        frozen_path and frozen_path.exists() and not args.refresh_frozen_cases
+    )
+    all_cases = load_frozen_cases(frozen_path) if reused_frozen_cases and frozen_path else []
     project_metadata: list[dict[str, Any]] = []
     for project in projects:
         symbols = load_graph_symbols(project, graph_client, repos_host_root)
         valid = _valid_symbols(symbols)
-        if len(valid) < args.cases_per_project:
-            continue
-        cases = build_cases(project, valid, args.cases_per_project)
-        all_cases.extend(cases)
+        if reused_frozen_cases:
+            cases = [case for case in all_cases if case.get("project") == project.project_name]
+            if len(cases) != args.cases_per_project:
+                raise SystemExit(
+                    f"Frozen case set has {len(cases)} case(s) for {project.project_name}; "
+                    f"{args.cases_per_project} are required."
+                )
+        else:
+            if len(valid) < args.cases_per_project:
+                continue
+            cases = build_cases(
+                project,
+                valid,
+                args.cases_per_project,
+                graph_client=graph_client,
+                repos_host_root=repos_host_root,
+                max_expansion_candidates=args.max_expansion_candidates,
+            )
+            all_cases.extend(cases)
         project_metadata.append(
             {
                 "project": project.project_name,
@@ -472,6 +793,13 @@ async def build_report(args: argparse.Namespace) -> dict[str, Any]:
             f"{args.min_projects} are required."
         )
 
+    if frozen_path and not reused_frozen_cases:
+        write_frozen_cases(
+            frozen_path,
+            all_cases,
+            overwrite=args.refresh_frozen_cases,
+        )
+
     report = benchmark_context_quality(payload={"cases": all_cases}, repo_root=Path.cwd())
     report["liveBenchmark"] = {
         "runDate": args.run_date,
@@ -480,6 +808,12 @@ async def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "casesPerProject": args.cases_per_project,
         "minProjects": args.min_projects,
         "projects": project_metadata,
+        "frozenCaseSet": {
+            "enabled": frozen_path is not None,
+            "reused": reused_frozen_cases,
+            "path": str(frozen_path) if frozen_path else None,
+            "sha256": frozen_case_set_sha256(all_cases),
+        },
     }
     report["projectSummary"] = summarize_projects(report)
     return report
@@ -494,9 +828,25 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--projects", nargs="+", default=DEFAULT_PROJECTS)
     parser.add_argument("--cases-per-project", type=int, default=DEFAULT_CASES_PER_PROJECT)
     parser.add_argument("--min-projects", type=int, default=3)
+    parser.add_argument(
+        "--max-expansion-candidates",
+        type=int,
+        default=DEFAULT_MAX_EXPANSION_CANDIDATES,
+        help="Maximum frozen CALLS/IMPORTS/FLOWS_TO candidates per case",
+    )
     parser.add_argument("--output", default="docs/benchmarks/context-quality-live-projects.report.json")
     parser.add_argument("--markdown", default="docs/benchmarks/context-quality-live-projects.report.md")
     parser.add_argument("--run-date", default=datetime.now(timezone.utc).date().isoformat())
+    parser.add_argument(
+        "--frozen-cases",
+        default="",
+        help="Optional JSONL case set; existing files are reused without live reselection",
+    )
+    parser.add_argument(
+        "--refresh-frozen-cases",
+        action="store_true",
+        help="Explicitly replace an existing --frozen-cases manifest",
+    )
     return parser.parse_args()
 
 

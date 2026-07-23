@@ -13,9 +13,9 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
+import jwt as pyjwt
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from jose import jwt as jose_jwt
 
 from backend import runtime_config
 from backend.auth.access import accessible_project_ids, id_filter_sql, require_project_access
@@ -285,7 +285,7 @@ def _claims_from_jwt(token: str | None) -> dict:
     if not token:
         return {}
     try:
-        claims = jose_jwt.get_unverified_claims(token)
+        claims = pyjwt.decode(token, options={"verify_signature": False})
     except Exception:
         return {}
     return claims if isinstance(claims, dict) else {}
