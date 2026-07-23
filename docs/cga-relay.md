@@ -39,7 +39,7 @@ On Windows MSVC targets, the crate config enables static CRT linking, fat LTO, s
 .\src\cga-relay\scripts\build-secure-release.ps1
 ```
 
-The script rejects binaries that retain COFF, CodeView, or embedded PDB symbols; omit required PE mitigations or concrete CFG/CET metadata; omit the machine-wide CGA-Relay mutex import or name; contain writable-executable sections; expose common absolute build paths or test secrets; or contain UPX markers. It produces `cga-relay.exe`, a versioned Windows x64 zip, and SHA-256 files. GitHub tag releases additionally require a valid Authenticode signature and RFC 3161 timestamp.
+The script rejects binaries that retain COFF, CodeView, or embedded PDB symbols; omit required PE mitigations or concrete CFG/CET metadata; omit the machine-wide CGA-Relay mutex import or name; retain the debug-only mutex test-scope override; contain writable-executable sections; expose common absolute build paths or test secrets; or contain UPX markers. It produces `cga-relay.exe`, a versioned Windows x64 zip, and SHA-256 files. GitHub tag releases additionally require a valid Authenticode signature and RFC 3161 timestamp.
 
 These controls remove routine symbol and path disclosure and raise the cost of static analysis. They do not make native code impossible to disassemble or decompile. CGA-Relay does not use UPX or similar packers because they are reversible and commonly increase endpoint-security false positives.
 
