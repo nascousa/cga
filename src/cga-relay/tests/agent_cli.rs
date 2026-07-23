@@ -1,13 +1,41 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::io::Write;
 use std::net::{TcpListener, TcpStream};
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command as ProcessCommand, Output};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const TEST_SECRET: &str = "TEST_SECRET_VALUE_SHOULD_NEVER_LEAK";
 const RESPONSE_HEADER_MARKER: &str = "PRIVATE_RESPONSE_HEADER_MARKER";
+
+struct Command(ProcessCommand);
+
+impl Command {
+    fn new(program: impl AsRef<OsStr>) -> Self {
+        let mut command = ProcessCommand::new(program);
+        let current_thread = thread::current();
+        let scope = current_thread.name().unwrap_or("cga-relay-agent-cli-test");
+        command.env("CGA_RELAY_TEST_INSTANCE_SCOPE", scope);
+        Self(command)
+    }
+}
+
+impl Deref for Command {
+    type Target = ProcessCommand;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Command {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
 
 struct TestDir {
     path: PathBuf,
@@ -1831,6 +1859,50 @@ fn run_mcp(config: &Path, input: &str, extra_env: &[(&str, &str)]) -> Output {
         .write_all(input.as_bytes())
         .unwrap();
     child.wait_with_output().unwrap()
+}
+
+#[test]
+fn second_process_is_rejected_while_first_process_holds_mutex() {
+    let tmp = TestDir::new("single-instance");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[]);
+    let mut first = Command::new(agent_bin())
+        .args(["mcp", "--config", config.to_str().unwrap()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("first relay process should start");
+
+    let mut blocked_output = None;
+    for _ in 0..20 {
+        assert!(
+            first.try_wait().unwrap().is_none(),
+            "first relay process exited before holding the mutex"
+        );
+        let output = Command::new(agent_bin())
+            .args(["doctor", "--config", config.to_str().unwrap()])
+            .output()
+            .unwrap();
+        if !output.status.success() && stderr(&output).contains("CGA-Relay is already running") {
+            blocked_output = Some(output);
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(
+        blocked_output.is_some(),
+        "second relay process was not rejected by the mutex"
+    );
+    drop(first.stdin.take());
+    let first_output = first.wait_with_output().unwrap();
+    assert!(
+        first_output.status.success(),
+        "stderr: {}",
+        stderr(&first_output)
+    );
 }
 
 #[test]

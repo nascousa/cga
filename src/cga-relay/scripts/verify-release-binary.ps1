@@ -170,6 +170,15 @@ if (-not $cetCompat) {
 
 $ascii = [Text.Encoding]::ASCII.GetString($bytes)
 $unicode = [Text.Encoding]::Unicode.GetString($bytes)
+$singleInstanceMutexImport = 'CreateMutexW'
+$singleInstanceMutexName = 'Global\Nascousa.CGA-Relay.SingleInstance'
+if ($ascii.IndexOf($singleInstanceMutexImport, [StringComparison]::Ordinal) -lt 0) {
+    throw "Relay artifact is missing the $singleInstanceMutexImport single-instance mutex import."
+}
+if ($ascii.IndexOf($singleInstanceMutexName, [StringComparison]::Ordinal) -lt 0 -and
+    $unicode.IndexOf($singleInstanceMutexName, [StringComparison]::Ordinal) -lt 0) {
+    throw 'Relay artifact is missing the fixed CGA-Relay single-instance mutex name.'
+}
 $forbiddenPatterns = @(
     '(?i)\.pdb(?:\x00|$)',
     '(?i)[a-z]:\\repos\\',
@@ -214,6 +223,8 @@ $hash = Get-FileHash -LiteralPath $resolvedPath -Algorithm SHA256
     SymbolDebugDataAbsent = $true
     PermittedDebugTypes   = @($debugTypes)
     CoffSymbolsAbsent    = $true
+    SingleInstanceMutexImport = $singleInstanceMutexImport
+    SingleInstanceMutexName = $singleInstanceMutexName
     AuthenticodeStatus   = $signature.Status.ToString()
     SignerSubject        = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { $null }
     TimestampSubject     = if ($signature.TimeStamperCertificate) { $signature.TimeStamperCertificate.Subject } else { $null }
