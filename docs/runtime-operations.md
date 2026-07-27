@@ -104,6 +104,75 @@ A lightweight background worker runs due enabled tasks, carries the opened Brows
 
 When scheduled tasks execute inside `cga-desktop-api`, `localhost:<port>` points to the container. Host-side BrowserAgent or workflow targets should use `host.docker.internal:<port>` and the target service must be listening on the host.
 
+## Azure Policy Change Monitor Managed Proxy
+
+The Azure Policy Change Monitor can run as a platform extension through a dedicated Azure Container Apps read proxy. This keeps Azure authentication in Azure and gives the local CGA runtime only an HTTPS endpoint plus a shared request key.
+
+The proxy security boundary is fixed:
+
+- One target subscription and four allowlisted read operations: policy definitions, policy set definitions, policy assignments, and Activity Log.
+- Subscription-scoped Reader for the dedicated user-assigned managed identity.
+- AcrPull only on the reused Azure Container Registry.
+- Compliance queries and all Azure write operations are rejected.
+- HTTPS-only external ingress, non-root container, immutable image digest, scale 0-1, bounded response size, and bounded Activity Log lookback.
+- The shared key is stored only in the Container App secret store and the ignored local `.env` file. Extension configuration stores only `AZURE_POLICY_MONITOR_PROXY_KEY` as the environment variable name.
+
+### Deployment Order
+
+Run deployment commands from the repository root. Set the subscription explicitly before each stage and keep the shared key in a shell variable without printing it.
+
+1. Deploy `deploy/azure-policy-proxy/identity.bicep`. This creates the dedicated identity, subscription Reader assignment, and ACR-scoped AcrPull assignment.
+2. Query the identity's live role assignments and wait until both exact scopes are visible. Do not build or deploy the app before this propagation gate passes.
+3. Build `extensions/azure-policy-monitor/Dockerfile.proxy` in the existing ACR and resolve the pushed manifest to an `@sha256:` image reference.
+4. Generate a 256-bit random key. Store it as `AZURE_POLICY_MONITOR_PROXY_KEY` in the ignored local `.env` file and pass the same value to the secure `proxySharedKey` parameter.
+5. Run a resource-group what-if for `deploy/azure-policy-proxy/app.bicep`. Accept only creation of the named Container App; reject updates or deletes to the existing registry, environment, identity, or other apps.
+6. Deploy `app.bicep` with the immutable image reference and secure key parameter.
+
+The current reference deployment uses:
+
+| Setting | Value |
+|---------|-------|
+| Subscription | `40d9a853-9ece-49c7-84eb-3f9896cd2a27` |
+| Resource group | `azurepg-icm-automation` |
+| Container App | `cga-azure-policy-proxy` |
+| Managed identity | `cga-azure-policy-proxy-mi` |
+| Endpoint | `https://cga-azure-policy-proxy.kindtree-a8b25993.eastus.azurecontainerapps.io` |
+| Image digest | `sha256:0ee00e3238f32df8152c61890f054aedfe72100639293c522a087dea406160f2` |
+
+### Runtime Configuration And Verification
+
+Configure the platform extension `azure_policy_change_monitor` with Azure monitoring enabled, repository scanning disabled, proxy authentication, compliance disabled, Activity Log enabled with a 120-minute lookback, 90 retained snapshots, and `read_only=true`.
+
+After `.env` changes, recreate only the CGA API service that owns the schedule so the process receives the new variable. For the repository-root desktop stack:
+
+```powershell
+docker compose -f docker-compose.desktop.yml up -d --build --no-deps cga
+```
+
+Verify the deployment in this order:
+
+1. `GET /healthz` returns HTTP 200 with `{"status":"ok"}`.
+2. Each of the four authenticated read operations returns HTTP 200.
+3. A request without `X-CGA-Proxy-Key` returns HTTP 401.
+4. A compliance operation such as `query_policy_states` returns `OperationNotAllowed`.
+5. Run the extension twice. The first run creates the baseline; the second should report no drift when Azure state is unchanged.
+6. Create one enabled `extension_task` with `payload.extension_id=azure_policy_change_monitor`, `cadence_minutes=30`, and no inline configuration or secret override. Manually execute it once and confirm the linked extension run succeeds.
+
+The active reference schedule is task `ZCOTRCUE`, schedule ID 4. Its scheduler state and recent run history are available from `/api/admin/schedules` and `/api/admin/extensions/azure_policy_change_monitor/runs`.
+
+### Shared-Key Rotation
+
+Rotate the key during a short maintenance window:
+
+1. Generate a new 256-bit random key without printing it or writing it to a tracked file.
+2. Redeploy `app.bicep` with the existing immutable image and the new secure `proxySharedKey` value. Wait for the new revision to become ready.
+3. Replace only `AZURE_POLICY_MONITOR_PROXY_KEY` in the ignored local `.env` file.
+4. Recreate only the CGA API service that owns the schedule.
+5. Run all four authenticated operations, the HTTP 401 negative check, and one manual scheduled execution.
+6. Clear the key variable from the shell. Never place the value in extension configuration, deployment plans, command output, tickets, or logs.
+
+If the Azure revision succeeds but the local service cannot authenticate, stop scheduled execution until the local `.env` value and the Container App secret are aligned. Do not broaden RBAC or enable compliance as a recovery step.
+
 ## Runtime Persistence And Backup
 
 - CGA runtime state lives in PostgreSQL for users, projects, tokens, audit logs, and work activity records.

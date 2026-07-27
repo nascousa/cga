@@ -33,6 +33,8 @@ def test_policy_monitor_admin_has_live_monitor_and_output_controls() -> None:
         "extension-config-management-group-id",
         "extension-config-azure-scope",
         "extension-config-auth-mode",
+        "extension-config-proxy-endpoint",
+        "extension-config-proxy-key-env",
         "extension-config-management-endpoint",
         "extension-config-authority-host",
         "extension-config-managed-identity-client-id",

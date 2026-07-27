@@ -88,6 +88,57 @@ def test_runner_rejects_non_read_only_configuration() -> None:
         )
 
 
+def test_runner_rejects_compliance_with_proxy_authentication() -> None:
+    with pytest.raises(ValueError, match="include_compliance=false"):
+        run_policy_monitor(
+            {
+                "repo_scan_enabled": False,
+                "azure_monitor_enabled": True,
+                "subscription_id": "00000000-0000-0000-0000-000000000001",
+                "auth_mode": "proxy",
+                "include_compliance": True,
+                "read_only": True,
+            },
+            azure_api=MutableAzurePolicyApi(),
+        )
+
+
+def test_create_azure_api_selects_proxy_adapter(monkeypatch) -> None:
+    observed: dict[str, Any] = {}
+
+    class FakeProxyApi:
+        def __init__(self, **kwargs) -> None:
+            observed.update(kwargs)
+
+    monkeypatch.setattr(runner_module, "AzurePolicyProxyApi", FakeProxyApi)
+    environment = {"CGA_PROXY_KEY": "a" * 48}
+
+    api = runner_module._create_azure_api(
+        {
+            "auth_mode": "proxy",
+            "proxy_endpoint": "https://cga-policy-proxy.example",
+            "proxy_key_env": "CGA_PROXY_KEY",
+            "azure_timeout_seconds": 20,
+            "azure_max_attempts": 3,
+            "max_collection_items": 1000,
+            "proxy_max_response_bytes": 2048,
+        },
+        token_provider=None,
+        environment=environment,
+    )
+
+    assert isinstance(api, FakeProxyApi)
+    assert observed == {
+        "endpoint": "https://cga-policy-proxy.example",
+        "key_environment_name": "CGA_PROXY_KEY",
+        "environment": environment,
+        "timeout_seconds": 20.0,
+        "max_attempts": 3,
+        "max_collection_items": 1000,
+        "max_response_bytes": 2048,
+    }
+
+
 def test_model_summary_failure_is_reported_without_failing_monitor(monkeypatch) -> None:
     def fail_summary(*args, **kwargs):
         raise RuntimeError("provider response contained a secret that must not be persisted")

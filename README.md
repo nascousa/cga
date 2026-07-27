@@ -1,9 +1,9 @@
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.119
+- **Version:** 1.30.121
 - **Status:** Published
 - **Author:** Nate Scott
-- **Date:** 2026-07-23 (CGA-Relay OS mutex single-instance enforcement)
+- **Date:** 2026-07-27 (managed Azure Policy proxy and 30-minute monitoring)
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
@@ -127,7 +127,7 @@ The run is intentionally reported with nuance: one project's HPS increased under
 ## Documentation
 
 - [Docker Desktop bundle](deploy/docker-desktop/README.md) - one-click local distribution and release zip behavior.
-- [Runtime operations](docs/runtime-operations.md) - work briefing, schedules, persistence, backup, and default local runtimes.
+- [Runtime operations](docs/runtime-operations.md) - work briefing, schedules, Azure Policy proxy operations, persistence, backup, and default local runtimes.
 - [AI-first readiness](docs/ai-first-readiness.md) - readiness snapshots and observe-only evidence packs for AI-first team planning.
 - [AI-first correlation contract](docs/ai-first-correlation-contract.md) - standard task, issue, PR, and activity ids for evidence packs and traces.
 - [How CGA works](docs/how-it-works.md) - compact deep dive on graph-first retrieval, agent flow, LSPs, AST-Grep, and quality controls.

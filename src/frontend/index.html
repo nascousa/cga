@@ -2924,6 +2924,7 @@
                   <label>Authentication</label>
                   <select id="extension-config-auth-mode">
                     <option value="auto">Auto</option>
+                    <option value="proxy">Managed Read Proxy</option>
                     <option value="managed_identity">Managed Identity</option>
                     <option value="workload_identity">Workload Identity</option>
                     <option value="environment">Environment</option>
@@ -2933,6 +2934,14 @@
                 <div class="form-group">
                   <label>Managed Identity Client ID</label>
                   <input id="extension-config-managed-identity-client-id" placeholder="Optional user-assigned identity" />
+                </div>
+                <div class="form-group wide">
+                  <label>Managed Read Proxy Endpoint</label>
+                  <input id="extension-config-proxy-endpoint" placeholder="https://cga-policy-proxy.example" />
+                </div>
+                <div class="form-group wide">
+                  <label>Proxy Key Environment</label>
+                  <input id="extension-config-proxy-key-env" placeholder="AZURE_POLICY_MONITOR_PROXY_KEY" />
                 </div>
                 <div class="form-group wide">
                   <label>Azure Resource Manager Endpoint</label>
@@ -6330,6 +6339,8 @@ function renderExtensionOverview(overview) {
   setValue('extension-config-azure-attempts', cfg.azure_max_attempts ?? 4);
   setValue('extension-config-auth-mode', cfg.auth_mode || 'auto');
   setValue('extension-config-managed-identity-client-id', cfg.managed_identity_client_id || '');
+  setValue('extension-config-proxy-endpoint', cfg.proxy_endpoint || '');
+  setValue('extension-config-proxy-key-env', cfg.proxy_key_env || 'AZURE_POLICY_MONITOR_PROXY_KEY');
   setValue('extension-config-management-endpoint', cfg.management_endpoint || 'https://management.azure.com');
   setValue('extension-config-authority-host', cfg.authority_host || 'https://login.microsoftonline.com');
   setValue('extension-config-arm-token-scope', cfg.arm_token_scope || 'https://management.azure.com/.default');
@@ -6488,6 +6499,8 @@ function readSelectedExtensionConfig() {
     azure_max_attempts: integerValue('extension-config-azure-attempts', 4),
     auth_mode: textValue('extension-config-auth-mode') || 'auto',
     managed_identity_client_id: textValue('extension-config-managed-identity-client-id'),
+    proxy_endpoint: textValue('extension-config-proxy-endpoint'),
+    proxy_key_env: textValue('extension-config-proxy-key-env') || 'AZURE_POLICY_MONITOR_PROXY_KEY',
     management_endpoint: textValue('extension-config-management-endpoint') || 'https://management.azure.com',
     authority_host: textValue('extension-config-authority-host') || 'https://login.microsoftonline.com',
     arm_token_scope: textValue('extension-config-arm-token-scope') || 'https://management.azure.com/.default',

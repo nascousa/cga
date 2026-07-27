@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Mapping
 
 from .azure_auth import DefaultAzureAccessTokenProvider
+from .azure_proxy import AzurePolicyProxyApi
 from .azure_rest import AzureAccessTokenProvider, AzurePolicyRestApi
 from .azure_state import AzurePolicyApi, AzurePolicyStateConfig, collect_azure_policy_state
 from .diff import SEVERITY_ORDER, diff_policy_snapshots
@@ -53,16 +54,20 @@ def run_policy_monitor(
         findings.extend(_tag_findings(repository_result.get("findings"), "repository"))
 
     if azure_enabled:
+        auth_mode = str(config.get("auth_mode") or "auto").strip().lower()
+        include_compliance = _bool(config.get("include_compliance"), True)
+        if auth_mode == "proxy" and include_compliance:
+            raise ValueError("Azure Policy proxy authentication requires include_compliance=false.")
         state_config = AzurePolicyStateConfig(
             subscription_id=str(config.get("subscription_id") or ""),
             scope=str(config.get("azure_scope") or config.get("scope") or ""),
             management_group_id=str(config.get("management_group_id") or ""),
             activity_lookback_minutes=_integer(config.get("activity_lookback_minutes"), 1440, 1, 43_200),
-            include_compliance=_bool(config.get("include_compliance"), True),
+            include_compliance=include_compliance,
             include_activity=_bool(config.get("include_activity"), True),
         )
         resolved_scope = state_config.resolved_scope()
-        api = azure_api or _create_azure_api(config, token_provider=token_provider)
+        api = azure_api or _create_azure_api(config, token_provider=token_provider, environment=environment)
         snapshot = collect_azure_policy_state(api, state_config, captured_at=captured_at)
         drift = diff_policy_snapshots(previous_snapshot, snapshot)
         findings.extend(_tag_findings(drift.get("findings"), "azure"))
@@ -131,11 +136,28 @@ def _create_azure_api(
     config: dict[str, Any],
     *,
     token_provider: AzureAccessTokenProvider | None,
-) -> AzurePolicyRestApi:
+    environment: Mapping[str, str] | None = None,
+) -> AzurePolicyApi:
+    auth_mode = str(config.get("auth_mode") or "auto").strip().lower()
+    if auth_mode == "proxy":
+        return AzurePolicyProxyApi(
+            endpoint=str(config.get("proxy_endpoint") or ""),
+            key_environment_name=str(config.get("proxy_key_env") or "AZURE_POLICY_MONITOR_PROXY_KEY"),
+            environment=environment,
+            timeout_seconds=float(_integer(config.get("azure_timeout_seconds"), 30, 1, 120)),
+            max_attempts=_integer(config.get("azure_max_attempts"), 4, 1, 8),
+            max_collection_items=_integer(config.get("max_collection_items"), 50_000, 1, 250_000),
+            max_response_bytes=_integer(
+                config.get("proxy_max_response_bytes"),
+                25 * 1024 * 1024,
+                1024,
+                50 * 1024 * 1024,
+            ),
+        )
     management_endpoint = str(config.get("management_endpoint") or "https://management.azure.com").rstrip("/")
     authority_host = str(config.get("authority_host") or "https://login.microsoftonline.com")
     provider = token_provider or DefaultAzureAccessTokenProvider(
-        auth_mode=str(config.get("auth_mode") or "auto"),
+        auth_mode=auth_mode,
         authority_host=authority_host,
         managed_identity_client_id=str(config.get("managed_identity_client_id") or ""),
         timeout_seconds=float(_integer(config.get("azure_timeout_seconds"), 30, 1, 120)),
