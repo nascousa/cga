@@ -21,7 +21,10 @@ impl Command {
             .name()
             .map(str::to_owned)
             .unwrap_or_else(|| format!("{:?}", current_thread.id()));
-        command.env("CGA_RELAY_TEST_INSTANCE_SCOPE", scope);
+        command.env(
+            "CGA_RELAY_TEST_INSTANCE_SCOPE",
+            format!("{}:{scope}", std::process::id()),
+        );
         Self(command)
     }
 }
@@ -1941,7 +1944,7 @@ fn run_mcp(config: &Path, input: &str, extra_env: &[(&str, &str)]) -> Output {
 }
 
 #[test]
-fn second_process_is_rejected_while_first_process_holds_mutex() {
+fn concurrent_processes_allow_exactly_one_mutex_holder() {
     let tmp = TestDir::new("single-instance");
     let repo = tmp.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -1953,35 +1956,48 @@ fn second_process_is_rejected_while_first_process_holds_mutex() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("first relay process should start");
+    let mut second = Command::new(agent_bin())
+        .args(["mcp", "--config", config.to_str().unwrap()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("second relay process should start");
 
-    let mut blocked_output = None;
-    for _ in 0..20 {
-        assert!(
-            first.try_wait().unwrap().is_none(),
-            "first relay process exited before holding the mutex"
-        );
-        let output = Command::new(agent_bin())
-            .args(["doctor", "--config", config.to_str().unwrap()])
-            .output()
-            .unwrap();
-        if !output.status.success() && stderr(&output).contains("CGA-Relay is already running") {
-            blocked_output = Some(output);
+    let mut contender_exited = false;
+    for _ in 0..200 {
+        if first.try_wait().unwrap().is_some() || second.try_wait().unwrap().is_some() {
+            contender_exited = true;
             break;
         }
         thread::sleep(Duration::from_millis(10));
     }
 
-    assert!(
-        blocked_output.is_some(),
-        "second relay process was not rejected by the mutex"
-    );
     drop(first.stdin.take());
+    drop(second.stdin.take());
     let first_output = first.wait_with_output().unwrap();
+    let second_output = second.wait_with_output().unwrap();
+    let outputs = [&first_output, &second_output];
+
     assert!(
-        first_output.status.success(),
-        "stderr: {}",
-        stderr(&first_output)
+        contender_exited,
+        "neither relay process was rejected by the mutex"
     );
+    assert_eq!(
+        outputs
+            .iter()
+            .filter(|output| output.status.success())
+            .count(),
+        1,
+        "exactly one relay process should hold the mutex: first={}, second={}",
+        stderr(&first_output),
+        stderr(&second_output)
+    );
+    let rejected = outputs
+        .iter()
+        .find(|output| !output.status.success())
+        .expect("one relay process should be rejected");
+    assert!(stderr(rejected).contains("CGA-Relay is already running"));
 }
 
 #[test]
