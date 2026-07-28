@@ -27,7 +27,11 @@ The backend dependency manifest is `requirements.txt`.
 | asyncpg | PostgreSQL async driver | Apache-2.0 |
 | redis-py | Redis client | MIT |
 | FalkorDB Python client | FalkorDB client access | Verify package metadata for the resolved version |
-| tree-sitter Python bindings | Source parsing support | Verify package metadata for the resolved version |
+| tree-sitter | Python bindings for structural source parsing | MIT |
+| tree-sitter-language-pack | Prebuilt tree-sitter language parsers | MIT OR Apache-2.0 |
+| tree-sitter-c-sharp | C# parser grammar | MIT |
+| tree-sitter-embedded-template | Embedded-template parser grammar | MIT |
+| tree-sitter-yaml | YAML parser grammar | MIT |
 | sentence-transformers | Semantic embeddings | Verify package metadata for the resolved version |
 | NumPy | Array computing | BSD-3-Clause and related package notices |
 | structlog | Structured logging | MIT OR Apache-2.0 |
