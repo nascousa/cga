@@ -12,6 +12,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'release-process.ps1')
+
 $crateRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $manifestPath = Join-Path $crateRoot 'Cargo.toml'
 $manifest = Get-Content -LiteralPath $manifestPath -Raw
@@ -43,7 +45,9 @@ if ($hasCertificate -xor $hasPassword) {
 $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 $targetRoot = Join-Path $crateRoot 'target\secure-release'
 $packageRoot = Join-Path $targetRoot "package-$Version"
+$candidateRoot = Join-Path $targetRoot "candidate-$Version"
 $builtExe = Join-Path $targetRoot 'x86_64-pc-windows-msvc\release\cga-relay.exe'
+$candidateExe = Join-Path $candidateRoot 'cga-relay.exe'
 $releaseExe = Join-Path $outputRoot 'cga-relay.exe'
 $zipName = "cga-relay-$Version-windows-x64.zip"
 $zipPath = Join-Path $outputRoot $zipName
@@ -51,9 +55,11 @@ $exeChecksumPath = Join-Path $outputRoot 'cga-relay.exe.sha256'
 $zipChecksumPath = "$zipPath.sha256"
 
 New-Item -ItemType Directory -Path $outputRoot -Force | Out-Null
-Remove-Item -LiteralPath $packageRoot -Recurse -Force -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
-foreach ($path in @($releaseExe, $zipPath, $exeChecksumPath, $zipChecksumPath)) {
+foreach ($path in @($packageRoot, $candidateRoot)) {
+    Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $path -Force | Out-Null
+}
+foreach ($path in @($zipPath, $exeChecksumPath, $zipChecksumPath)) {
     Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
 }
 
@@ -66,7 +72,7 @@ try {
 } finally {
     Pop-Location
 }
-Copy-Item -LiteralPath $builtExe -Destination $releaseExe -Force
+Copy-Item -LiteralPath $builtExe -Destination $candidateExe -Force
 
 if ($hasCertificate) {
     $signTool = Get-Command signtool.exe -ErrorAction SilentlyContinue
@@ -111,7 +117,7 @@ if ($hasCertificate) {
         if (-not $signingCertificate) {
             throw 'The relay signing PFX does not contain a certificate with a private key.'
         }
-        & $signToolPath sign /fd SHA256 /sha1 $signingCertificate.Thumbprint /s My /tr http://timestamp.digicert.com /td SHA256 $releaseExe
+        & $signToolPath sign /fd SHA256 /sha1 $signingCertificate.Thumbprint /s My /tr http://timestamp.digicert.com /td SHA256 $candidateExe
         if ($LASTEXITCODE -ne 0) {
             throw "CGA-Relay Authenticode signing failed with exit code $LASTEXITCODE."
         }
@@ -129,7 +135,7 @@ if ($hasCertificate) {
 }
 
 $verifyArgs = @{
-    BinaryPath   = $releaseExe
+    BinaryPath   = $candidateExe
     ForbiddenText = @($crateRoot)
 }
 if ($RequireSignature) {
@@ -137,25 +143,45 @@ if ($RequireSignature) {
 }
 & (Join-Path $PSScriptRoot 'verify-release-binary.ps1') @verifyArgs
 
-Copy-Item -LiteralPath $releaseExe -Destination (Join-Path $packageRoot 'cga-relay.exe') -Force
+Copy-Item -LiteralPath $candidateExe -Destination (Join-Path $packageRoot 'cga-relay.exe') -Force
 $packageReadme = @"
 CGA-Relay $Version for Windows x64
 
 This release is built with static CRT linking, fat LTO, stripped symbols, panic abort,
 Control Flow Guard, ASLR, high-entropy ASLR, DEP/NX, and CET compatibility.
 Windows account sessions are protected for the current user with DPAPI.
+The secure release script stops running Relay processes only after verification,
+replaces their executable paths, and restores one prior tray process.
 
 Verify SHA-256 before execution. Code hardening raises reverse-engineering cost but
 cannot make a native executable impossible to analyze.
 "@
 Set-Content -LiteralPath (Join-Path $packageRoot 'README.txt') -Value $packageReadme -Encoding ASCII
 
-$exeHash = (Get-FileHash -LiteralPath $releaseExe -Algorithm SHA256).Hash.ToLowerInvariant()
+$exeHash = (Get-FileHash -LiteralPath $candidateExe -Algorithm SHA256).Hash.ToLowerInvariant()
 "$exeHash  cga-relay.exe" | Set-Content -LiteralPath $exeChecksumPath -Encoding ASCII
 Copy-Item -LiteralPath $exeChecksumPath -Destination (Join-Path $packageRoot 'cga-relay.exe.sha256') -Force
 Compress-Archive -Path (Join-Path $packageRoot '*') -DestinationPath $zipPath -CompressionLevel Optimal -Force
 $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
 "$zipHash  $zipName" | Set-Content -LiteralPath $zipChecksumPath -Encoding ASCII
+
+$runningProcesses = @(Get-CgaRelayRunningProcesses)
+$replacementResult = Install-CgaRelayCandidate `
+    -CandidatePath $candidateExe `
+    -RunningProcesses $runningProcesses
+$releaseAlreadyReplaced = @(
+    $replacementResult.ReplacedPaths |
+        Where-Object {
+            [string]::Equals(
+                [System.IO.Path]::GetFullPath($_),
+                $releaseExe,
+                [System.StringComparison]::OrdinalIgnoreCase
+            )
+        }
+).Count -gt 0
+if (-not $releaseAlreadyReplaced) {
+    Copy-Item -LiteralPath $candidateExe -Destination $releaseExe -Force
+}
 
 [pscustomobject]@{
     Version = $Version
@@ -164,4 +190,8 @@ $zipHash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerIn
     ExecutableSHA256 = $exeHash
     ArchiveSHA256 = $zipHash
     SignatureRequired = [bool]$RequireSignature
+    StoppedProcesses = $replacementResult.StoppedCount
+    ReplacedExecutables = $replacementResult.ReplacedCount
+    RestartedProcesses = $replacementResult.RestartedCount
+    ReplacedPaths = $replacementResult.ReplacedPaths
 } | ConvertTo-Json -Depth 3

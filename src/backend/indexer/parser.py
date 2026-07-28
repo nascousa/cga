@@ -16,7 +16,10 @@ import ast
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
+from typing import AbstractSet, Iterator
+
+from backend.indexer.language_definitions import REGISTERED_EXTENSIONS, REGISTERED_FILENAMES
+from backend.indexer.language_catalog import is_parser_file_enabled
 
 
 @dataclass
@@ -82,7 +85,7 @@ def path_to_module(file_path: str) -> str:
         rel = p
     parts = [part for part in rel.parts if part not in ("src",)]
     module = ".".join(parts)
-    for suffix in (".py", ".ts", ".tsx", ".js", ".jsx", ".ps1", ".psm1", ".psd1"):
+    for suffix in (".py", ".ts", ".tsx", ".js", ".jsx", ".ps1", ".psm1", ".psd1", ".go", ".rs", ".java", ".cs"):
         if module.endswith(suffix):
             module = module[: -len(suffix)]
             break
@@ -1301,12 +1304,15 @@ class SourceParser:
     """Dispatch parser by file extension."""
 
     def __init__(self) -> None:
+        from backend.indexer.language_registry import LanguageRegistry
+
         self._python = PythonParser()
         self._ts_js = TypeScriptJavaScriptParser()
         self._powershell = PowerShellParser()
         self._go = GoParser()
         self._rust = RustParser()
         self._java = JavaParser()
+        self._language_registry = LanguageRegistry()
 
     def parse(self, file_path: str) -> ParsedFile:
         suffix = Path(file_path).suffix.lower()
@@ -1322,16 +1328,26 @@ class SourceParser:
             return self._rust.parse(file_path)
         if suffix == ".java":
             return self._java.parse(file_path)
+        structural_parser = self._language_registry.parser_for(file_path)
+        if structural_parser is not None:
+            return structural_parser.parse(file_path)
         return ParsedFile(path=file_path, language="unknown", parse_error="unsupported extension")
 
 
-SUPPORTED_EXTENSIONS = {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".ps1", ".psm1", ".psd1"}
+SUPPORTED_EXTENSIONS = frozenset(
+    {".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java", ".ps1", ".psm1", ".psd1"}
+) | REGISTERED_EXTENSIONS
+SUPPORTED_FILENAMES = REGISTERED_FILENAMES
 
 
-def discover_files(repo_path: str) -> Iterator[str]:
+def discover_files(
+    repo_path: str,
+    disabled_languages: AbstractSet[str] | None = None,
+) -> Iterator[str]:
     """Yield absolute paths of all supported source files under *repo_path*."""
     import os
 
+    disabled = frozenset(disabled_languages or ())
     skip_dirs = {
         ".git", ".venv", "venv", "env", "__pycache__",
         "node_modules", ".mypy_cache", ".pytest_cache", "dist", "build",
@@ -1341,5 +1357,5 @@ def discover_files(repo_path: str) -> Iterator[str]:
         dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
         for fname in files:
             fpath = os.path.join(root, fname)
-            if Path(fpath).suffix.lower() in SUPPORTED_EXTENSIONS:
+            if is_parser_file_enabled(fpath, disabled):
                 yield fpath

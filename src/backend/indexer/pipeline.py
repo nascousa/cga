@@ -22,11 +22,16 @@ from pathlib import Path
 
 import structlog
 
+from backend import runtime_config
 from backend.graph.client import GraphClient
 from backend.graph import schema as S
 from backend.indexer.call_analyzer import CallAnalyzer, RawCall
 from backend.indexer.hasher import file_changed, hash_variable_flows, sha256_file
-from backend.indexer.parser import ParsedFile, SUPPORTED_EXTENSIONS, SourceParser, discover_files, path_to_module
+from backend.indexer.language_catalog import (
+    is_supported_parser_file,
+    parser_language_ids_for_path,
+)
+from backend.indexer.parser import ParsedFile, SourceParser, discover_files, path_to_module
 
 # Worker count bounds
 _MIN_WORKERS = 2
@@ -118,18 +123,17 @@ def _resolve_changed_path(repo_path: str, resolved_repo_path: Path, changed_path
 
 def _resolve_import_path(source_file: str, imported_module: str, repo_path: str) -> str | None:
     """Resolve relative import to actual file path (best effort).
-    
+
     Handles:
     - Relative paths like "./utils", "../core"
     - Directory imports like "./handlers/auth"
     - Language-specific extensions
-    
+
     Returns the resolved file path if found, None otherwise (e.g., external packages).
     """
     source_path = Path(source_file)
     source_dir = source_path.parent
-    repo = Path(repo_path)
-    
+
     if imported_module.startswith("."):
         if imported_module.startswith("./"):
             rel = imported_module[2:]
@@ -137,25 +141,24 @@ def _resolve_import_path(source_file: str, imported_module: str, repo_path: str)
             rel = imported_module
         else:
             rel = imported_module[1:]
-        
+
         candidate = (source_dir / rel).resolve()
-        
+
         if candidate.is_file():
             return str(candidate)
-        
+
         for ext in [".py", ".ts", ".tsx", ".js", ".jsx"]:
             file_candidate = Path(str(candidate) + ext)
             if file_candidate.is_file():
                 return str(file_candidate)
-        
+
         if candidate.is_dir():
             for ext in [".py", ".ts", ".tsx", ".js", ".jsx"]:
                 init_file = candidate / f"__init__{ext}" if ext == ".py" else candidate / f"index{ext}"
                 if init_file.is_file():
                     return str(init_file)
-    
-    return None
 
+    return None
 
 
 class IndexPipeline:
@@ -167,7 +170,13 @@ class IndexPipeline:
 
     def index_full(self, repo_path: str) -> dict:
         resolved_repo_path = _resolve_repo_root(repo_path)
-        files = list(discover_files(str(resolved_repo_path)))
+        disabled_languages = runtime_config.get_disabled_parser_languages()
+        files = list(
+            discover_files(
+                str(resolved_repo_path),
+                disabled_languages=disabled_languages,
+            )
+        )
         workers = _adaptive_workers(len(files))
         log.info("pipeline.full.start", repo_path=repo_path, resolved_repo_path=str(resolved_repo_path), files=len(files), workers=workers)
         self._delete_repo_subgraph(repo_path)
@@ -177,7 +186,14 @@ class IndexPipeline:
         symbol_map_lock = threading.Lock()
 
         def _process_full(fpath: str) -> dict:
-            return self._index_file(repo_path, fpath, symbol_map, force=True, symbol_map_lock=symbol_map_lock)
+            return self._index_file(
+                repo_path,
+                fpath,
+                symbol_map,
+                force=True,
+                symbol_map_lock=symbol_map_lock,
+                disabled_languages=disabled_languages,
+            )
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
             futures = {executor.submit(_process_full, fp): fp for fp in files}
@@ -194,6 +210,7 @@ class IndexPipeline:
 
     def index_incremental(self, repo_path: str, changed_paths: list[str]) -> dict:
         resolved_repo_path = _resolve_repo_root(repo_path)
+        disabled_languages = runtime_config.get_disabled_parser_languages()
         log.info("pipeline.incremental.start", changed=len(changed_paths), repo_path=repo_path, resolved_repo_path=str(resolved_repo_path))
         self._upsert_repo(repo_path)
         stats: dict = {"files": 0, "skipped": 0, "symbols": 0, "calls": 0, "imports": 0, "variables": 0, "variable_flows": 0, "errors": 0}
@@ -202,7 +219,7 @@ class IndexPipeline:
         valid_paths: list[str] = []
         for fpath in changed_paths:
             normalized_fpath = _resolve_changed_path(repo_path, resolved_repo_path, fpath)
-            if Path(normalized_fpath).suffix.lower() not in SUPPORTED_EXTENSIONS:
+            if not is_supported_parser_file(normalized_fpath):
                 continue
             valid_paths.append(normalized_fpath)
 
@@ -211,7 +228,14 @@ class IndexPipeline:
         log.info("pipeline.incremental.workers", file_count=len(valid_paths), workers=workers)
 
         def _process(fpath: str) -> dict:
-            result = self._index_file(repo_path, fpath, symbol_map, force=False, symbol_map_lock=symbol_map_lock)
+            result = self._index_file(
+                repo_path,
+                fpath,
+                symbol_map,
+                force=False,
+                symbol_map_lock=symbol_map_lock,
+                disabled_languages=disabled_languages,
+            )
             return result
 
         with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -257,6 +281,7 @@ class IndexPipeline:
         symbol_map: dict[str, str],
         force: bool,
         symbol_map_lock: threading.Lock | None = None,
+        disabled_languages: frozenset[str] | None = None,
     ) -> dict:
         result = {"files": 0, "skipped": 0, "symbols": 0, "calls": 0, "imports": 0, "variables": 0, "variable_flows": 0, "errors": 0}
         try:
@@ -266,14 +291,31 @@ class IndexPipeline:
                 self._delete_file_subgraph(file_path)
                 return result
 
+            disabled = disabled_languages or frozenset()
+            candidate_languages = parser_language_ids_for_path(file_path)
+            if candidate_languages and candidate_languages.issubset(disabled):
+                self._delete_file_subgraph(file_path)
+                result["skipped"] = 1
+                return result
+
             current_hash = sha256_file(file_path)
-            if not force:
+            requires_language_gate = bool(candidate_languages & disabled)
+            if not force and not requires_language_gate:
                 stored = self._get_stored_hash(file_path)
                 if not file_changed(current_hash, stored):
                     result["skipped"] = 1
                     return result
 
             parsed: ParsedFile = self._parser.parse(file_path)
+            if parsed.language in disabled:
+                self._delete_file_subgraph(file_path)
+                result["skipped"] = 1
+                return result
+            if not force and requires_language_gate:
+                stored = self._get_stored_hash(file_path)
+                if not file_changed(current_hash, stored):
+                    result["skipped"] = 1
+                    return result
             if parsed.parse_error:
                 log.warning("pipeline.parse_error", path=file_path, error=parsed.parse_error)
 
@@ -333,14 +375,12 @@ class IndexPipeline:
                 symbol_map.update(new_symbols)
             result["symbols"] += len(sym_rows)
 
-            python_raw_calls: list[RawCall] = []
-            if parsed.language == "python":
-                python_raw_calls = self._extract_python_raw_calls(file_path)
-
-            if parsed.language == "python":
-                result["calls"] = self._write_python_call_edges(python_raw_calls, symbol_map)
-            elif parsed.language in {"typescript", "javascript"}:
-                result["calls"] = self._write_ts_js_call_edges(parsed.calls, symbol_map)
+            raw_calls = (
+                self._extract_python_raw_calls(file_path)
+                if parsed.language == "python"
+                else parsed.calls
+            )
+            result["calls"] = self._write_call_edges_batch(raw_calls, symbol_map)
 
             result["imports"] = self._write_import_edges(file_path, parsed, repo_path)
 
@@ -348,10 +388,7 @@ class IndexPipeline:
             result["variables"] = variable_stats["variables"]
             result["variable_flows"] = variable_stats["variable_flows"]
 
-            if parsed.language == "python":
-                result["variable_flows"] += self._write_cross_scope_variable_flows(python_raw_calls, symbol_map)
-            elif parsed.language in {"typescript", "javascript"}:
-                result["variable_flows"] += self._write_cross_scope_variable_flows(parsed.calls, symbol_map)
+            result["variable_flows"] += self._write_cross_scope_variable_flows(raw_calls, symbol_map)
 
             result["files"] = 1
         except Exception as exc:

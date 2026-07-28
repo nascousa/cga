@@ -8,6 +8,9 @@ const APP_ICON_LARGE_ID: u16 = 3;
 const APP_ICON_GRAY_GROUP_ID: u16 = 4;
 const APP_ICON_GRAY_SMALL_ID: u16 = 5;
 const APP_ICON_GRAY_LARGE_ID: u16 = 6;
+const APP_ICON_WARNING_GROUP_ID: u16 = 7;
+const APP_ICON_WARNING_SMALL_ID: u16 = 8;
+const APP_ICON_WARNING_LARGE_ID: u16 = 9;
 const RT_ICON: u16 = 3;
 const RT_GROUP_ICON: u16 = 14;
 
@@ -19,6 +22,7 @@ type GroupIconResource<'a> = (u16, &'a [GroupIconEntry]);
 enum IconVariant {
     Color,
     Gray,
+    Warning,
 }
 
 fn main() {
@@ -32,6 +36,8 @@ fn main() {
     let large = make_icon_image(32, IconVariant::Color);
     let gray_small = make_icon_image(16, IconVariant::Gray);
     let gray_large = make_icon_image(32, IconVariant::Gray);
+    let warning_small = make_icon_image(16, IconVariant::Warning);
+    let warning_large = make_icon_image(32, IconVariant::Warning);
     let ico = make_ico(&[(16, &small), (32, &large)]);
     let color_group = [
         (16, APP_ICON_SMALL_ID, small.len() as u32),
@@ -41,16 +47,23 @@ fn main() {
         (16, APP_ICON_GRAY_SMALL_ID, gray_small.len() as u32),
         (32, APP_ICON_GRAY_LARGE_ID, gray_large.len() as u32),
     ];
+    let warning_group = [
+        (16, APP_ICON_WARNING_SMALL_ID, warning_small.len() as u32),
+        (32, APP_ICON_WARNING_LARGE_ID, warning_large.len() as u32),
+    ];
     let res = make_res(
         &[
             (APP_ICON_SMALL_ID, &small),
             (APP_ICON_LARGE_ID, &large),
             (APP_ICON_GRAY_SMALL_ID, &gray_small),
             (APP_ICON_GRAY_LARGE_ID, &gray_large),
+            (APP_ICON_WARNING_SMALL_ID, &warning_small),
+            (APP_ICON_WARNING_LARGE_ID, &warning_large),
         ],
         &[
             (APP_ICON_GROUP_ID, &color_group[..]),
             (APP_ICON_GRAY_GROUP_ID, &gray_group[..]),
+            (APP_ICON_WARNING_GROUP_ID, &warning_group[..]),
         ],
     );
     let ico_path = out_dir.join("cga-relay.ico");
@@ -103,13 +116,23 @@ fn icon_pixel(
         return apply_icon_variant((0, 0, 0, 0), variant);
     }
 
-    let mut color = (15, 132, 62, 255);
+    let mut color = match variant {
+        IconVariant::Warning => (242, 183, 5, 255),
+        IconVariant::Color | IconVariant::Gray => (15, 132, 62, 255),
+    };
     if x + y > width + width / 5 {
-        color = (34, 172, 82, 255);
+        color = match variant {
+            IconVariant::Warning => (255, 210, 51, 255),
+            IconVariant::Color | IconVariant::Gray => (34, 172, 82, 255),
+        };
     }
 
     if letter_r_pixel(x, y, width, height) {
-        return apply_icon_variant((245, 255, 250, 255), variant);
+        let letter = match variant {
+            IconVariant::Warning => (58, 45, 0, 255),
+            IconVariant::Color | IconVariant::Gray => (245, 255, 250, 255),
+        };
+        return apply_icon_variant(letter, variant);
     }
 
     apply_icon_variant(color, variant)
@@ -146,6 +169,7 @@ fn apply_icon_variant(color: (u8, u8, u8, u8), variant: IconVariant) -> (u8, u8,
                 (gray, gray, gray, alpha)
             }
         }
+        IconVariant::Warning => color,
     }
 }
 

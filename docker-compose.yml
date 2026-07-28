@@ -84,6 +84,7 @@ services:
     volumes:
       - ${CGA_BACKUP_DIR:-./data/backups}:/backups
       - ${CGA_REPOS_MOUNT:-.}:/repos:ro
+      - runtime_data:/app/data
     depends_on:
       falkordb-dev:
         condition: service_healthy
@@ -249,6 +250,7 @@ services:
       - BACKUP_DIR=/backups/cga/auth
     volumes:
       - backup_prod_data:/backups
+      - runtime_data:/app/data
     depends_on:
       redis:
         condition: service_healthy
@@ -384,6 +386,8 @@ volumes:
   postgres_dev_data:
     driver: local
   backup_prod_data:
+    driver: local
+  runtime_data:
     driver: local
 networks:
   your-app-network:

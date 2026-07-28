@@ -21,6 +21,9 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SERVER_NAME: &str = "cga-relay";
 const TRAY_ICON_LOGGED_IN_RESOURCE_ID: u16 = 1;
 const TRAY_ICON_LOGGED_OUT_RESOURCE_ID: u16 = 4;
+const TRAY_ICON_WARNING_RESOURCE_ID: u16 = 7;
+const BACKEND_NOTIFICATION_TITLE: &str = "CGA Server Container is unavailable";
+const BACKEND_NOTIFICATION_MESSAGE: &str = "Start the CGA Server Container to reconnect CGA-Relay.";
 const PROJECT_DISPLAY_NAME: &str = "CGA-Relay";
 const PROJECT_AUTHOR: &str = "Nate Scott";
 const PROJECT_REPOSITORY: &str = "https://github.com/nascousa/cga";
@@ -484,9 +487,10 @@ fn cmd_mcp(args: &[String]) -> AgentResult<()> {
 
 fn tray_status_json(config: &AgentConfig) -> String {
     let login = tray_login_status(config);
+    let backend_available = tray_backend_available(config);
     let user_groups = tray_user_group_labels(config, &login);
     format!(
-        "{{\"supported\":{},\"agent_id\":\"{}\",\"project_id\":\"{}\",\"mode\":\"{}\",\"tooltip\":\"{}\",\"icon\":\"embedded-resource:{}\",\"icon_variant\":\"{}\",\"icon_loaded\":{},\"logged_in\":{},\"username\":\"{}\",\"menu\":{},\"about\":{{\"name\":\"{}\",\"user_groups\":{},\"user_group_count\":{},\"author\":\"{}\",\"repository\":\"{}\",\"support\":\"{}\",\"license\":\"{}\"}},\"menu_events\":[\"WM_LBUTTONDBLCLK\",\"WM_CONTEXTMENU\",\"WM_RBUTTONUP\",\"WM_TIMER\"]}}",
+        "{{\"supported\":{},\"agent_id\":\"{}\",\"project_id\":\"{}\",\"mode\":\"{}\",\"tooltip\":\"{}\",\"icon\":\"embedded-resource:{}\",\"icon_variant\":\"{}\",\"icon_loaded\":{},\"backend_available\":{},\"notification_title\":\"{}\",\"notification_message\":\"{}\",\"logged_in\":{},\"username\":\"{}\",\"menu\":{},\"about\":{{\"name\":\"{}\",\"user_groups\":{},\"user_group_count\":{},\"author\":\"{}\",\"repository\":\"{}\",\"support\":\"{}\",\"license\":\"{}\"}},\"menu_events\":[\"WM_LBUTTONDBLCLK\",\"WM_CONTEXTMENU\",\"WM_RBUTTONUP\",\"WM_TIMER\"]}}",
         tray_supported(),
         json_escape(&config.agent_id),
         json_escape(&config.project_id),
@@ -495,10 +499,13 @@ fn tray_status_json(config: &AgentConfig) -> String {
         } else {
             "unsupported"
         },
-        json_escape(&tray_tooltip(config, &login)),
-        tray_icon_resource_id(&login),
-        tray_icon_variant(&login),
+        json_escape(&tray_tooltip(config, &login, backend_available)),
+        tray_icon_resource_id(&login, backend_available),
+        tray_icon_variant(&login, backend_available),
         tray_icon_loaded(),
+        backend_available,
+        json_escape(BACKEND_NOTIFICATION_TITLE),
+        json_escape(BACKEND_NOTIFICATION_MESSAGE),
         login.logged_in,
         json_escape(&login.username),
         tray_menu_json(&login),
@@ -571,16 +578,24 @@ fn tray_user_group_summary(config: &AgentConfig, login: &TrayLoginStatus) -> Str
     }
 }
 
-fn tray_icon_resource_id(login: &TrayLoginStatus) -> u16 {
-    if login.logged_in {
+fn tray_backend_available(config: &AgentConfig) -> bool {
+    http_get_json(config, &format!("{}/health", config.api_base_url)).is_ok()
+}
+
+fn tray_icon_resource_id(login: &TrayLoginStatus, backend_available: bool) -> u16 {
+    if !backend_available {
+        TRAY_ICON_WARNING_RESOURCE_ID
+    } else if login.logged_in {
         TRAY_ICON_LOGGED_IN_RESOURCE_ID
     } else {
         TRAY_ICON_LOGGED_OUT_RESOURCE_ID
     }
 }
 
-fn tray_icon_variant(login: &TrayLoginStatus) -> &'static str {
-    if login.logged_in {
+fn tray_icon_variant(login: &TrayLoginStatus, backend_available: bool) -> &'static str {
+    if !backend_available {
+        "yellow-blink"
+    } else if login.logged_in {
         "color"
     } else {
         "gray"
@@ -598,8 +613,10 @@ fn cga_admin_web_url(config: &AgentConfig) -> String {
     format!("{}/admin/ai-first", config.api_base_url)
 }
 
-fn tray_tooltip(config: &AgentConfig, login: &TrayLoginStatus) -> String {
-    if login.logged_in {
+fn tray_tooltip(config: &AgentConfig, login: &TrayLoginStatus, backend_available: bool) -> String {
+    if !backend_available {
+        "CGA-Relay - CGA Server Container unavailable".to_string()
+    } else if login.logged_in {
         format!("CGA-Relay - signed in as {}", login.username)
     } else {
         format!("CGA-Relay - {} - not signed in", config.agent_id)
@@ -614,6 +631,7 @@ fn tray_supported() -> bool {
 fn tray_icon_loaded() -> bool {
     windows_tray::embedded_icon_available(TRAY_ICON_LOGGED_IN_RESOURCE_ID)
         && windows_tray::embedded_icon_available(TRAY_ICON_LOGGED_OUT_RESOURCE_ID)
+        && windows_tray::embedded_icon_available(TRAY_ICON_WARNING_RESOURCE_ID)
 }
 
 #[cfg(not(windows))]
@@ -3815,14 +3833,16 @@ fn unescape_field(value: &str) -> String {
 #[cfg(windows)]
 mod windows_tray {
     use super::{
-        cga_admin_web_url, tray_icon_resource_id, tray_login_menu_label, tray_login_status,
-        tray_tooltip, tray_user_group_summary, AgentConfig, AgentError, AgentResult,
-        TrayLoginStatus, PROJECT_AUTHOR, PROJECT_DISPLAY_NAME, PROJECT_LICENSE, PROJECT_REPOSITORY,
-        PROJECT_SUPPORT, SERVER_NAME, TRAY_ICON_LOGGED_IN_RESOURCE_ID, VERSION,
+        cga_admin_web_url, tray_backend_available, tray_icon_resource_id, tray_login_menu_label,
+        tray_login_status, tray_tooltip, tray_user_group_summary, AgentConfig, AgentError,
+        AgentResult, TrayLoginStatus, BACKEND_NOTIFICATION_MESSAGE, BACKEND_NOTIFICATION_TITLE,
+        PROJECT_AUTHOR, PROJECT_DISPLAY_NAME, PROJECT_LICENSE, PROJECT_REPOSITORY, PROJECT_SUPPORT,
+        SERVER_NAME, TRAY_ICON_LOGGED_IN_RESOURCE_ID, TRAY_ICON_WARNING_RESOURCE_ID, VERSION,
     };
     use std::ffi::c_void;
     use std::mem::{size_of, zeroed};
     use std::ptr::{null, null_mut};
+    use std::thread;
 
     type Bool = i32;
     type Dword = u32;
@@ -3840,6 +3860,8 @@ mod windows_tray {
 
     const ID_TRAY_ICON: Uint = 1;
     const ID_LOGIN_REFRESH_TIMER: usize = 1;
+    const ID_BACKEND_HEALTH_TIMER: usize = 2;
+    const ID_WARNING_BLINK_TIMER: usize = 3;
     const IDI_APPLICATION: usize = 32512;
     const GWLP_USERDATA: i32 = -21;
     const ID_MENU_SETTINGS: usize = 1001;
@@ -3854,8 +3876,10 @@ mod windows_tray {
     const MB_ICONINFORMATION: Uint = 0x00000040;
     const MB_OK: Uint = 0x00000000;
     const NIF_ICON: Uint = 0x00000002;
+    const NIF_INFO: Uint = 0x00000010;
     const NIF_MESSAGE: Uint = 0x00000001;
     const NIF_TIP: Uint = 0x00000004;
+    const NIIF_WARNING: Dword = 0x00000002;
     const NIM_ADD: Dword = 0x00000000;
     const NIM_DELETE: Dword = 0x00000002;
     const NIM_MODIFY: Dword = 0x00000001;
@@ -3866,6 +3890,7 @@ mod windows_tray {
     const TPM_RETURNCMD: Uint = 0x00000100;
     const TPM_RIGHTBUTTON: Uint = 0x00000002;
     const TRAY_CALLBACK_MESSAGE: Uint = WM_USER + 1;
+    const BACKEND_HEALTH_RESULT_MESSAGE: Uint = WM_USER + 2;
     const WM_CONTEXTMENU: Uint = 0x007B;
     const WM_DESTROY: Uint = 0x0002;
     const WM_LBUTTONDBLCLK: Uint = 0x0203;
@@ -3935,6 +3960,9 @@ mod windows_tray {
     struct TrayState {
         config: AgentConfig,
         login: TrayLoginStatus,
+        backend_available: Option<bool>,
+        backend_check_in_flight: bool,
+        warning_icon_visible: bool,
         account_label: Vec<u16>,
         cga_admin_web_url: Vec<u16>,
         settings_url: Vec<u16>,
@@ -4031,8 +4059,7 @@ mod windows_tray {
         let class_name = wide_null("CgaRelayTrayWindow");
         let title = wide_null(SERVER_NAME);
         let login = tray_login_status(config);
-        let logged_in = login.logged_in;
-        let tooltip = tray_tooltip(config, &login);
+        let tooltip = tray_tooltip(config, &login, true);
 
         unsafe {
             let h_instance = GetModuleHandleW(null());
@@ -4075,13 +4102,22 @@ mod windows_tray {
 
             let state_ptr = Box::into_raw(Box::new(tray_state(config, settings_url, login)));
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, state_ptr as isize);
-            if let Err(error) = add_icon(hwnd, h_instance, &tooltip, logged_in) {
+            let icon_resource_id = tray_icon_resource_id(
+                &tray_state_from_hwnd(hwnd)
+                    .expect("tray state should be installed")
+                    .login,
+                true,
+            );
+            if let Err(error) = add_icon(hwnd, h_instance, &tooltip, icon_resource_id) {
                 SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
                 let _ = Box::from_raw(state_ptr);
                 DestroyWindow(hwnd);
                 return Err(error);
             }
             SetTimer(hwnd, ID_LOGIN_REFRESH_TIMER, 3000, null());
+            SetTimer(hwnd, ID_BACKEND_HEALTH_TIMER, 5000, null());
+            SetTimer(hwnd, ID_WARNING_BLINK_TIMER, 500, null());
+            start_backend_health_check(hwnd);
             FreeConsole();
             let mut msg: Msg = zeroed();
             while GetMessageW(&mut msg, 0, 0, 0) > 0 {
@@ -4089,6 +4125,8 @@ mod windows_tray {
                 DispatchMessageW(&msg);
             }
             KillTimer(hwnd, ID_LOGIN_REFRESH_TIMER);
+            KillTimer(hwnd, ID_BACKEND_HEALTH_TIMER);
+            KillTimer(hwnd, ID_WARNING_BLINK_TIMER);
             delete_icon(hwnd);
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
             let _ = Box::from_raw(state_ptr);
@@ -4103,6 +4141,9 @@ mod windows_tray {
         TrayState {
             config: config.clone(),
             login,
+            backend_available: None,
+            backend_check_in_flight: false,
+            warning_icon_visible: false,
             account_label: wide_null(&account_label),
             cga_admin_web_url: wide_null(&cga_admin_web_url(config)),
             settings_url: wide_null(settings_url),
@@ -4148,12 +4189,24 @@ mod windows_tray {
             },
             WM_DESTROY => {
                 KillTimer(hwnd, ID_LOGIN_REFRESH_TIMER);
+                KillTimer(hwnd, ID_BACKEND_HEALTH_TIMER);
+                KillTimer(hwnd, ID_WARNING_BLINK_TIMER);
                 PostQuitMessage(0);
+                0
+            }
+            BACKEND_HEALTH_RESULT_MESSAGE => {
+                apply_backend_health_result(hwnd, w_param != 0);
                 0
             }
             WM_TIMER => {
                 if w_param == ID_LOGIN_REFRESH_TIMER {
                     refresh_login_state(hwnd);
+                    0
+                } else if w_param == ID_BACKEND_HEALTH_TIMER {
+                    start_backend_health_check(hwnd);
+                    0
+                } else if w_param == ID_WARNING_BLINK_TIMER {
+                    blink_backend_warning(hwnd);
                     0
                 } else {
                     DefWindowProcW(hwnd, msg, w_param, l_param)
@@ -4165,6 +4218,7 @@ mod windows_tray {
 
     unsafe fn show_context_menu(hwnd: Hwnd) {
         refresh_login_state(hwnd);
+        start_backend_health_check(hwnd);
         let menu = CreatePopupMenu();
         if menu == 0 {
             return;
@@ -4225,8 +4279,85 @@ mod windows_tray {
         state.login = login;
         state.account_label = wide_null(&escape_menu_label(&tray_login_menu_label(&state.login)));
         state.about_text = wide_null(&tray_about_text(&state.config, &state.login));
-        let tooltip = tray_tooltip(&state.config, &state.login);
-        modify_icon(hwnd, h_instance, &tooltip, state.login.logged_in);
+        let backend_available = state.backend_available != Some(false);
+        let tooltip = tray_tooltip(&state.config, &state.login, backend_available);
+        let icon_resource_id = active_tray_icon_resource_id(state);
+        modify_icon(hwnd, h_instance, &tooltip, icon_resource_id);
+    }
+
+    unsafe fn start_backend_health_check(hwnd: Hwnd) {
+        let Some(state) = tray_state_from_hwnd_mut(hwnd) else {
+            return;
+        };
+        if state.backend_check_in_flight {
+            return;
+        }
+        state.backend_check_in_flight = true;
+        let config = state.config.clone();
+        let _ = thread::spawn(move || {
+            let backend_available = tray_backend_available(&config);
+            unsafe {
+                PostMessageW(
+                    hwnd,
+                    BACKEND_HEALTH_RESULT_MESSAGE,
+                    usize::from(backend_available),
+                    0,
+                );
+            }
+        });
+    }
+
+    unsafe fn apply_backend_health_result(hwnd: Hwnd, backend_available: bool) {
+        let h_instance = GetModuleHandleW(null());
+        let Some(state) = tray_state_from_hwnd_mut(hwnd) else {
+            return;
+        };
+        state.backend_check_in_flight = false;
+        if state.backend_available == Some(backend_available) {
+            return;
+        }
+
+        state.backend_available = Some(backend_available);
+        state.warning_icon_visible = !backend_available;
+        let tooltip = tray_tooltip(&state.config, &state.login, backend_available);
+        let icon_resource_id = active_tray_icon_resource_id(state);
+        modify_icon(hwnd, h_instance, &tooltip, icon_resource_id);
+        if !backend_available {
+            show_backend_unavailable_notification(hwnd);
+        }
+    }
+
+    unsafe fn blink_backend_warning(hwnd: Hwnd) {
+        let h_instance = GetModuleHandleW(null());
+        let Some(state) = tray_state_from_hwnd_mut(hwnd) else {
+            return;
+        };
+        if state.backend_available != Some(false) {
+            return;
+        }
+
+        state.warning_icon_visible = !state.warning_icon_visible;
+        let tooltip = tray_tooltip(&state.config, &state.login, false);
+        let icon_resource_id = active_tray_icon_resource_id(state);
+        modify_icon(hwnd, h_instance, &tooltip, icon_resource_id);
+    }
+
+    fn active_tray_icon_resource_id(state: &TrayState) -> u16 {
+        if state.backend_available == Some(false) && state.warning_icon_visible {
+            TRAY_ICON_WARNING_RESOURCE_ID
+        } else {
+            tray_icon_resource_id(&state.login, true)
+        }
+    }
+
+    unsafe fn show_backend_unavailable_notification(hwnd: Hwnd) {
+        let mut data = notify_icon_data(hwnd);
+        data.u_flags = NIF_INFO;
+        fill_wide_buffer(&mut data.sz_info_title, BACKEND_NOTIFICATION_TITLE);
+        fill_wide_buffer(&mut data.sz_info, BACKEND_NOTIFICATION_MESSAGE);
+        data.dw_info_flags = NIIF_WARNING;
+        data.u_version_or_timeout = 10_000;
+        Shell_NotifyIconW(NIM_MODIFY, &mut data);
     }
 
     unsafe fn append_menu_item(menu: Hmenu, id: usize, label: &str) {
@@ -4317,12 +4448,12 @@ mod windows_tray {
         hwnd: Hwnd,
         h_instance: Hinstance,
         tooltip: &str,
-        logged_in: bool,
+        icon_resource_id: u16,
     ) -> AgentResult<()> {
         let mut data = notify_icon_data(hwnd);
         data.u_flags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
         data.u_callback_message = TRAY_CALLBACK_MESSAGE;
-        data.h_icon = load_tray_icon(h_instance, logged_in);
+        data.h_icon = load_tray_icon(h_instance, icon_resource_id);
         fill_wide_buffer(&mut data.sz_tip, tooltip);
         if Shell_NotifyIconW(NIM_ADD, &mut data) == 0 {
             return Err(AgentError("failed to add tray icon".to_string()));
@@ -4332,10 +4463,10 @@ mod windows_tray {
         Ok(())
     }
 
-    unsafe fn modify_icon(hwnd: Hwnd, h_instance: Hinstance, tooltip: &str, logged_in: bool) {
+    unsafe fn modify_icon(hwnd: Hwnd, h_instance: Hinstance, tooltip: &str, icon_resource_id: u16) {
         let mut data = notify_icon_data(hwnd);
         data.u_flags = NIF_ICON | NIF_TIP;
-        data.h_icon = load_tray_icon(h_instance, logged_in);
+        data.h_icon = load_tray_icon(h_instance, icon_resource_id);
         fill_wide_buffer(&mut data.sz_tip, tooltip);
         Shell_NotifyIconW(NIM_MODIFY, &mut data);
     }
@@ -4357,11 +4488,7 @@ mod windows_tray {
         }
     }
 
-    unsafe fn load_tray_icon(h_instance: Hinstance, logged_in: bool) -> Hicon {
-        let resource_id = tray_icon_resource_id(&TrayLoginStatus {
-            logged_in,
-            username: String::new(),
-        });
+    unsafe fn load_tray_icon(h_instance: Hinstance, resource_id: u16) -> Hicon {
         let icon = LoadIconW(h_instance, make_int_resource(resource_id));
         if icon != 0 {
             icon

@@ -27,6 +27,7 @@ def test_runtime_config_persists_indexing_repos_root(
                 "default_token_budget": 4096,
                 "intelligence_strategy": "hybrid_semantic",
                 "parsing_strategy": "config_metadata",
+                "disabled_parser_languages": ["python", "csharp"],
             }
         }
     )
@@ -36,10 +37,24 @@ def test_runtime_config_persists_indexing_repos_root(
     assert saved["indexing"]["default_token_budget"] == 4096
     assert saved["indexing"]["intelligence_strategy"] == "hybrid_semantic"
     assert saved["indexing"]["parsing_strategy"] == "config_metadata"
+    assert saved["indexing"]["disabled_parser_languages"] == ["csharp", "python"]
+    parser_languages = {item["id"]: item for item in saved["indexing"]["parser_languages"]}
+    assert len(parser_languages) == 51
+    assert parser_languages["python"]["enabled"] is False
+    assert parser_languages["csharp"]["enabled"] is False
+    assert parser_languages["rust"]["enabled"] is True
+    assert parser_languages["starlark"]["filenames"] == [
+        "BUILD",
+        "BUILD.bazel",
+        "MODULE.bazel",
+        "WORKSPACE",
+        "WORKSPACE.bazel",
+    ]
     assert loaded["indexing"]["repos_root"] == str(repos_root)
     assert loaded["indexing"]["default_token_budget"] == 4096
     assert loaded["indexing"]["intelligence_strategy"] == "hybrid_semantic"
     assert loaded["indexing"]["parsing_strategy"] == "config_metadata"
+    assert loaded["indexing"]["disabled_parser_languages"] == ["csharp", "python"]
     assert loaded["indexing"]["repos_root_exists"] is False
 
 
@@ -77,6 +92,20 @@ def test_runtime_config_rejects_invalid_default_token_budget(
 
     with pytest.raises(runtime_config.RuntimeConfigError):
         runtime_config.update_runtime_config({"indexing": {"default_token_budget": True}})
+
+
+def test_runtime_config_rejects_invalid_disabled_parser_languages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(runtime_config, "RUNTIME_CONFIG_PATH", tmp_path / "runtime-config.json")
+
+    with pytest.raises(runtime_config.RuntimeConfigError, match="must be an array"):
+        runtime_config.update_runtime_config({"indexing": {"disabled_parser_languages": "python"}})
+
+    with pytest.raises(runtime_config.RuntimeConfigError, match="unknown parser languages: imaginary" ):
+        runtime_config.update_runtime_config(
+            {"indexing": {"disabled_parser_languages": ["python", "imaginary"]}}
+        )
 
 
 def test_runtime_config_uses_environment_smtp_password_without_persisting_it(
@@ -164,6 +193,7 @@ def test_admin_runtime_config_endpoint_updates_indexing_repos_root(
                     "default_token_budget": 2600,
                     "intelligence_strategy": "large_monorepo",
                     "parsing_strategy": "tree_sitter_ast",
+                    "disabled_parser_languages": ["perl", "php"],
                 }
             },
         )
@@ -176,11 +206,13 @@ def test_admin_runtime_config_endpoint_updates_indexing_repos_root(
     assert response.json()["indexing"]["default_token_budget"] == 2600
     assert response.json()["indexing"]["intelligence_strategy"] == "large_monorepo"
     assert response.json()["indexing"]["parsing_strategy"] == "tree_sitter_ast"
+    assert response.json()["indexing"]["disabled_parser_languages"] == ["perl", "php"]
     assert reload_response.status_code == 200
     assert reload_response.json()["indexing"]["repos_root"] == str(repos_root)
     assert reload_response.json()["indexing"]["default_token_budget"] == 2600
     assert reload_response.json()["indexing"]["intelligence_strategy"] == "large_monorepo"
     assert reload_response.json()["indexing"]["parsing_strategy"] == "tree_sitter_ast"
+    assert reload_response.json()["indexing"]["disabled_parser_languages"] == ["perl", "php"]
 
 
 def test_indexing_settings_endpoint_allows_authenticated_developer_without_admin_config_access(
@@ -199,6 +231,7 @@ def test_indexing_settings_endpoint_allows_authenticated_developer_without_admin
                 "default_token_budget": 3200,
                 "intelligence_strategy": "hybrid_semantic",
                 "parsing_strategy": "scip_lsp_semantic",
+                "disabled_parser_languages": ["cobol"],
             }
         }
     )
@@ -217,4 +250,6 @@ def test_indexing_settings_endpoint_allows_authenticated_developer_without_admin
     assert response.json()["indexing"]["default_token_budget"] == 3200
     assert response.json()["indexing"]["intelligence_strategy"] == "hybrid_semantic"
     assert response.json()["indexing"]["parsing_strategy"] == "scip_lsp_semantic"
+    assert response.json()["indexing"]["disabled_parser_languages"] == ["cobol"]
+    assert len(response.json()["indexing"]["parser_languages"]) == 51
     assert admin_response.status_code == 403

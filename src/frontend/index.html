@@ -252,7 +252,39 @@
     .settings-body { flex: 1; min-width: 0; }
     .settings-section { display: none; }
     .settings-section.active { display: block; }
+    .settings-section-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
     .settings-section h2 { margin: 0 0 4px; font-size: 18px; font-weight: 600; color: var(--text); }
+    .settings-section-collapse-btn {
+      flex: 0 0 28px;
+      width: 28px;
+      height: 28px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 1;
+      transition: color .15s, border-color .15s, background .15s;
+    }
+    .settings-section-collapse-btn:hover {
+      color: var(--text);
+      border-color: var(--border-strong);
+      background: rgba(255,255,255,.04);
+    }
+    .settings-section-collapse-btn:focus-visible {
+      outline: 2px solid rgba(74,222,128,.32);
+      outline-offset: 2px;
+    }
+    .settings-section.is-collapsed [data-settings-section-content] { display: none; }
     .settings-hint { margin: 0 0 16px; color: var(--muted); font-size: 12.5px; }
     .settings-card {
       background: var(--panel); border: 1px solid var(--border);
@@ -346,6 +378,132 @@
       font-size: 10.5px;
       font-weight: 600;
     }
+    .settings-language-panel { margin-top: 18px; }
+    .settings-language-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .settings-language-search { flex: 1 1 280px; min-width: 180px; }
+    .settings-language-search input {
+      width: 100%;
+      min-height: 36px;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      font-size: 12.5px;
+    }
+    .settings-language-search input:focus {
+      outline: 2px solid rgba(74,222,128,.24);
+      border-color: var(--accent);
+    }
+    .settings-language-groups { display: grid; gap: 14px; }
+    .parser-language-group { display: grid; gap: 8px; }
+    .parser-language-group-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 10px;
+      color: var(--muted);
+    }
+    .parser-language-group-head strong { color: var(--text); font-size: 12.5px; }
+    .parser-language-group-head span { font-size: 11px; }
+    .parser-language-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 8px;
+    }
+    .parser-language-option {
+      min-width: 0;
+      min-height: 62px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 10px 12px;
+      color: var(--text);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .parser-language-option:hover { border-color: var(--border-strong); background: rgba(255,255,255,.03); }
+    .parser-language-identity {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1 1 auto;
+    }
+    .parser-language-icon {
+      width: 30px;
+      height: 30px;
+      flex: 0 0 30px;
+      display: inline-block;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,.22));
+    }
+    .parser-language-icon svg { display: block; width: 100%; height: 100%; }
+    .parser-language-copy { min-width: 0; display: grid; gap: 4px; }
+    .parser-language-copy strong { font-size: 12.5px; font-weight: 600; }
+    .parser-language-copy small {
+      color: var(--muted);
+      font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+      font-size: 10.5px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .parser-language-switch { position: relative; flex: 0 0 36px; width: 36px; height: 20px; }
+    .parser-language-switch input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .parser-language-track {
+      position: absolute;
+      inset: 0;
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      background: rgba(148,163,184,.18);
+      transition: background .15s, border-color .15s;
+    }
+    .parser-language-track::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: transform .15s, background .15s;
+    }
+    .parser-language-switch input:focus-visible + .parser-language-track {
+      outline: 2px solid rgba(74,222,128,.32);
+      outline-offset: 2px;
+    }
+    .parser-language-switch input:checked + .parser-language-track {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+    }
+    .parser-language-switch input:checked + .parser-language-track::after {
+      transform: translateX(16px);
+      background: var(--accent);
+    }
+    .parser-language-empty {
+      min-height: 74px;
+      display: grid;
+      place-items: center;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      border-radius: 8px;
+      font-size: 12px;
+    }
+    .settings-language-footnote { margin: 10px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
     .settings-actions-indexing { justify-content: flex-start; }
     .upgrade-hero {
       display: grid;
@@ -401,6 +559,19 @@
     }
     @media (max-width: 920px) {
       .upgrade-hero { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 760px) {
+      .settings-layout { flex-direction: column; gap: 16px; }
+      .settings-subnav {
+        width: 100%;
+        min-width: 0;
+        flex-direction: row;
+        overflow-x: auto;
+      }
+      .settings-subnav .subtab-btn { flex: 0 0 auto; white-space: nowrap; }
+      .settings-language-toolbar { align-items: stretch; flex-wrap: wrap; }
+      .settings-language-search { flex-basis: 100%; }
+      .parser-language-grid { grid-template-columns: 1fr; }
     }
     .settings-copy-value {
       display: inline-flex;
@@ -3891,6 +4062,36 @@
               </div>
               <div id="settings-indexing-parsing-options" class="settings-strategy-grid"></div>
             </div>
+            <div class="settings-language-panel" aria-labelledby="settings-indexing-languages-title">
+              <div class="settings-strategy-head">
+                <h3 id="settings-indexing-languages-title">Parser Language Support</h3>
+                <span id="settings-indexing-language-status" class="settings-strategy-status">Loading</span>
+              </div>
+              <div class="settings-language-toolbar">
+                <label class="settings-language-search" for="settings-indexing-language-search">
+                  <input id="settings-indexing-language-search" type="search" placeholder="Filter languages" autocomplete="off" oninput="filterParserLanguages(this.value)" />
+                </label>
+                <button type="button" class="btn btn-sm btn-ghost" onclick="setAllParserLanguages(true)">Enable all</button>
+                <button type="button" class="btn btn-sm btn-ghost" onclick="setAllParserLanguages(false)">Disable all</button>
+              </div>
+              <div id="settings-indexing-language-groups" class="settings-language-groups"></div>
+              <p class="settings-language-footnote">Saved changes apply to subsequent index runs. Run a full index to remove all existing graph data for disabled languages.</p>
+              <template id="settings-indexing-language-option-template">
+                <label class="parser-language-option">
+                  <span class="parser-language-identity">
+                    <span class="parser-language-icon" aria-hidden="true"></span>
+                    <span class="parser-language-copy">
+                      <strong></strong>
+                      <small></small>
+                    </span>
+                  </span>
+                  <span class="parser-language-switch">
+                    <input type="checkbox" />
+                    <span class="parser-language-track" aria-hidden="true"></span>
+                  </span>
+                </label>
+              </template>
+            </div>
             <div class="settings-actions settings-actions-indexing">
               <button class="btn btn-primary" onclick="saveIndexingSettings()">Save Settings</button>
             </div>
@@ -4274,6 +4475,8 @@ const BRIEFING_COLLAPSE_STORAGE_KEY = 'cga_work_dashboard_collapsed_sections';
 let _briefingCollapsedSections = loadBriefingCollapsedSections();
 const AI_FIRST_PROJECT_EXPANDED_STORAGE_KEY = 'cga_ai_first_expanded_projects';
 let _aiFirstExpandedProjects = loadAiFirstExpandedProjects();
+const SETTINGS_COLLAPSE_STORAGE_KEY = 'cga_settings_collapsed_sections';
+let _settingsCollapsedSections = new Set();
 const LOGIN_REMEMBER_USERNAME_KEY = 'cga_login_remember_username';
 const LOGIN_USERNAME_KEY = 'cga_login_username';
 const INDEXING_INTELLIGENCE_STRATEGY_OPTIONS = Object.freeze([
@@ -4338,6 +4541,72 @@ const INDEXING_PARSING_STRATEGY_OPTIONS = Object.freeze([
   },
 ]);
 let _indexingStrategyDraft = { intelligence_strategy: 'auto', parsing_strategy: 'auto' };
+const PARSER_LANGUAGE_KIND_LABELS = Object.freeze({
+  dedicated: 'Dedicated parsers',
+  tree_sitter: 'Tree-sitter structural parsers',
+  pattern: 'Bounded pattern parsers',
+});
+const PARSER_LANGUAGE_KIND_ORDER = Object.freeze(['dedicated', 'tree_sitter', 'pattern']);
+const PARSER_LANGUAGE_ICONS = Object.freeze({
+  python: { mark: 'Py', color: '#3776ab', ink: '#ffffff' },
+  typescript: { mark: 'TS', color: '#3178c6', ink: '#ffffff' },
+  javascript: { mark: 'JS', color: '#f7df1e', ink: '#111827' },
+  powershell: { mark: 'PS', color: '#2671be', ink: '#ffffff' },
+  go: { mark: 'Go', color: '#00add8', ink: '#06232c' },
+  rust: { mark: 'Rs', color: '#ce422b', ink: '#ffffff' },
+  java: { mark: 'Jv', color: '#e76f00', ink: '#ffffff' },
+  csharp: { mark: 'C#', color: '#68217a', ink: '#ffffff' },
+  c: { mark: 'C', color: '#5c6bc0', ink: '#ffffff' },
+  cpp: { mark: 'C++', color: '#00599c', ink: '#ffffff' },
+  kotlin: { mark: 'Kt', color: '#7f52ff', ink: '#ffffff' },
+  scala: { mark: 'Sc', color: '#dc322f', ink: '#ffffff' },
+  swift: { mark: 'Sw', color: '#f05138', ink: '#ffffff' },
+  ruby: { mark: 'Rb', color: '#cc342d', ink: '#ffffff' },
+  php: { mark: 'PHP', color: '#777bb4', ink: '#ffffff' },
+  dart: { mark: 'Dt', color: '#0175c2', ink: '#ffffff' },
+  lua: { mark: 'Lua', color: '#2c2d72', ink: '#ffffff' },
+  perl: { mark: 'Pl', color: '#39457e', ink: '#ffffff' },
+  bash: { mark: '$', color: '#4eaa25', ink: '#ffffff' },
+  groovy: { mark: 'Gr', color: '#4298b8', ink: '#ffffff' },
+  fsharp: { mark: 'F#', color: '#378bba', ink: '#ffffff' },
+  zig: { mark: 'Zig', color: '#f7a41d', ink: '#1f2937' },
+  nim: { mark: 'Nim', color: '#ffe953', ink: '#1f2937' },
+  d: { mark: 'D', color: '#ba595e', ink: '#ffffff' },
+  fortran: { mark: 'Ftn', color: '#734f96', ink: '#ffffff' },
+  pascal: { mark: 'Pas', color: '#e3a008', ink: '#1f2937' },
+  r: { mark: 'R', color: '#276dc3', ink: '#ffffff' },
+  julia: { mark: 'Jl', color: '#9558b2', ink: '#ffffff' },
+  matlab: { mark: 'Mat', color: '#e16737', ink: '#ffffff' },
+  haskell: { mark: 'Hs', color: '#5d4f85', ink: '#ffffff' },
+  ocaml: { mark: 'OC', color: '#ec6813', ink: '#ffffff' },
+  erlang: { mark: 'Erl', color: '#a90533', ink: '#ffffff' },
+  objective_c: { mark: 'Obj', color: '#438eff', ink: '#ffffff' },
+  crystal: { mark: 'Cr', color: '#111827', ink: '#ffffff' },
+  visual_basic: { mark: 'VB', color: '#512bd4', ink: '#ffffff' },
+  ada: { mark: 'Ada', color: '#02a9e0', ink: '#06232c' },
+  cobol: { mark: 'Cob', color: '#005ca5', ink: '#ffffff' },
+  mojo: { mark: 'Mj', color: '#ff6b35', ink: '#1f2937' },
+  cmake: { mark: 'CM', color: '#064f8c', ink: '#ffffff' },
+  solidity: { mark: 'Sol', color: '#363636', ink: '#ffffff' },
+  sql: { mark: 'SQL', color: '#336791', ink: '#ffffff' },
+  graphql: { mark: 'GQL', color: '#e10098', ink: '#ffffff' },
+  protobuf: { mark: 'PB', color: '#4285f4', ink: '#ffffff' },
+  starlark: { mark: 'St', color: '#f4b400', ink: '#1f2937' },
+  nix: { mark: 'Nix', color: '#5277c3', ink: '#ffffff' },
+  scss: { mark: 'Sass', color: '#cf649a', ink: '#ffffff' },
+  vyper: { mark: 'Vy', color: '#333333', ink: '#ffffff' },
+  move: { mark: 'Mv', color: '#00b4d8', ink: '#06232c' },
+  cairo: { mark: 'Cai', color: '#f5c542', ink: '#1f2937' },
+  clarity: { mark: 'Cl', color: '#5546ff', ink: '#ffffff' },
+  cadence: { mark: 'Cd', color: '#00ef8b', ink: '#06232c' },
+});
+const PARSER_LANGUAGE_FILE_LABELS = Object.freeze({
+  '.🔥': '.🔥 (emoji extension)',
+});
+const PARSER_LANGUAGE_ICON_SVG_NS = 'http://www.w3.org/2000/svg';
+let _parserLanguageCatalog = [];
+let _disabledParserLanguagesDraft = new Set();
+let _parserLanguageFilter = '';
 
 const ADMIN_TAB_ROUTES = Object.freeze({
   projects: '/admin/projects',
@@ -4351,6 +4620,20 @@ const ADMIN_TAB_ROUTES = Object.freeze({
   viewer: '/admin/graph',
   settings: '/admin/settings',
 });
+const SETTINGS_SUBTAB_ROUTES = Object.freeze({
+  general: '/admin/settings',
+  graphdb: '/admin/settings/graphdb',
+  indexing: '/admin/settings/indexing',
+  integrations: '/admin/settings/integrations',
+  delegation: '/admin/settings/delegation',
+  security: '/admin/settings/security',
+  upgrade: '/admin/settings/upgrade',
+  backup: '/admin/settings/backup',
+  report: '/admin/settings/report',
+});
+const SETTINGS_PATH_SUBTABS = Object.freeze(
+  Object.fromEntries(Object.entries(SETTINGS_SUBTAB_ROUTES).map(([name, route]) => [route, name])),
+);
 const ADMIN_PATH_TABS = Object.freeze({
   '/admin': 'projects',
   '/admin/projects': 'projects',
@@ -4378,14 +4661,25 @@ function normalizedAdminPath(pathname) {
 }
 
 function adminTabFromLocation() {
-  const mapped = ADMIN_PATH_TABS[normalizedAdminPath(window.location.pathname).toLowerCase()];
+  const pathname = normalizedAdminPath(window.location.pathname).toLowerCase();
+  const mapped = ADMIN_PATH_TABS[pathname];
   if (mapped) return mapped;
+  if (pathname.startsWith('/admin/settings/')) return 'settings';
   // Default landing tab: Dashboard for admins, Project for non-admins
   return _me?.role === 'admin' ? 'briefing' : 'projects';
 }
 
+function settingsSubtabFromLocation() {
+  const pathname = normalizedAdminPath(window.location.pathname).toLowerCase();
+  return SETTINGS_PATH_SUBTABS[pathname] || 'general';
+}
+
 function adminRouteForTab(name) {
   return ADMIN_TAB_ROUTES[name] || ADMIN_TAB_ROUTES.projects;
+}
+
+function settingsRouteForSubtab(name) {
+  return SETTINGS_SUBTAB_ROUTES[name] || SETTINGS_SUBTAB_ROUTES.general;
 }
 
 function canOpenAdminTab(name) {
@@ -4393,11 +4687,25 @@ function canOpenAdminTab(name) {
 }
 
 function setAdminRoute(name, { replace = false } = {}) {
-  const route = adminRouteForTab(name);
+  const route = name === 'settings'
+    ? settingsRouteForSubtab(settingsSubtabFromLocation())
+    : adminRouteForTab(name);
   if (window.location.pathname === route) return;
   const next = new URL(window.location.href);
   next.pathname = route;
   window.history[replace ? 'replaceState' : 'pushState']({ adminTab: name }, '', next.pathname + next.search + next.hash);
+}
+
+function setSettingsSubtabRoute(name, { replace = false } = {}) {
+  const route = settingsRouteForSubtab(name);
+  if (window.location.pathname === route) return;
+  const next = new URL(window.location.href);
+  next.pathname = route;
+  window.history[replace ? 'replaceState' : 'pushState'](
+    { adminTab: 'settings', settingsSubtab: name },
+    '',
+    next.pathname + next.search + next.hash,
+  );
 }
 
 function _ensurePageBounds(state, totalRows) {
@@ -4930,6 +5238,7 @@ if (rememberUsernameCheckbox) {
 
 async function initApp() {
   try { _me = await api('GET', '/auth/me'); } catch { logout(); return; }
+  enhanceSettingsSections();
   destroyLoginBackground();
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
@@ -5116,6 +5425,14 @@ function renderIndexingSettings(cfg) {
     intelligence_strategy: intelligenceStrategy,
     parsing_strategy: parsingStrategy,
   };
+  _parserLanguageCatalog = Array.isArray(indexing.parser_languages)
+    ? indexing.parser_languages
+    : [];
+  _disabledParserLanguagesDraft = new Set(
+    Array.isArray(indexing.disabled_parser_languages)
+      ? indexing.disabled_parser_languages
+      : _parserLanguageCatalog.filter(item => item.enabled === false).map(item => item.id),
+  );
   if (input && document.activeElement !== input) input.value = indexing.repos_root || '';
   if (tokenBudgetInput) {
     tokenBudgetInput.min = String(tokenBudgetMin);
@@ -5129,6 +5446,7 @@ function renderIndexingSettings(cfg) {
   }
   renderIndexingStrategyCards('intelligence_strategy', intelligenceStrategy);
   renderIndexingStrategyCards('parsing_strategy', parsingStrategy);
+  renderParserLanguageSettings();
   renderIndexingSummary(cfg);
   if (!status) return;
   const sourceLabel = indexing.repos_root_source === 'saved'
@@ -5194,6 +5512,125 @@ function selectIndexingStrategy(field, value) {
   renderIndexingStrategyCards(field, value);
 }
 
+function createParserLanguageIconSvg(iconConfig) {
+  const svg = document.createElementNS(PARSER_LANGUAGE_ICON_SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '0 0 32 32');
+  svg.setAttribute('focusable', 'false');
+
+  const background = document.createElementNS(PARSER_LANGUAGE_ICON_SVG_NS, 'rect');
+  background.setAttribute('x', '1');
+  background.setAttribute('y', '1');
+  background.setAttribute('width', '30');
+  background.setAttribute('height', '30');
+  background.setAttribute('rx', '6');
+  background.setAttribute('fill', iconConfig.color);
+  background.setAttribute('stroke', 'rgba(255,255,255,.24)');
+
+  const mark = document.createElementNS(PARSER_LANGUAGE_ICON_SVG_NS, 'text');
+  mark.setAttribute('x', '16');
+  mark.setAttribute('y', '16.5');
+  mark.setAttribute('fill', iconConfig.ink);
+  mark.setAttribute('text-anchor', 'middle');
+  mark.setAttribute('dominant-baseline', 'middle');
+  mark.setAttribute('font-family', 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace');
+  mark.setAttribute('font-size', iconConfig.mark.length === 1 ? '15' : iconConfig.mark.length === 2 ? '11.5' : '8.5');
+  mark.setAttribute('font-weight', '800');
+  mark.textContent = iconConfig.mark;
+
+  svg.append(background, mark);
+  return svg;
+}
+
+function renderParserLanguageSettings() {
+  const root = document.getElementById('settings-indexing-language-groups');
+  const status = document.getElementById('settings-indexing-language-status');
+  const template = document.getElementById('settings-indexing-language-option-template');
+  const enabledCount = _parserLanguageCatalog.length - _disabledParserLanguagesDraft.size;
+  if (status) {
+    status.textContent = _parserLanguageCatalog.length
+      ? `${enabledCount} of ${_parserLanguageCatalog.length} enabled`
+      : 'Unavailable';
+    status.classList.toggle('warn', enabledCount === 0);
+  }
+  if (!root || !template) return;
+
+  const query = _parserLanguageFilter.trim().toLowerCase();
+  const filtered = _parserLanguageCatalog.filter(item => {
+    const searchable = [item.label, item.id, ...(item.extensions || []), ...(item.filenames || [])]
+      .join(' ')
+      .toLowerCase();
+    return !query || searchable.includes(query);
+  });
+  root.replaceChildren();
+  if (!filtered.length) {
+    const empty = document.createElement('div');
+    empty.className = 'parser-language-empty';
+    empty.textContent = 'No languages match this filter.';
+    root.appendChild(empty);
+    return;
+  }
+
+  PARSER_LANGUAGE_KIND_ORDER.forEach(kind => {
+    const items = filtered.filter(item => item.parser_kind === kind);
+    if (!items.length) return;
+    const group = document.createElement('section');
+    group.className = 'parser-language-group';
+    const heading = document.createElement('div');
+    heading.className = 'parser-language-group-head';
+    const title = document.createElement('strong');
+    title.textContent = PARSER_LANGUAGE_KIND_LABELS[kind] || kind;
+    const count = document.createElement('span');
+    count.textContent = `${items.length} shown`;
+    heading.append(title, count);
+    const grid = document.createElement('div');
+    grid.className = 'parser-language-grid';
+
+    items.forEach(item => {
+      const option = template.content.firstElementChild.cloneNode(true);
+      const checkbox = option.querySelector('input');
+      const icon = option.querySelector('.parser-language-icon');
+      const iconConfig = PARSER_LANGUAGE_ICONS[item.id];
+      const enabled = !_disabledParserLanguagesDraft.has(item.id);
+      const recognizedFiles = [...(item.extensions || []), ...(item.filenames || [])];
+      if (icon && iconConfig) {
+        icon.replaceChildren(createParserLanguageIconSvg(iconConfig));
+        icon.dataset.language = item.id;
+        icon.title = `${item.label} language`;
+      }
+      option.querySelector('strong').textContent = item.label;
+      option.querySelector('small').textContent = recognizedFiles
+        .map(file => PARSER_LANGUAGE_FILE_LABELS[file] || file)
+        .join(' · ');
+      checkbox.checked = enabled;
+      checkbox.setAttribute('aria-label', `${enabled ? 'Disable' : 'Enable'} ${item.label} parser`);
+      checkbox.addEventListener('change', () => toggleParserLanguage(item.id, checkbox.checked));
+      grid.appendChild(option);
+    });
+
+    group.append(heading, grid);
+    root.appendChild(group);
+  });
+}
+
+function toggleParserLanguage(languageId, enabled) {
+  if (!_parserLanguageCatalog.some(item => item.id === languageId)) return;
+  if (enabled) _disabledParserLanguagesDraft.delete(languageId);
+  else _disabledParserLanguagesDraft.add(languageId);
+  renderParserLanguageSettings();
+}
+
+function setAllParserLanguages(enabled) {
+  _disabledParserLanguagesDraft = enabled
+    ? new Set()
+    : new Set(_parserLanguageCatalog.map(item => item.id));
+  renderParserLanguageSettings();
+}
+
+function filterParserLanguages(value) {
+  _parserLanguageFilter = String(value || '');
+  renderParserLanguageSettings();
+}
+
 async function saveIndexingSettings() {
   const input = document.getElementById('settings-indexing-repos-root');
   const tokenBudgetInput = document.getElementById('settings-indexing-token-budget');
@@ -5213,6 +5650,7 @@ async function saveIndexingSettings() {
         default_token_budget: tokenBudget,
         intelligence_strategy: _indexingStrategyDraft.intelligence_strategy || 'auto',
         parsing_strategy: _indexingStrategyDraft.parsing_strategy || 'auto',
+        disabled_parser_languages: Array.from(_disabledParserLanguagesDraft).sort(),
       },
     });
     _runtimeConfig = cfg;
@@ -5224,17 +5662,112 @@ async function saveIndexingSettings() {
   }
 }
 
-function switchSettingsSubtab(name, btn) {
+function switchSettingsSubtab(name, btn, options = {}) {
+  const nextName = SETTINGS_SUBTAB_ROUTES[name] ? name : 'general';
   document.querySelectorAll('#pane-settings .settings-section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('#settings-subnav .subtab-btn').forEach(b => b.classList.remove('active'));
-  const section = document.getElementById('settings-section-' + name);
+  const section = document.getElementById('settings-section-' + nextName);
   if (section) section.classList.add('active');
-  const activeBtn = btn || document.querySelector(`#settings-subnav .subtab-btn[data-subtab="${name}"]`);
+  const activeBtn = nextName === name && btn
+    ? btn
+    : document.querySelector(`#settings-subnav .subtab-btn[data-subtab="${nextName}"]`);
   if (activeBtn) activeBtn.classList.add('active');
-  if (name === 'upgrade') loadUpgradeStatus();
-  if (name === 'backup') loadBackups();
-  if (name === 'delegation') loadMicrosoftAdoStatus();
-  if (name === 'report') initWsrTemplateEditor();
+  if (options.updateUrl !== false) {
+    setSettingsSubtabRoute(nextName, { replace: Boolean(options.replace) || nextName !== name });
+  }
+  if (nextName === 'upgrade') loadUpgradeStatus();
+  if (nextName === 'backup') loadBackups();
+  if (nextName === 'delegation') loadMicrosoftAdoStatus();
+  if (nextName === 'report') initWsrTemplateEditor();
+}
+
+function settingsCollapseStorageKey() {
+  const username = encodeURIComponent(String(_me?.username || 'anonymous'));
+  return `${SETTINGS_COLLAPSE_STORAGE_KEY}:${username}`;
+}
+
+function loadSettingsCollapsedSections() {
+  try {
+    const raw = localStorage.getItem(settingsCollapseStorageKey());
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveSettingsCollapsedSections() {
+  try {
+    localStorage.setItem(settingsCollapseStorageKey(), JSON.stringify([..._settingsCollapsedSections]));
+  } catch {}
+}
+
+function settingsSectionBodyId(sectionKey) {
+  return `settings-section-${sectionKey}-body`;
+}
+
+function applySettingsSectionCollapse(sectionKey) {
+  const section = document.getElementById(`settings-section-${sectionKey}`);
+  if (!section) return;
+  const collapsed = _settingsCollapsedSections.has(sectionKey);
+  section.classList.toggle('is-collapsed', collapsed);
+  const button = section.querySelector('[data-settings-section-collapse]');
+  if (!button) return;
+  const label = button.dataset.settingsSectionLabel || 'section';
+  button.textContent = collapsed ? '\u25B8' : '\u25BE';
+  button.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  button.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${label}`);
+  button.title = `${collapsed ? 'Expand' : 'Collapse'} section`;
+}
+
+function enhanceSettingsSections() {
+  _settingsCollapsedSections = loadSettingsCollapsedSections();
+  document.querySelectorAll('#pane-settings .settings-section').forEach(section => {
+    const sectionKey = section.id.replace(/^settings-section-/, '');
+    if (!sectionKey) return;
+    let header = [...section.children].find(child => child.classList?.contains('settings-section-head'));
+    if (!header) {
+      const heading = [...section.children].find(child => child.tagName === 'H2');
+      if (!heading) return;
+      header = document.createElement('div');
+      header.className = 'settings-section-head';
+      section.insertBefore(header, heading);
+      header.appendChild(heading);
+    }
+
+    let content = [...section.children].find(child => child.hasAttribute?.('data-settings-section-content'));
+    if (!content) {
+      content = document.createElement('div');
+      content.id = settingsSectionBodyId(sectionKey);
+      content.setAttribute('data-settings-section-content', '');
+      [...section.children]
+        .filter(child => child !== header)
+        .forEach(child => content.appendChild(child));
+      section.appendChild(content);
+    }
+
+    let button = header.querySelector('[data-settings-section-collapse]');
+    if (!button) {
+      const heading = header.querySelector('h2');
+      button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'settings-section-collapse-btn';
+      button.setAttribute('data-settings-section-collapse', sectionKey);
+      button.dataset.settingsSectionLabel = heading?.textContent?.trim() || 'section';
+      button.setAttribute('aria-controls', content.id);
+      button.addEventListener('click', () => {
+        if (_settingsCollapsedSections.has(sectionKey)) {
+          _settingsCollapsedSections.delete(sectionKey);
+        } else {
+          _settingsCollapsedSections.add(sectionKey);
+        }
+        saveSettingsCollapsedSections();
+        applySettingsSectionCollapse(sectionKey);
+      });
+      header.appendChild(button);
+    }
+    applySettingsSectionCollapse(sectionKey);
+  });
 }
 
 // ── Upgrade Center subtab ────────────────────────────────────────────────
@@ -5544,7 +6077,10 @@ function switchTab(name, btn, options = {}) {
     }, 5000);
   }
   if (nextName === 'report') loadWorkReport();
-  if (nextName === 'settings') loadSettings();
+  if (nextName === 'settings') {
+    switchSettingsSubtab(settingsSubtabFromLocation(), null, { updateUrl: false });
+    loadSettings();
+  }
   if (nextName === 'audit') {
     loadAudit();
     _auditPollInterval = setInterval(() => {
