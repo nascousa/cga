@@ -23,6 +23,7 @@ $installedPath = Join-Path $installedDirectory 'cga-relay.exe'
 $candidatePath = Join-Path $candidateDirectory 'cga-relay.exe'
 $process = $null
 $lockProcess = $null
+$rollbackProcess = $null
 
 try {
     New-Item -ItemType Directory -Path $installedDirectory, $candidateDirectory -Force | Out-Null
@@ -61,6 +62,56 @@ try {
     )
     if ($replacementResidue.Count -ne 0) {
         throw "Replacement residue was not removed: $($replacementResidue.FullName -join ', ')"
+    }
+
+    Copy-Item -LiteralPath $env:ComSpec -Destination $installedPath -Force
+    $originalHash = (Get-FileHash -LiteralPath $installedPath -Algorithm SHA256).Hash
+    $process = Start-Process `
+        -FilePath $installedPath `
+        -ArgumentList '/d /c ping -t 127.0.0.1 > nul' `
+        -WindowStyle Hidden `
+        -PassThru
+    $cimProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($process.Id)"
+    if (-not $cimProcess) {
+        throw 'The rollback test process did not start.'
+    }
+    $runningProcess = [pscustomobject]@{
+        ProcessId = $cimProcess.ProcessId
+        ExecutablePath = $cimProcess.ExecutablePath
+        CommandLine = "`"$installedPath`" tray"
+    }
+
+    $rollbackError = $null
+    try {
+        Install-CgaRelayCandidate `
+            -CandidatePath $candidatePath `
+            -RunningProcesses @($runningProcess) `
+            -Restart:$true | Out-Null
+    } catch {
+        $rollbackError = $_.Exception.Message
+    }
+    if ([string]::IsNullOrWhiteSpace($rollbackError) -or
+        -not $rollbackError.Contains('The original binary was restored and restarted')) {
+        throw "The failed candidate restart did not report a successful rollback: $rollbackError"
+    }
+    if ((Get-FileHash -LiteralPath $installedPath -Algorithm SHA256).Hash -ne $originalHash) {
+        throw 'The failed candidate restart did not restore the original executable.'
+    }
+    $rollbackProcesses = @(
+        Get-CimInstance Win32_Process -Filter "Name = 'cga-relay.exe'" |
+            Where-Object { $_.ExecutablePath -and
+                [System.IO.Path]::GetFullPath($_.ExecutablePath) -eq [System.IO.Path]::GetFullPath($installedPath) }
+    )
+    if ($rollbackProcesses.Count -ne 1) {
+        throw "Expected one restored Relay process, found $($rollbackProcesses.Count)."
+    }
+    $rollbackProcess = Get-Process -Id $rollbackProcesses[0].ProcessId
+    $rollbackResidue = @(
+        Get-ChildItem -LiteralPath $installedDirectory -File |
+            Where-Object Name -Like '*.cga-release-*'
+    )
+    if ($rollbackResidue.Count -ne 0) {
+        throw "Rollback residue was not removed: $($rollbackResidue.FullName -join ', ')"
     }
 
     $lockPath = Join-Path $testRoot 'transient-lock.bak'
@@ -105,6 +156,9 @@ try {
     }
     if ($lockProcess -and -not $lockProcess.HasExited) {
         Stop-Process -Id $lockProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    if ($rollbackProcess -and -not $rollbackProcess.HasExited) {
+        Stop-Process -Id $rollbackProcess.Id -Force -ErrorAction SilentlyContinue
     }
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
 }

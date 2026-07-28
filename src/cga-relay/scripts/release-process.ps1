@@ -61,6 +61,24 @@ function Remove-CgaRelayReleaseFile {
     }
 }
 
+function Start-CgaRelayProcess {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ExecutablePath,
+
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyString()]
+        [string]$Arguments
+    )
+
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $ExecutablePath
+    $startInfo.Arguments = $Arguments
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    [System.Diagnostics.Process]::Start($startInfo)
+}
+
 function Install-CgaRelayCandidate {
     param(
         [Parameter(Mandatory = $true)]
@@ -167,16 +185,35 @@ function Install-CgaRelayCandidate {
             Where-Object { $_.Arguments -match '(^|\s)tray(\s|$)' } |
             Select-Object -First 1
         if ($trayRecord) {
-            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
-            $startInfo.FileName = $trayRecord.ExecutablePath
-            $startInfo.Arguments = $trayRecord.Arguments
-            $startInfo.UseShellExecute = $false
-            $startInfo.CreateNoWindow = $true
-            $restarted = [System.Diagnostics.Process]::Start($startInfo)
-            if (-not $restarted -or $restarted.WaitForExit(1000)) {
-                throw 'The replaced CGA-Relay tray process did not remain running.'
+            try {
+                $restarted = Start-CgaRelayProcess `
+                    -ExecutablePath $trayRecord.ExecutablePath `
+                    -Arguments $trayRecord.Arguments
+                if (-not $restarted -or $restarted.WaitForExit(1000)) {
+                    throw 'The replaced CGA-Relay tray process did not remain running.'
+                }
+                $restartedProcessIds = @($restarted.Id)
+            } catch {
+                $candidateRestartError = $_.Exception.Message
+                foreach ($target in $targets) {
+                    if ($target.Replaced -and (Test-Path -LiteralPath $target.BackupPath)) {
+                        Remove-Item -LiteralPath $target.TargetPath -Force -ErrorAction SilentlyContinue
+                        Move-Item -LiteralPath $target.BackupPath -Destination $target.TargetPath -Force
+                    }
+                }
+
+                try {
+                    $restored = Start-CgaRelayProcess `
+                        -ExecutablePath $trayRecord.ExecutablePath `
+                        -Arguments $trayRecord.Arguments
+                    if (-not $restored -or $restored.WaitForExit(1000)) {
+                        throw 'The restored CGA-Relay tray process did not remain running.'
+                    }
+                } catch {
+                    throw "Candidate restart failed ($candidateRestartError). The original binary was restored, but its tray restart failed: $($_.Exception.Message)"
+                }
+                throw "Candidate restart failed ($candidateRestartError). The original binary was restored and restarted as process $($restored.Id)."
             }
-            $restartedProcessIds = @($restarted.Id)
         }
     }
 
