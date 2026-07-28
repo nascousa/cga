@@ -61,6 +61,22 @@ function Remove-CgaRelayReleaseFile {
     }
 }
 
+function Move-CgaRelayReleaseFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$SourcePath,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationPath
+    )
+
+    Move-Item `
+        -LiteralPath $SourcePath `
+        -Destination $DestinationPath `
+        -Force `
+        -ErrorAction Stop
+}
+
 function Start-CgaRelayProcess {
     param(
         [Parameter(Mandatory = $true)]
@@ -77,6 +93,40 @@ function Start-CgaRelayProcess {
     $startInfo.UseShellExecute = $false
     $startInfo.CreateNoWindow = $true
     [System.Diagnostics.Process]::Start($startInfo)
+}
+
+function Restore-CgaRelayTargets {
+    param(
+        [Parameter(Mandatory = $true)]
+        [AllowEmptyCollection()]
+        [object[]]$Targets
+    )
+
+    $restoreFailures = [System.Collections.Generic.List[string]]::new()
+    foreach ($target in $Targets) {
+        if (-not $target.OriginalBackedUp) {
+            continue
+        }
+        if (-not (Test-Path -LiteralPath $target.BackupPath)) {
+            $restoreFailures.Add("$($target.TargetPath): backup is missing")
+            continue
+        }
+
+        try {
+            if (Test-Path -LiteralPath $target.TargetPath) {
+                Remove-CgaRelayReleaseFile -Path $target.TargetPath
+            }
+            Move-CgaRelayReleaseFile `
+                -SourcePath $target.BackupPath `
+                -DestinationPath $target.TargetPath
+            $target.OriginalBackedUp = $false
+            $target.Replaced = $false
+        } catch {
+            $restoreFailures.Add("$($target.TargetPath): $($_.Exception.Message)")
+        }
+    }
+
+    $restoreFailures.ToArray()
 }
 
 function Install-CgaRelayCandidate {
@@ -133,6 +183,7 @@ function Install-CgaRelayCandidate {
                     TargetPath = $targetPath
                     StagedPath = $stagedPath
                     BackupPath = $backupPath
+                    OriginalBackedUp = $false
                     Replaced = $false
                 }
             }
@@ -156,21 +207,33 @@ function Install-CgaRelayCandidate {
         }
 
         foreach ($target in $targets) {
-            Move-Item -LiteralPath $target.TargetPath -Destination $target.BackupPath -Force
+            Move-CgaRelayReleaseFile `
+                -SourcePath $target.TargetPath `
+                -DestinationPath $target.BackupPath
+            $target.OriginalBackedUp = $true
             try {
-                Move-Item -LiteralPath $target.StagedPath -Destination $target.TargetPath -Force
+                Move-CgaRelayReleaseFile `
+                    -SourcePath $target.StagedPath `
+                    -DestinationPath $target.TargetPath
                 $target.Replaced = $true
             } catch {
-                Move-Item -LiteralPath $target.BackupPath -Destination $target.TargetPath -Force
-                throw
+                $promotionError = $_.Exception.Message
+                try {
+                    Move-CgaRelayReleaseFile `
+                        -SourcePath $target.BackupPath `
+                        -DestinationPath $target.TargetPath
+                    $target.OriginalBackedUp = $false
+                } catch {
+                    throw "Candidate promotion failed ($promotionError). Immediate restoration also failed: $($_.Exception.Message)"
+                }
+                throw "Candidate promotion failed: $promotionError"
             }
         }
     } catch {
-        foreach ($target in $targets) {
-            if ($target.Replaced -and (Test-Path -LiteralPath $target.BackupPath)) {
-                Remove-Item -LiteralPath $target.TargetPath -Force -ErrorAction SilentlyContinue
-                Move-Item -LiteralPath $target.BackupPath -Destination $target.TargetPath -Force
-            }
+        $replacementError = $_.Exception.Message
+        $restoreFailures = @(Restore-CgaRelayTargets -Targets $targets)
+        if ($restoreFailures.Count -gt 0) {
+            throw "Replacement failed ($replacementError). Rollback also failed: $($restoreFailures -join '; '). Failed-path backups were retained."
         }
         throw
     } finally {
@@ -195,11 +258,9 @@ function Install-CgaRelayCandidate {
                 $restartedProcessIds = @($restarted.Id)
             } catch {
                 $candidateRestartError = $_.Exception.Message
-                foreach ($target in $targets) {
-                    if ($target.Replaced -and (Test-Path -LiteralPath $target.BackupPath)) {
-                        Remove-Item -LiteralPath $target.TargetPath -Force -ErrorAction SilentlyContinue
-                        Move-Item -LiteralPath $target.BackupPath -Destination $target.TargetPath -Force
-                    }
+                $restoreFailures = @(Restore-CgaRelayTargets -Targets $targets)
+                if ($restoreFailures.Count -gt 0) {
+                    throw "Candidate restart failed ($candidateRestartError). Rollback also failed: $($restoreFailures -join '; '). Failed-path backups were retained."
                 }
 
                 try {
@@ -210,9 +271,9 @@ function Install-CgaRelayCandidate {
                         throw 'The restored CGA-Relay tray process did not remain running.'
                     }
                 } catch {
-                    throw "Candidate restart failed ($candidateRestartError). The original binary was restored, but its tray restart failed: $($_.Exception.Message)"
+                    throw "Candidate restart failed ($candidateRestartError). The original binaries were restored, but the tray restart failed: $($_.Exception.Message)"
                 }
-                throw "Candidate restart failed ($candidateRestartError). The original binary was restored and restarted as process $($restored.Id)."
+                throw "Candidate restart failed ($candidateRestartError). The original binaries were restored and the tray restarted as process $($restored.Id)."
             }
         }
     }
