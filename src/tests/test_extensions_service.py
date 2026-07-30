@@ -5,7 +5,7 @@ import json
 import pytest
 
 from backend.extensions.models import ExtensionConfigUpdate
-from backend.extensions.registry import AZURE_POLICY_EXTENSION_ID, _normalize_repo_path
+from backend.extensions.registry import AZURE_POLICY_EXTENSION_ID, _normalize_repo_path, validate_extension_config
 from backend.extensions.service import _default_repo_path, get_extension_config, list_extension_runs, run_project_extension, update_extension_config
 from backend.schedules.models import ScheduledTaskCreate
 from backend.schedules.service import create_scheduled_task, execute_scheduled_task
@@ -53,6 +53,38 @@ def test_default_repo_path_prefers_explicit_project_path(tmp_path) -> None:
 
 def test_default_repo_path_without_project_is_empty() -> None:
     assert _default_repo_path(None) == ""
+
+
+def test_proxy_config_requires_subscription_scope_and_disables_compliance() -> None:
+    config = {
+        "azure_monitor_enabled": True,
+        "subscription_id": "00000000-0000-0000-0000-000000000001",
+        "auth_mode": "proxy",
+        "proxy_endpoint": "https://cga-policy-proxy.example",
+        "proxy_key_env": "CGA_PROXY_KEY",
+        "include_compliance": False,
+    }
+
+    validate_extension_config(AZURE_POLICY_EXTENSION_ID, config, require_complete=True)
+
+    with pytest.raises(ValueError, match="include_compliance=false"):
+        validate_extension_config(
+            AZURE_POLICY_EXTENSION_ID,
+            {**config, "include_compliance": True},
+            require_complete=True,
+        )
+    with pytest.raises(ValueError, match="subscription scope only"):
+        validate_extension_config(
+            AZURE_POLICY_EXTENSION_ID,
+            {**config, "subscription_id": "", "management_group_id": "platform"},
+            require_complete=True,
+        )
+    with pytest.raises(ValueError, match="proxy_key"):
+        validate_extension_config(
+            AZURE_POLICY_EXTENSION_ID,
+            {**config, "proxy_key": "must-not-be-persisted"},
+            require_complete=True,
+        )
 
 
 @pytest.mark.asyncio

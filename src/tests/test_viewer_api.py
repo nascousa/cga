@@ -425,7 +425,22 @@ def test_admin_exposes_settings_tab() -> None:
 def test_admin_deep_links_are_served() -> None:
     client = TestClient(app)
 
-    for path in ["/admin/projects", "/admin/users", "/admin/audit", "/admin/graph", "/admin/settings"]:
+    paths = [
+        "/admin/projects",
+        "/admin/users",
+        "/admin/audit",
+        "/admin/graph",
+        "/admin/settings",
+        "/admin/settings/graphdb",
+        "/admin/settings/indexing",
+        "/admin/settings/integrations",
+        "/admin/settings/delegation",
+        "/admin/settings/security",
+        "/admin/settings/upgrade",
+        "/admin/settings/backup",
+        "/admin/settings/report",
+    ]
+    for path in paths:
         response = client.get(path)
         assert response.status_code == 200
         assert "<title>CGA (Context Graph Agent)</title>" in response.text

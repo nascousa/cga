@@ -5,9 +5,11 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 from pathlib import Path
 
+from backend import runtime_config
 from backend.graph import schema as S
 from backend.indexer.call_analyzer import RawCall
-from backend.indexer.parser import ParsedFile, ParsedVariable, ParsedVariableFlow
+from backend.indexer.hasher import sha256_file
+from backend.indexer.parser import ParsedFile, ParsedSymbol, ParsedVariable, ParsedVariableFlow
 from backend.indexer.pipeline import IndexPipeline
 
 
@@ -81,7 +83,6 @@ def test_write_cross_scope_variable_flows_writes_argument_and_return_edges() -> 
 
 def test_index_full_clears_repo_subgraph_before_rebuild(tmp_path: Path) -> None:
     graph = MagicMock()
-    query_result = MagicMock()
 
     def side_effect(cypher: str, params: dict | None = None):
         result = MagicMock()
@@ -201,6 +202,42 @@ def test_index_incremental_resolves_relative_paths_under_repo_root(tmp_path: Pat
     assert pipeline._index_file.call_args.args[1] == str(source_file)
 
 
+def test_index_incremental_accepts_registered_conventional_filename(
+    tmp_path: Path, monkeypatch
+) -> None:
+    graph = MagicMock()
+    query_result = MagicMock()
+    query_result.result_set = []
+    graph.query.return_value = query_result
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    source_file = repo_root / "CMakeLists.txt"
+    source_file.write_text("project(sample)", encoding="utf-8")
+    monkeypatch.setattr("backend.indexer.pipeline.SourceParser", MagicMock)
+    monkeypatch.setattr(
+        runtime_config,
+        "get_disabled_parser_languages",
+        lambda: frozenset(),
+    )
+    pipeline = IndexPipeline(graph)
+    pipeline._index_file = MagicMock(return_value={
+        "files": 1,
+        "skipped": 0,
+        "symbols": 0,
+        "calls": 0,
+        "imports": 0,
+        "variables": 0,
+        "variable_flows": 0,
+        "errors": 0,
+    })
+    pipeline._count_symbols = MagicMock(return_value=0)
+
+    pipeline.index_incremental(str(repo_root), [str(source_file)])
+
+    pipeline._index_file.assert_called_once()
+    assert pipeline._index_file.call_args.args[1] == str(source_file)
+
+
 def test_index_file_clears_existing_file_subgraph_before_rewrite(tmp_path: Path) -> None:
     graph = MagicMock()
     repo_root = tmp_path / "repo"
@@ -225,6 +262,42 @@ def test_index_file_clears_existing_file_subgraph_before_rewrite(tmp_path: Path)
     assert delete_idx < merge_idx
 
 
+def test_index_file_writes_calls_from_registered_language(tmp_path: Path) -> None:
+    graph = MagicMock()
+    query_result = MagicMock()
+    query_result.result_set = []
+    graph.query.return_value = query_result
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    file_path = repo_root / "Formatter.cs"
+    file_path.write_text("public class Formatter {}", encoding="utf-8")
+    parsed = ParsedFile(path=str(file_path), language="csharp")
+    parsed.symbols.extend(
+        [
+            ParsedSymbol("Build", "Formatter.Build", "method", str(file_path), 1, 1),
+            ParsedSymbol("Normalize", "Formatter.Normalize", "method", str(file_path), 1, 1),
+        ]
+    )
+    parsed.calls.append(RawCall("Formatter.Build", "Normalize"))
+    pipeline = IndexPipeline(graph)
+    pipeline._parser.parse = MagicMock(return_value=parsed)
+
+    stats = pipeline._index_file(str(repo_root), str(file_path), {}, force=True)
+
+    assert stats["calls"] == 1
+    assert any(
+        call.args[0] == S.BATCH_EDGE_SYMBOL_CALLS
+        and call.args[1]["rows"] == [
+            {
+                "caller_qname": "Formatter.Build",
+                "callee_qname": "Formatter.Normalize",
+            }
+        ]
+        for call in graph.query.call_args_list
+        if len(call.args) > 1
+    )
+
+
 def test_index_incremental_deletes_missing_file_subgraph_without_error(tmp_path: Path) -> None:
     graph = MagicMock()
     repo_root = tmp_path / "repo"
@@ -242,3 +315,71 @@ def test_index_incremental_deletes_missing_file_subgraph_without_error(tmp_path:
         for call in graph.query.call_args_list
         if len(call.args) > 1
     )
+
+
+def test_index_incremental_deletes_graph_for_disabled_language(
+    tmp_path: Path, monkeypatch
+) -> None:
+    graph = MagicMock()
+    query_result = MagicMock()
+    query_result.result_set = []
+    graph.query.return_value = query_result
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    source_file = repo_root / "service.py"
+    source_file.write_text("def run():\n    return True\n", encoding="utf-8")
+    monkeypatch.setattr(
+        runtime_config,
+        "get_disabled_parser_languages",
+        lambda: frozenset({"python"}),
+    )
+    monkeypatch.setattr("backend.indexer.pipeline.SourceParser", MagicMock)
+    pipeline = IndexPipeline(graph)
+    pipeline._load_symbol_map = MagicMock(return_value={})
+    pipeline._count_symbols = MagicMock(return_value=0)
+    pipeline._parser.parse = MagicMock()
+
+    stats = pipeline.index_incremental(str(repo_root), [str(source_file)])
+
+    assert stats["skipped"] == 1
+    pipeline._parser.parse.assert_not_called()
+    assert any(
+        call.args[0] == S.DELETE_FILE and call.args[1]["file_path"] == str(source_file)
+        for call in graph.query.call_args_list
+        if len(call.args) > 1
+    )
+
+
+def test_index_file_gates_resolved_language_for_shared_extension(
+    tmp_path: Path, monkeypatch
+) -> None:
+    graph = MagicMock()
+    query_result = MagicMock()
+    query_result.result_set = []
+    graph.query.return_value = query_result
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    source_file = repo_root / "Formatter.m"
+    source_file.write_text("@interface Formatter\n@end\n", encoding="utf-8")
+    parser = MagicMock()
+    parser.parse.return_value = ParsedFile(path=str(source_file), language="objective_c")
+    monkeypatch.setattr("backend.indexer.pipeline.SourceParser", lambda: parser)
+    pipeline = IndexPipeline(graph)
+    pipeline._get_stored_hash = MagicMock(return_value=sha256_file(str(source_file)))
+
+    stats = pipeline._index_file(
+        str(repo_root),
+        str(source_file),
+        {},
+        force=False,
+        disabled_languages=frozenset({"objective_c"}),
+    )
+
+    assert stats["skipped"] == 1
+    parser.parse.assert_called_once_with(str(source_file))
+    assert any(
+        call.args[0] == S.DELETE_FILE and call.args[1]["file_path"] == str(source_file)
+        for call in graph.query.call_args_list
+        if len(call.args) > 1
+    )
+    assert not any(call.args[0] == S.MERGE_FILE for call in graph.query.call_args_list)

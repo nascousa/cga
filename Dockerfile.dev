@@ -22,7 +22,11 @@ RUN pip install --no-cache-dir \
     falkordb \
     structlog \
     "prometheus-client" \
-    tree-sitter \
+    tree-sitter==0.25.2 \
+    tree-sitter-language-pack==0.13.0 \
+    tree-sitter-c-sharp==0.23.1 \
+    tree-sitter-embedded-template==0.25.0 \
+    tree-sitter-yaml==0.7.2 \
     httpx \
     mcp \
     sse-starlette

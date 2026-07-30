@@ -17,8 +17,14 @@ impl Command {
     fn new(program: impl AsRef<OsStr>) -> Self {
         let mut command = ProcessCommand::new(program);
         let current_thread = thread::current();
-        let scope = current_thread.name().unwrap_or("cga-relay-agent-cli-test");
-        command.env("CGA_RELAY_TEST_INSTANCE_SCOPE", scope);
+        let scope = current_thread
+            .name()
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("{:?}", current_thread.id()));
+        command.env(
+            "CGA_RELAY_TEST_INSTANCE_SCOPE",
+            format!("{}:{scope}", std::process::id()),
+        );
         Self(command)
     }
 }
@@ -194,6 +200,26 @@ fn write_http_response(stream: &mut TcpStream, status: u16) {
     stream
         .write_all(response.as_bytes())
         .expect("response should be writable");
+}
+
+fn spawn_health_server() -> (String, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = thread::spawn(move || {
+        let mut stream = listener.accept().unwrap().0;
+        let request = read_http_request(&mut stream);
+        assert!(
+            request.starts_with("GET /health HTTP/1.1"),
+            "request: {request}"
+        );
+        let body = "{\"ok\":true}";
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        stream.write_all(response.as_bytes()).unwrap();
+    });
+    (format!("http://127.0.0.1:{port}"), server)
 }
 
 fn spawn_checkpoint_server() -> (u16, thread::JoinHandle<Vec<String>>) {
@@ -668,10 +694,11 @@ fn doctor_reports_redacted_status() {
 
 #[test]
 fn tray_status_reports_notification_area_mode_without_starting_loop() {
+    let (api_base_url, server) = spawn_health_server();
     let tmp = TestDir::new("tray-status");
     let repo = tmp.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
-    let config = write_safe_config(tmp.path(), &repo, &[]);
+    let config = write_safe_config(tmp.path(), &repo, &[("API_BASE_URL", api_base_url)]);
     let output = Command::new(agent_bin())
         .args([
             "tray",
@@ -690,6 +717,7 @@ fn tray_status_reports_notification_area_mode_without_starting_loop() {
     assert!(out.contains("\"tooltip\":\"CGA-Relay - dev-agent-01 - not signed in\""));
     assert!(out.contains("\"icon\":\"embedded-resource:4\""));
     assert!(out.contains("\"icon_variant\":\"gray\""));
+    assert!(out.contains("\"backend_available\":true"));
     assert!(out.contains("\"logged_in\":false"));
     assert!(out.contains("\"username\":\"\""));
     assert!(out.contains(
@@ -712,10 +740,61 @@ fn tray_status_reports_notification_area_mode_without_starting_loop() {
     }
     assert!(!out.contains(TEST_SECRET));
     assert!(!stderr(&output).contains(TEST_SECRET));
+    server.join().unwrap();
+}
+
+#[test]
+fn tray_status_warns_when_cga_server_container_is_unavailable() {
+    let unavailable_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let unavailable_port = unavailable_listener.local_addr().unwrap().port();
+    drop(unavailable_listener);
+
+    let tmp = TestDir::new("tray-status-backend-unavailable");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(
+        tmp.path(),
+        &repo,
+        &[(
+            "API_BASE_URL",
+            format!("http://127.0.0.1:{unavailable_port}"),
+        )],
+    );
+
+    let output = run_agent(&[
+        "tray",
+        "--config",
+        config.to_str().unwrap(),
+        "--status",
+        "--json",
+    ]);
+
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    let out = stdout(&output);
+    assert!(out.contains("\"backend_available\":false"), "stdout: {out}");
+    assert!(
+        out.contains("\"icon\":\"embedded-resource:7\""),
+        "stdout: {out}"
+    );
+    assert!(
+        out.contains("\"icon_variant\":\"yellow-blink\""),
+        "stdout: {out}"
+    );
+    assert!(
+        out.contains("\"notification_title\":\"CGA Server Container is unavailable\""),
+        "stdout: {out}"
+    );
+    assert!(
+        out.contains(
+            "\"notification_message\":\"Start the CGA Server Container to reconnect CGA-Relay.\""
+        ),
+        "stdout: {out}"
+    );
 }
 
 #[test]
 fn tray_status_uses_color_icon_and_username_when_signed_in() {
+    let (api_base_url, server) = spawn_health_server();
     let tmp = TestDir::new("tray-status-signed-in");
     let repo = tmp.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -734,7 +813,7 @@ fn tray_status_uses_color_icon_and_username_when_signed_in() {
         "version\t1\ngroup\t1\tTeam Alpha\tPrimary access\t1\nproject\t1\tAlpha Project\tALPHA12345\tC:/repo\t1\n",
     )
     .unwrap();
-    let config = write_safe_config(tmp.path(), &repo, &[]);
+    let config = write_safe_config(tmp.path(), &repo, &[("API_BASE_URL", api_base_url)]);
 
     let output = Command::new(agent_bin())
         .args([
@@ -761,6 +840,7 @@ fn tray_status_uses_color_icon_and_username_when_signed_in() {
     assert!(out.contains("signed in as dev@example.com"));
     assert!(!out.contains(TEST_SECRET));
     assert!(!stderr(&output).contains(TEST_SECRET));
+    server.join().unwrap();
     if cfg!(windows) {
         let persisted_session = fs::read_to_string(state.join("account-session.json")).unwrap();
         assert!(persisted_session.contains("\"access_token_dpapi\":"));
@@ -771,6 +851,7 @@ fn tray_status_uses_color_icon_and_username_when_signed_in() {
 
 #[test]
 fn tray_status_treats_expired_account_jwt_as_signed_out() {
+    let (api_base_url, server) = spawn_health_server();
     let tmp = TestDir::new("tray-status-expired");
     let repo = tmp.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -781,7 +862,7 @@ fn tray_status_treats_expired_account_jwt_as_signed_out() {
         "{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"e30.eyJzdWIiOiJkZXYiLCJleHAiOjF9.sig\"}\n",
     )
     .unwrap();
-    let config = write_safe_config(tmp.path(), &repo, &[]);
+    let config = write_safe_config(tmp.path(), &repo, &[("API_BASE_URL", api_base_url)]);
 
     let output = run_agent(&[
         "tray",
@@ -796,6 +877,7 @@ fn tray_status_treats_expired_account_jwt_as_signed_out() {
     assert!(out.contains("\"logged_in\":false"), "stdout: {out}");
     assert!(out.contains("\"icon_variant\":\"gray\""), "stdout: {out}");
     assert!(out.contains("\"username\":\"\""), "stdout: {out}");
+    server.join().unwrap();
 
     let settings = run_agent(&[
         "settings",
@@ -1862,7 +1944,7 @@ fn run_mcp(config: &Path, input: &str, extra_env: &[(&str, &str)]) -> Output {
 }
 
 #[test]
-fn second_process_is_rejected_while_first_process_holds_mutex() {
+fn concurrent_processes_allow_exactly_one_mutex_holder() {
     let tmp = TestDir::new("single-instance");
     let repo = tmp.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -1874,35 +1956,48 @@ fn second_process_is_rejected_while_first_process_holds_mutex() {
         .stderr(std::process::Stdio::piped())
         .spawn()
         .expect("first relay process should start");
+    let mut second = Command::new(agent_bin())
+        .args(["mcp", "--config", config.to_str().unwrap()])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("second relay process should start");
 
-    let mut blocked_output = None;
-    for _ in 0..20 {
-        assert!(
-            first.try_wait().unwrap().is_none(),
-            "first relay process exited before holding the mutex"
-        );
-        let output = Command::new(agent_bin())
-            .args(["doctor", "--config", config.to_str().unwrap()])
-            .output()
-            .unwrap();
-        if !output.status.success() && stderr(&output).contains("CGA-Relay is already running") {
-            blocked_output = Some(output);
+    let mut contender_exited = false;
+    for _ in 0..200 {
+        if first.try_wait().unwrap().is_some() || second.try_wait().unwrap().is_some() {
+            contender_exited = true;
             break;
         }
         thread::sleep(Duration::from_millis(10));
     }
 
-    assert!(
-        blocked_output.is_some(),
-        "second relay process was not rejected by the mutex"
-    );
     drop(first.stdin.take());
+    drop(second.stdin.take());
     let first_output = first.wait_with_output().unwrap();
+    let second_output = second.wait_with_output().unwrap();
+    let outputs = [&first_output, &second_output];
+
     assert!(
-        first_output.status.success(),
-        "stderr: {}",
-        stderr(&first_output)
+        contender_exited,
+        "neither relay process was rejected by the mutex"
     );
+    assert_eq!(
+        outputs
+            .iter()
+            .filter(|output| output.status.success())
+            .count(),
+        1,
+        "exactly one relay process should hold the mutex: first={}, second={}",
+        stderr(&first_output),
+        stderr(&second_output)
+    );
+    let rejected = outputs
+        .iter()
+        .find(|output| !output.status.success())
+        .expect("one relay process should be rejected");
+    assert!(stderr(rejected).contains("CGA-Relay is already running"));
 }
 
 #[test]

@@ -41,6 +41,8 @@ On Windows MSVC targets, the crate config enables static CRT linking, fat LTO, s
 
 The script rejects binaries that retain COFF, CodeView, or embedded PDB symbols; omit required PE mitigations or concrete CFG/CET metadata; omit the machine-wide CGA-Relay mutex import or name; retain the debug-only mutex test-scope override; contain writable-executable sections; expose common absolute build paths or test secrets; or contain UPX markers. It produces `cga-relay.exe`, a versioned Windows x64 zip, and SHA-256 files. GitHub tag releases additionally require a valid Authenticode signature and RFC 3161 timestamp.
 
+The script stages and verifies the complete candidate before touching a live installation. If one or more `cga-relay.exe` processes are running after verification succeeds, the script force-stops them, replaces every original executable path with the verified candidate, and restarts at most one prior `tray` command with its original arguments. Stdio `mcp` processes are replaced but not detached and restarted because their owning client must reconnect them. A replacement failure restores the previous executable from a same-directory backup.
+
 These controls remove routine symbol and path disclosure and raise the cost of static analysis. They do not make native code impossible to disassemble or decompile. CGA-Relay does not use UPX or similar packers because they are reversible and commonly increase endpoint-security false positives.
 
 ## Verify Release Artifacts
@@ -48,7 +50,7 @@ These controls remove routine symbol and path disclosure and raise the cost of s
 GitHub Release assets are uploaded with flat file names. Download `SHA256SUMS.txt` and every file named by it into one directory, then run `sha256sum --check SHA256SUMS.txt`. To verify only the Windows Relay assets from PowerShell, compare each asset to its sidecar and require a valid Authenticode signature before execution:
 
 ```powershell
-$version = '1.30.117'
+$version = '1.30.124'
 $assets = @('cga-relay.exe', "cga-relay-$version-windows-x64.zip")
 foreach ($asset in $assets) {
 	$expected = ((Get-Content ".\$asset.sha256" -Raw) -split '\s+')[0]
@@ -118,9 +120,11 @@ After account login, MCP tool calls and `sync` can use the user JWT relay bridge
 
 `tray` runs the same standalone Rust executable as a Windows notification-area relay with a native Shell_NotifyIcon tray icon. The executable icon uses the embedded color `R` resource, while the tray icon uses the embedded gray `R` resource when no CGA account is signed in and switches to the embedded color `R` resource after account login. It does not launch Python, Node, Cargo, PowerShell, or a project-local MCP server.
 
+At startup, and every five seconds afterward, the tray process checks `API_BASE_URL/health` on a background thread so a slow backend cannot block the Windows message loop. While the CGA backend is unavailable, the tray alternates its normal account icon with an embedded yellow `R` warning icon every 500 milliseconds. The first failed check in each continuous outage also raises a Windows system notification titled `CGA Server Container is unavailable` with the message `Start the CGA Server Container to reconnect CGA-Relay.` The warning stops as soon as health recovers; a later outage can notify again, but repeated failed checks during the same outage do not generate duplicate notifications.
+
 When `tray` starts successfully, CGA-Relay releases the startup console so the long-running tray process does not leave a blank command window on the desktop. Status and diagnostic commands such as `tray --status --json`, `doctor`, and `settings --render` keep normal terminal output.
 
-Left-clicking the tray icon shows a short running-status message. Right-clicking opens a native menu that first displays `Not signed in` or `Signed in: <username>`, followed by `Settings`, `Logs`, `About`, and `Exit` options. `Settings` opens the CGA-Relay settings page, `Logs` opens the configured log directory, `About` shows the relay version, author, repository, support link, license, relay id, and current account user groups, and `Exit` stops the tray process. Use `tray --status --json` for automation or installers that need to confirm tray support without starting the long-running message loop.
+Left-clicking the tray icon shows a short running-status message. Right-clicking opens a native menu that first displays `Not signed in` or `Signed in: <username>`, followed by `Settings`, `Logs`, `About`, and `Exit` options. `Settings` opens the CGA-Relay settings page, `Logs` opens the configured log directory, `About` shows the relay version, author, repository, support link, license, relay id, and current account user groups, and `Exit` stops the tray process. Use `tray --status --json` for automation or installers that need to confirm tray support and inspect `backend_available`, `icon_variant`, and notification text without starting the long-running message loop.
 
 Relay communication logs are written under `LOG_DIR` as hourly UTC timestamped `.log` files named `YYYYMMDD-HH.log`. The relay records MCP stdin/stdout events, local settings requests, outbound CGA HTTP requests, and CGA HTTP responses. MCP payloads, local settings request bodies, and backend HTTP request and response bodies are represented only by byte counts; payload content and payload hashes are not stored. Untrusted response headers, reason phrases, malformed responses, and oversized response prefixes are also represented only by byte counts and status codes where available. Authorization headers, bearer values, token fields, password fields, API key fields, secret fields, cookies, and form-style sensitive values are redacted before anything is appended to disk.
 

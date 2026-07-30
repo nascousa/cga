@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any, Iterable
 
+from backend.indexer.language_catalog import PARSER_LANGUAGE_IDS, parser_language_payload
+
 
 class RuntimeConfigError(ValueError):
     """Raised when a runtime configuration patch is invalid."""
@@ -102,6 +104,22 @@ def _normalize_indexing_token_budget(value: Any) -> int:
             f"{MIN_INDEXING_TOKEN_BUDGET} and {MAX_INDEXING_TOKEN_BUDGET}"
         )
     return budget
+
+
+def _normalize_disabled_parser_languages(value: Any) -> frozenset[str]:
+    if value is None:
+        return frozenset()
+    if not isinstance(value, list):
+        raise RuntimeConfigError("indexing.disabled_parser_languages must be an array")
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise RuntimeConfigError(
+            "indexing.disabled_parser_languages must contain non-empty strings"
+        )
+    normalized = frozenset(item.strip().lower() for item in value)
+    unknown = sorted(normalized - PARSER_LANGUAGE_IDS)
+    if unknown:
+        raise RuntimeConfigError(f"unknown parser languages: {', '.join(unknown)}")
+    return normalized
 
 
 def _normalize_bool(value: Any, field: str) -> bool:
@@ -325,6 +343,7 @@ def get_runtime_config(default_repos_root: str | Path | None = None) -> dict[str
         INDEXING_PARSING_STRATEGIES,
     )
     default_token_budget = get_indexing_token_budget(raw)
+    disabled_parser_languages = get_disabled_parser_languages(raw)
     return {
         "indexing": {
             "repos_root": repos_root,
@@ -339,6 +358,8 @@ def get_runtime_config(default_repos_root: str | Path | None = None) -> dict[str
             "default_token_budget_default": DEFAULT_INDEXING_TOKEN_BUDGET,
             "default_token_budget_min": MIN_INDEXING_TOKEN_BUDGET,
             "default_token_budget_max": MAX_INDEXING_TOKEN_BUDGET,
+            "disabled_parser_languages": sorted(disabled_parser_languages),
+            "parser_languages": parser_language_payload(disabled_parser_languages),
         },
         "modules": get_module_config(raw),
         "smtp": _public_smtp_config(raw),
@@ -393,6 +414,12 @@ def update_runtime_config(patch: dict[str, Any] | None) -> dict[str, Any]:
             indexing["default_token_budget"] = _normalize_indexing_token_budget(
                 indexing_patch.get("default_token_budget")
             )
+        if "disabled_parser_languages" in indexing_patch:
+            indexing["disabled_parser_languages"] = sorted(
+                _normalize_disabled_parser_languages(
+                    indexing_patch.get("disabled_parser_languages")
+                )
+            )
         raw["indexing"] = indexing
 
     if "modules" in patch:
@@ -413,6 +440,12 @@ def get_indexing_token_budget(raw: dict[str, Any] | None = None) -> int:
     data = raw if raw is not None else _read_raw_config()
     indexing = data.get("indexing") if isinstance(data.get("indexing"), dict) else {}
     return _normalize_indexing_token_budget(indexing.get("default_token_budget", DEFAULT_INDEXING_TOKEN_BUDGET))
+
+
+def get_disabled_parser_languages(raw: dict[str, Any] | None = None) -> frozenset[str]:
+    data = raw if raw is not None else _read_raw_config()
+    indexing = data.get("indexing") if isinstance(data.get("indexing"), dict) else {}
+    return _normalize_disabled_parser_languages(indexing.get("disabled_parser_languages", []))
 
 
 def get_indexing_repo_search_roots(default_roots: Iterable[Path] | None = None) -> list[Path]:

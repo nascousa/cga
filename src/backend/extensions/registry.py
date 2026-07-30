@@ -26,13 +26,15 @@ FORBIDDEN_INLINE_SECRET_KEYS = {
     "password",
     "refresh_token",
     "secret",
+    "shared_key",
     "smtp_password",
     "token",
+    "proxy_key",
     "webhook_url",
 }
 ENVIRONMENT_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 CONFIG_ENUMS = {
-    "auth_mode": {"auto", "environment", "workload_identity", "managed_identity", "azure_cli"},
+    "auth_mode": {"auto", "environment", "workload_identity", "managed_identity", "azure_cli", "proxy"},
     "model_auth_mode": {"auto", "api_key", "azure"},
     "model_api_key_header": {"api-key", "authorization"},
     "notification_min_severity": {"info", "low", "medium", "high", "critical"},
@@ -43,6 +45,7 @@ CONFIG_INTEGER_RANGES = {
     "azure_timeout_seconds": (1, 120),
     "azure_max_attempts": (1, 8),
     "max_collection_items": (1, 250_000),
+    "proxy_max_response_bytes": (1024, 50 * 1024 * 1024),
     "model_timeout_seconds": (1, 180),
     "model_max_attempts": (1, 5),
     "notification_timeout_seconds": (1, 60),
@@ -110,6 +113,9 @@ EXTENSIONS: dict[str, ExtensionDefinition] = {
             "authority_host": "https://login.microsoftonline.com",
             "arm_token_scope": "https://management.azure.com/.default",
             "managed_identity_client_id": "",
+            "proxy_endpoint": "",
+            "proxy_key_env": "AZURE_POLICY_MONITOR_PROXY_KEY",
+            "proxy_max_response_bytes": 26214400,
             "activity_subscription_ids": [],
             "include_compliance": True,
             "include_activity": True,
@@ -163,17 +169,19 @@ def validate_extension_config(
     for field, (minimum, maximum) in CONFIG_INTEGER_RANGES.items():
         if field in config:
             _config_integer(config.get(field), field, minimum, maximum)
-    for field in ("model_api_key_env", "notification_webhook_env"):
+    for field in ("model_api_key_env", "notification_webhook_env", "proxy_key_env"):
         value = str(config.get(field) or "").strip()
         if value and not ENVIRONMENT_NAME.fullmatch(value):
             raise ValueError(f"Extension configuration field {field} must be an uppercase environment variable name.")
-    for field in ("management_endpoint", "authority_host", "model_endpoint"):
+    for field in ("management_endpoint", "authority_host", "model_endpoint", "proxy_endpoint"):
         value = str(config.get(field) or "").strip()
         if value:
             _validate_https_config_url(value, field)
 
     if not require_complete:
         return
+    azure_enabled = _config_bool(config.get("azure_monitor_enabled"), False)
+    auth_mode = str(config.get("auth_mode") or "auto").strip().lower()
     if _config_bool(config.get("azure_monitor_enabled"), False) and not any(
         str(config.get(field) or "").strip()
         for field in ("subscription_id", "management_group_id", "azure_scope")
@@ -183,6 +191,17 @@ def validate_extension_config(
     management_group_scope = bool(str(config.get("management_group_id") or "").strip()) or azure_scope.startswith(
         "/providers/microsoft.management/managementgroups/"
     )
+    if azure_enabled and auth_mode == "proxy":
+        proxy_endpoint = str(config.get("proxy_endpoint") or "").strip()
+        if not proxy_endpoint:
+            raise ValueError("Proxy authentication requires proxy_endpoint.")
+        parsed_proxy = urllib.parse.urlparse(proxy_endpoint)
+        if parsed_proxy.query or parsed_proxy.fragment:
+            raise ValueError("Extension configuration field proxy_endpoint cannot contain query data or fragments.")
+        if management_group_scope:
+            raise ValueError("Proxy authentication supports subscription scope only.")
+        if _config_bool(config.get("include_compliance"), True):
+            raise ValueError("Proxy authentication requires include_compliance=false.")
     if (
         _config_bool(config.get("azure_monitor_enabled"), False)
         and _config_bool(config.get("include_activity"), True)

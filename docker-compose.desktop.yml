@@ -34,6 +34,7 @@ services:
     volumes:
       - ${CGA_BACKUP_DIR:-./data/backups}:/backups
       - ${CGA_REPOS_MOUNT:-.}:/repos:ro
+      - runtime_data:/app/data
     depends_on:
       falkordb:
         condition: service_healthy
@@ -127,3 +128,4 @@ volumes:
   falkordb_data:
   redis_data:
   postgres_data:
+  runtime_data:

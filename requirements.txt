@@ -19,7 +19,11 @@ redis[hiredis]>=5.0,<6.0
 falkordb>=1.0,<2.0
 
 # Code parsing
-tree-sitter>=0.23,<1.0
+tree-sitter==0.25.2
+tree-sitter-language-pack==0.13.0
+tree-sitter-c-sharp==0.23.1
+tree-sitter-embedded-template==0.25.0
+tree-sitter-yaml==0.7.2
 
 # Semantic embeddings
 # sentence-transformers>=5.0 required: CVE-2026-1839 affects <5.0

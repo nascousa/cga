@@ -1,9 +1,9 @@
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.119
+- **Version:** 1.30.124
 - **Status:** Published
 - **Author:** Nate Scott
-- **Date:** 2026-07-23 (CGA-Relay OS mutex single-instance enforcement)
+- **Date:** 2026-07-28 (per-user collapsible Settings sections, 51 parser language icon badges, text-only Mojo extension label, refresh-stable Admin tabs, managed Azure Policy proxy, and 30-minute monitoring)
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
@@ -84,13 +84,93 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 - **Admin Dashboard:** project registration, user access groups, indexing status, settings, schedules, and operational views.
 - **3D Graph Viewer:** visual exploration of repository relationships and graph layout controls.
 - **MCP-compatible API:** agent-facing retrieval tools for symbols, files, dependencies, imports, variable flow, and architecture queries.
-- **CGA-Relay:** one developer-machine `cga-relay`, enforced by a machine-wide OS mutex, with stdio MCP gateway, local scan/sync, branch/ref graph routing and promotion, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
+- **CGA-Relay:** one developer-machine `cga-relay`, enforced by a machine-wide OS mutex, with backend health alerts, stdio MCP gateway, local scan/sync, branch/ref graph routing and promotion, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
 - **Work Briefing Aggregation:** WA-compatible activity capture and briefing summaries inside CGA.
 - **AI-First Readiness And Evidence:** Admin APIs for readiness snapshots, GitHub/Azure DevOps/verification signals, evidence packs, PR evidence links, and policy-derived gates that combine graph, indexing, ADC, governance, and work activity signals.
 - **Schedule Automation:** admin-defined recurring jobs for BrowserAgent page tests, agent activation calls, generic HTTP tasks, and project extensions.
 - **Project Extensions:** project-scoped extension pages and runs, starting with Azure Policy Change Monitor for cloud parity, GUID/version consistency, risky-effect scans, and Docker Desktop `/repos` path mapping.
 - **Runtime Backup:** PostgreSQL and FalkorDB snapshots for local-first persistence and recovery.
 - **Upgrade Center:** admin-visible upgrade readiness, backup status, schema compatibility, relay guidance, and copyable upgrade commands.
+
+## Supported Languages And Formats
+
+CGA currently discovers and structurally indexes **51 language and format families** across **95 unique file extensions** and **8 conventional filenames**. The runtime source of truth is the dedicated dispatch in [src/backend/indexer/parser.py](src/backend/indexer/parser.py) plus the declarative registry in [src/backend/indexer/language_definitions.py](src/backend/indexer/language_definitions.py).
+
+Support means that CGA can discover the file and map its available structure into files and, where those concepts apply, symbols, imports, calls, and lightweight variable-flow relationships. Relationship depth varies by language and syntax; declarative formats do not imply executable calls or variable flows, and this is repository-context extraction rather than compiler-equivalent type or overload resolution.
+
+### Dedicated Parsers
+
+| Language | Recognized files |
+|---|---|
+| Python | `.py` |
+| TypeScript | `.ts`, `.tsx` |
+| JavaScript | `.js`, `.jsx` |
+| PowerShell | `.ps1`, `.psm1`, `.psd1` |
+| Go | `.go` |
+| Rust | `.rs` |
+| Java | `.java` |
+
+### Tree-sitter Structural Parsers
+
+These parsers use the pinned offline grammar bundle; indexing does not download grammars at runtime.
+
+| Language or format | Recognized files |
+|---|---|
+| C# | `.cs` |
+| C | `.c`, `.h` |
+| C++ | `.cpp`, `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx` |
+| Kotlin | `.kt`, `.kts` |
+| Scala | `.scala`, `.sc` |
+| Swift | `.swift` |
+| Ruby | `.rb`, `.rake`, `.gemspec`; `Gemfile`, `Rakefile` |
+| PHP | `.php`, `.phtml` |
+| Dart | `.dart` |
+| Lua | `.lua` |
+| Perl | `.pl`, `.pm` |
+| Bash and shell scripts | `.sh`, `.bash`, `.zsh` |
+| Groovy and Gradle | `.groovy`, `.gradle` |
+| F# | `.fs`, `.fsx`, `.fsi` |
+| Zig | `.zig` |
+| Nim | `.nim`, `.nims` |
+| D | `.d`, `.di` |
+| Fortran | `.f`, `.for`, `.f77`, `.f90`, `.f95`, `.f03`, `.f08` |
+| Pascal | `.pas`, `.pp`, `.inc` |
+| R | `.r`, `.rmd`, `.rnw` |
+| Julia | `.jl` |
+| MATLAB | `.m` |
+| Haskell | `.hs`, `.lhs` |
+| OCaml | `.ml`, `.mli` |
+| Erlang | `.erl`, `.hrl` |
+| Objective-C and Objective-C++ | `.m`, `.mm` |
+| Crystal | `.cr` |
+| Solidity | `.sol` |
+| SQL | `.sql` |
+| GraphQL | `.graphql`, `.gql`, `.graphqls` |
+| Protocol Buffers | `.proto` |
+| Starlark and Bazel | `.bzl`, `.star`; `BUILD`, `BUILD.bazel`, `WORKSPACE`, `WORKSPACE.bazel`, `MODULE.bazel` |
+| Nix | `.nix` |
+| SCSS | `.scss` |
+
+For the shared `.m` extension, CGA examines the source and routes Objective-C declarations such as `@interface` or `#import` to Objective-C; other `.m` files use the MATLAB parser.
+
+### Bounded Pattern Parsers
+
+The offline grammar bundle does not provide compatible grammars for these languages and formats. CGA therefore uses conservative, language-specific structural patterns rather than pretending to provide compiler-level semantics.
+
+| Language or format | Recognized files |
+|---|---|
+| Visual Basic .NET | `.vb` |
+| Ada | `.ada`, `.adb`, `.ads` |
+| COBOL | `.cob`, `.cbl`, `.cpy` |
+| Mojo | `.mojo`, `.🔥` |
+| CMake | `.cmake`; `CMakeLists.txt` |
+| Vyper | `.vy` |
+| Move | `.move` |
+| Cairo | `.cairo` |
+| Clarity | `.clar` |
+| Cadence | `.cdc` |
+
+Files and formats not listed above are not claimed as supported by the current runtime registry.
 
 ## Screenshots
 
@@ -127,7 +207,7 @@ The run is intentionally reported with nuance: one project's HPS increased under
 ## Documentation
 
 - [Docker Desktop bundle](deploy/docker-desktop/README.md) - one-click local distribution and release zip behavior.
-- [Runtime operations](docs/runtime-operations.md) - work briefing, schedules, persistence, backup, and default local runtimes.
+- [Runtime operations](docs/runtime-operations.md) - work briefing, schedules, Azure Policy proxy operations, persistence, backup, and default local runtimes.
 - [AI-first readiness](docs/ai-first-readiness.md) - readiness snapshots and observe-only evidence packs for AI-first team planning.
 - [AI-first correlation contract](docs/ai-first-correlation-contract.md) - standard task, issue, PR, and activity ids for evidence packs and traces.
 - [How CGA works](docs/how-it-works.md) - compact deep dive on graph-first retrieval, agent flow, LSPs, AST-Grep, and quality controls.
