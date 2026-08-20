@@ -158,3 +158,10 @@ This ensures the NEXT agent handling this repository knows exactly where you lef
 - **Runtime:** The restarted loopback controller is enabled for project `J4BE9NUG2A`, reports seven registered projects and a configured session, and exposes the existing incremental-index endpoint. CGA health remains `ok` at version `1.30.124`.
 - **Publication Constraint:** Do not upload the unsigned local Relay candidate as a formal asset. Tag `v1.30.124` must run the repository workflow with `-RequireSignature`; publish only after that workflow succeeds.
 - **Desktop Artifact:** `CGA-Docker-Desktop-1.30.124.zip` is 131,403,611 bytes with 215 entries and SHA-256 `85e69f6cf53755954378559a828d363522c24a45a2e75ebbd66b71d9acaf1b3d`. Direct archive validation confirmed app and Relay version `1.30.124`, the final rollback source and tests, all five parser dependency notices, zero forbidden generated/secret paths, a 133,621,248-byte API image tar, a matching checksum sidecar, and valid Compose configuration.
+
+## Output Rules Relay Synchronization
+
+- **Implementation:** Added the `output-rules --config <path>` Relay command. It uses the authenticated account session to retrieve effective project output rules, validates the `CGA-MANAGED` marker, and atomically materializes the server-rendered Markdown at `.adc\standards\output\effective.md`.
+- **Offline Safety:** Requests and response validation happen before replacement, so transport failures, missing fields, or invalid managed content leave the last successful file untouched.
+- **Validation:** `cargo test` passed 9 unit and 48 integration tests.
+- **Remaining:** Dedicated output-rule synchronization integration tests and backend endpoint integration tests remain to be added; the existing Relay suite confirms the change compiles without regressions.

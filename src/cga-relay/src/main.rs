@@ -161,15 +161,36 @@ struct ScanResult {
 }
 
 fn main() {
-    let code =
-        match single_instance::acquire().and_then(|_guard| run(env::args().skip(1).collect())) {
-            Ok(()) => 0,
-            Err(error) => {
-                eprintln!("error: {}", error.0);
-                2
-            }
-        };
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let relaunch = args.iter().any(|arg| arg == "--relaunch");
+    let code = match acquire_single_instance(relaunch).and_then(|_guard| run(args)) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("error: {}", error.0);
+            2
+        }
+    };
     process::exit(code);
+}
+
+fn acquire_single_instance(relaunch: bool) -> AgentResult<single_instance::SingleInstanceGuard> {
+    if !relaunch {
+        return single_instance::acquire();
+    }
+
+    for _ in 0..100 {
+        match single_instance::acquire() {
+            Ok(guard) => return Ok(guard),
+            Err(error) if error.0.starts_with("CGA-Relay is already running;") => {
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(AgentError(
+        "timed out waiting for the previous CGA-Relay process to exit".to_string(),
+    ))
 }
 
 fn run(args: Vec<String>) -> AgentResult<()> {
@@ -184,6 +205,7 @@ fn run(args: Vec<String>) -> AgentResult<()> {
         "projects" => cmd_projects(&args[1..]),
         "scan" => cmd_scan(&args[1..]),
         "sync" => cmd_sync(&args[1..]),
+        "output-rules" => cmd_output_rules(&args[1..]),
         "index" => cmd_index(&args[1..]),
         "refs" => cmd_refs(&args[1..]),
         "settings" => cmd_settings(&args[1..]),
@@ -208,6 +230,7 @@ fn print_help() {
     println!("  projects  Add/list central local project registry entries");
     println!("  scan      Scan the configured project root");
     println!("  sync      Scan registered projects and submit changed snapshots");
+    println!("  output-rules  Synchronize effective server-managed output rules");
     println!("  index     Index Git or explicit file changes into a default/ref graph");
     println!("  refs      Promote temporary ref graphs after merge");
     println!("  settings  Render or inspect the local account settings page");
@@ -309,6 +332,7 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
             "CGA account login expired; sign in again before syncing account projects".to_string(),
         ));
     }
+
     if developer_token.is_none() && account_token.is_none() {
         if account_session_token_expired(&account_session) {
             return Err(AgentError(
@@ -365,6 +389,46 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
         project_payloads.join(",")
     );
     Ok(())
+}
+
+fn cmd_output_rules(args: &[String]) -> AgentResult<()> {
+    let config = load_config(required_arg(args, "--config")?)?;
+    sync_output_rules(&config)?;
+    println!(
+        "{{\"ok\":true,\"path\":\"{}\"}}",
+        json_escape(&display_path(&output_rules_path(&config)))
+    );
+    Ok(())
+}
+
+fn output_rules_path(config: &AgentConfig) -> PathBuf {
+    config
+        .project_root
+        .join(".adc")
+        .join("standards")
+        .join("output")
+        .join("effective.md")
+}
+
+fn sync_output_rules(config: &AgentConfig) -> AgentResult<()> {
+    let session = read_account_session(config).unwrap_or_default();
+    let access_token = current_account_access_token(&session).ok_or_else(|| {
+        AgentError("CGA account login is required to synchronize output rules".to_string())
+    })?;
+    let url = format!(
+        "{}/api/auth/cga-relay/output-rules?project_id={}",
+        config.api_base_url, config.project_id
+    );
+    let headers = [("Authorization", format!("Bearer {access_token}"))];
+    let response = http_get_json_with_headers(config, &url, &headers)?;
+    let markdown = json_string_field(&response, "markdown")
+        .ok_or_else(|| AgentError("output-rules response did not include markdown".to_string()))?;
+    if !markdown.starts_with("<!-- CGA-MANAGED") {
+        return Err(AgentError(
+            "output-rules response is missing the CGA-MANAGED marker".to_string(),
+        ));
+    }
+    write_atomic_file(&output_rules_path(config), &markdown)
 }
 
 fn cmd_index(args: &[String]) -> AgentResult<()> {
@@ -579,7 +643,11 @@ fn tray_user_group_summary(config: &AgentConfig, login: &TrayLoginStatus) -> Str
 }
 
 fn tray_backend_available(config: &AgentConfig) -> bool {
-    http_get_json(config, &format!("{}/health", config.api_base_url)).is_ok()
+    tray_backend_check(config).is_ok()
+}
+
+fn tray_backend_check(config: &AgentConfig) -> AgentResult<()> {
+    http_get_json(config, &format!("{}/health", config.api_base_url)).map(|_| ())
 }
 
 fn tray_icon_resource_id(login: &TrayLoginStatus, backend_available: bool) -> u16 {
@@ -604,7 +672,7 @@ fn tray_icon_variant(login: &TrayLoginStatus, backend_available: bool) -> &'stat
 
 fn tray_menu_json(login: &TrayLoginStatus) -> String {
     format!(
-        "[\"{}\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Exit\"]",
+        "[\"{}\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]",
         json_escape(&tray_login_menu_label(login))
     )
 }
@@ -1114,8 +1182,36 @@ fn write_file(path: &Path, text: &str) -> AgentResult<()> {
         fs::create_dir_all(parent)
             .map_err(|err| AgentError(format!("cannot create parent dir: {err}")))?;
     }
+
     fs::write(path, text)
         .map_err(|err| AgentError(format!("cannot write {}: {err}", path.display())))
+}
+
+fn write_atomic_file(path: &Path, text: &str) -> AgentResult<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| AgentError(format!("cannot create parent dir: {err}")))?;
+    }
+    let temporary = path.with_extension("md.tmp");
+    fs::write(&temporary, text)
+        .map_err(|err| AgentError(format!("cannot write {}: {err}", temporary.display())))?;
+    let backup = path.with_extension("md.bak");
+    if path.exists() {
+        fs::rename(path, &backup)
+            .map_err(|err| AgentError(format!("cannot stage {}: {err}", path.display())))?;
+    }
+    if let Err(err) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        if backup.exists() {
+            let _ = fs::rename(&backup, path);
+        }
+        return Err(AgentError(format!(
+            "cannot replace {}: {err}",
+            path.display()
+        )));
+    }
+    let _ = fs::remove_file(backup);
+    Ok(())
 }
 
 fn write_private_file(path: &Path, text: &str) -> AgentResult<()> {
@@ -1258,18 +1354,18 @@ fn handle_settings_connection(config: &AgentConfig, mut stream: TcpStream) -> Ag
             ("OPTIONS", _) => empty_response(200),
             ("GET", "/") | ("GET", "/settings") => html_response(&settings_page_html(config, None)),
             ("POST", "/login") => match handle_settings_login(config, &request.body) {
-                Ok(message) => html_response(&settings_page_html(config, Some(&message))),
-                Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
+                Ok(message) => html_response(&settings_page_html(config, Some((&message, false)))),
+                Err(error) => html_response(&settings_page_html(config, Some((&error.0, true)))),
             },
             ("POST", "/refresh") => match handle_settings_refresh(config) {
-                Ok(message) => html_response(&settings_page_html(config, Some(&message))),
-                Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
+                Ok(message) => html_response(&settings_page_html(config, Some((&message, false)))),
+                Err(error) => html_response(&settings_page_html(config, Some((&error.0, true)))),
             },
             ("POST", "/logout") => {
                 let _ = fs::remove_file(account_session_path(config));
                 let _ = fs::remove_file(account_projects_path(config));
                 let _ = fs::remove_file(account_groups_path(config));
-                html_response(&settings_page_html(config, Some("Signed out.")))
+                html_response(&settings_page_html(config, Some(("Signed out.", false))))
             }
             ("GET", "/status.json") => json_response(&settings_status_json(config)),
             ("POST", "/api/index-git-incremental") => {
@@ -1470,7 +1566,7 @@ fn handle_settings_login(config: &AgentConfig, body: &str) -> AgentResult<String
         &[],
         &login_body,
     )
-    .map_err(|_| AgentError("CGA login failed.".to_string()))?;
+    .map_err(|err| AgentError(format!("CGA login failed: {}", err.0)))?;
     let access_token = json_string_field(&token_json, "access_token").ok_or_else(|| {
         AgentError("CGA login response did not include an access token.".to_string())
     })?;
@@ -1480,13 +1576,13 @@ fn handle_settings_login(config: &AgentConfig, body: &str) -> AgentResult<String
         &format!("{}/api/auth/me", config.api_base_url),
         &auth,
     )
-    .map_err(|_| AgentError("Could not load CGA account profile.".to_string()))?;
+    .map_err(|err| AgentError(format!("Could not load CGA account profile: {}", err.0)))?;
     let groups_json = http_get_json_with_headers(
         config,
         &format!("{}/api/auth/me/groups", config.api_base_url),
         &auth,
     )
-    .map_err(|_| AgentError("Could not load CGA account user groups.".to_string()))?;
+    .map_err(|err| AgentError(format!("Could not load CGA account user groups: {}", err.0)))?;
     let account_username =
         json_string_field(&me_json, "username").unwrap_or_else(|| username.to_string());
     let role = json_string_field(&me_json, "role").unwrap_or_default();
@@ -1518,7 +1614,7 @@ fn handle_settings_refresh(config: &AgentConfig) -> AgentResult<String> {
     ))
 }
 
-fn settings_page_html(config: &AgentConfig, message: Option<&str>) -> String {
+fn settings_page_html(config: &AgentConfig, message: Option<(&str, bool)>) -> String {
     let session = read_account_session(config).unwrap_or_default();
     let groups = refresh_account_groups(config, &session)
         .or_else(|_| load_account_groups(config))
@@ -1526,7 +1622,10 @@ fn settings_page_html(config: &AgentConfig, message: Option<&str>) -> String {
     let signed_in = current_account_access_token(&session).is_some();
     let username = session.get("username").map(String::as_str).unwrap_or("");
     let message_html = message
-        .map(|text| format!("<div class=\"notice\">{}</div>", html_escape(text)))
+        .map(|(text, is_error)| {
+            let class = if is_error { "notice notice-error" } else { "notice" };
+            format!("<div class=\"{class}\">{}</div>", html_escape(text))
+        })
         .unwrap_or_default();
     let group_html = render_account_groups(&groups, signed_in);
     let account_html = if signed_in {
@@ -1539,7 +1638,7 @@ fn settings_page_html(config: &AgentConfig, message: Option<&str>) -> String {
     };
     let stylesheet = r#"
 :root{color-scheme:dark;--bg:#070b0e;--panel:#11181d;--panel-2:#0d1317;--line:#27343b;--text:#e8f4f1;--muted:#8ea19d;--accent:#2ee6a6;--accent-2:#ffcc66;--danger:#ff7a90;--shadow:0 24px 70px rgba(0,0,0,.42)}
-*{box-sizing:border-box}html{min-height:100%}body{min-height:100%;margin:0;font-family:Segoe UI,Arial,sans-serif;background:#070b0e;color:var(--text);letter-spacing:0}body::before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,#000,transparent 82%)}main{width:min(1120px,calc(100vw - 40px));margin:0 auto;padding:36px 0 44px}.topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:18px}.eyebrow{margin:0 0 8px;color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}h1,h2{margin:0;letter-spacing:0}h1{font-size:34px;line-height:1.08}h2{font-size:20px}h3{margin:0;font-size:16px}.muted{color:var(--muted);line-height:1.55}.version-pill{border:1px solid var(--line);background:#0b1115;border-radius:999px;color:var(--accent-2);padding:8px 12px;white-space:nowrap}.notice{border:1px solid rgba(46,230,166,.38);background:rgba(46,230,166,.1);color:#d8fff2;border-radius:8px;padding:12px 14px;margin:18px 0}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:20px 0}.metric{background:rgba(17,24,29,.82);border:1px solid var(--line);border-radius:8px;padding:12px}.metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.metric strong{font-size:14px;word-break:break-word}.panel{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:22px;margin:16px 0}.account-panel{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);gap:22px;align-items:start}.account-actions{display:flex;justify-content:flex-end;align-items:flex-start;gap:10px;flex-wrap:wrap}.account-actions form{margin:0}.group-list{display:grid;gap:16px;margin-top:14px}.group-card{border:1px solid rgba(39,52,59,.78);border-radius:8px;background:rgba(8,13,16,.42);padding:14px}.group-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.login-form{display:grid;gap:14px}label span{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}input{width:100%;height:40px;border:1px solid #31434a;border-radius:8px;background:#080d10;color:var(--text);padding:0 12px;outline:none}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(46,230,166,.14)}button{height:40px;border:0;border-radius:8px;background:var(--accent);color:#03110c;font-weight:800;padding:0 16px;cursor:pointer}button.secondary{border:1px solid #34444a;background:#0a1014;color:var(--text)}table{width:100%;border-collapse:collapse;margin-top:16px;overflow:hidden}th,td{border-bottom:1px solid var(--line);text-align:left;padding:12px 10px;vertical-align:top}th{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}code{color:#b5fff0;background:#07100e;border:1px solid #1a3b34;border-radius:6px;padding:3px 6px;font-size:12px}.project-name{font-weight:700}.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800;white-space:nowrap}.ready{background:rgba(46,230,166,.14);color:#7dffd3;border:1px solid rgba(46,230,166,.35)}.pending{background:rgba(255,204,102,.13);color:#ffe0a3;border:1px solid rgba(255,204,102,.36)}.empty-state{color:var(--muted);padding:28px 10px}@media(max-width:760px){main{width:min(100vw - 24px,1120px);padding-top:24px}.topbar,.account-panel{display:block}.account-actions{justify-content:flex-start;margin-top:16px}.version-pill{display:inline-block;margin-top:14px}.status-grid{grid-template-columns:1fr}h1{font-size:28px}td,th{padding:10px 8px}}
+*{box-sizing:border-box}html{min-height:100%}body{min-height:100%;margin:0;font-family:Segoe UI,Arial,sans-serif;background:#070b0e;color:var(--text);letter-spacing:0}body::before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,#000,transparent 82%)}main{width:min(1120px,calc(100vw - 40px));margin:0 auto;padding:36px 0 44px}.topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:18px}.eyebrow{margin:0 0 8px;color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}h1,h2{margin:0;letter-spacing:0}h1{font-size:34px;line-height:1.08}h2{font-size:20px}h3{margin:0;font-size:16px}.muted{color:var(--muted);line-height:1.55}.version-pill{border:1px solid var(--line);background:#0b1115;border-radius:999px;color:var(--accent-2);padding:8px 12px;white-space:nowrap}.notice{border:1px solid rgba(46,230,166,.38);background:rgba(46,230,166,.1);color:#d8fff2;border-radius:8px;padding:12px 14px;margin:18px 0}.notice-error{border-color:rgba(255,122,144,.55);background:rgba(255,122,144,.12);color:var(--danger)}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:20px 0}.metric{background:rgba(17,24,29,.82);border:1px solid var(--line);border-radius:8px;padding:12px}.metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.metric strong{font-size:14px;word-break:break-word}.panel{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:22px;margin:16px 0}.account-panel{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);gap:22px;align-items:start}.account-actions{display:flex;justify-content:flex-end;align-items:flex-start;gap:10px;flex-wrap:wrap}.account-actions form{margin:0}.group-list{display:grid;gap:16px;margin-top:14px}.group-card{border:1px solid rgba(39,52,59,.78);border-radius:8px;background:rgba(8,13,16,.42);padding:14px}.group-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.login-form{display:grid;gap:14px}label span{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}input{width:100%;height:40px;border:1px solid #31434a;border-radius:8px;background:#080d10;color:var(--text);padding:0 12px;outline:none}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(46,230,166,.14)}button{height:40px;border:0;border-radius:8px;background:var(--accent);color:#03110c;font-weight:800;padding:0 16px;cursor:pointer}button.secondary{border:1px solid #34444a;background:#0a1014;color:var(--text)}table{width:100%;border-collapse:collapse;margin-top:16px;overflow:hidden}th,td{border-bottom:1px solid var(--line);text-align:left;padding:12px 10px;vertical-align:top}th{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}code{color:#b5fff0;background:#07100e;border:1px solid #1a3b34;border-radius:6px;padding:3px 6px;font-size:12px}.project-name{font-weight:700}.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800;white-space:nowrap}.ready{background:rgba(46,230,166,.14);color:#7dffd3;border:1px solid rgba(46,230,166,.35)}.pending{background:rgba(255,204,102,.13);color:#ffe0a3;border:1px solid rgba(255,204,102,.36)}.empty-state{color:var(--muted);padding:28px 10px}@media(max-width:760px){main{width:min(100vw - 24px,1120px);padding-top:24px}.topbar,.account-panel{display:block}.account-actions{justify-content:flex-start;margin-top:16px}.version-pill{display:inline-block;margin-top:14px}.status-grid{grid-template-columns:1fr}h1{font-size:28px}td,th{padding:10px 8px}}
 "#;
     format!(
         "<!doctype html><html data-theme=\"dark\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>CGA-Relay Settings</title><style>{stylesheet}</style></head><body><main><header class=\"topbar\"><div><p class=\"eyebrow\">CGA-Relay</p><h1>CGA-Relay Settings</h1><p class=\"muted\">Secure relay access for your CGA account.</p></div><div class=\"version-pill\">v{VERSION}</div></header><div class=\"status-grid\"><div class=\"metric\"><span>Relay</span><strong>{}</strong></div><div class=\"metric\"><span>API</span><strong>{}</strong></div></div>{message_html}{account_html}{group_html}</main></body></html>",
@@ -3381,21 +3480,7 @@ fn http_get_json_with_headers(
     url: &str,
     headers: &[(&str, String)],
 ) -> AgentResult<String> {
-    let parsed = parse_http_url(url)?;
-    let mut stream = connect_http_stream(&parsed)?;
-    let crystals = crystals_headers();
-    log_http_request(config, "GET", url, headers, &crystals, "");
-    let mut request = format!(
-        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
-        parsed.path, parsed.host
-    );
-    append_request_headers(&mut request, headers);
-    append_request_headers(&mut request, &crystals);
-    request.push_str("\r\n");
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|err| AgentError(format!("request failed: {err}")))?;
-    read_http_response(config, "GET", url, stream)?.into_success_body()
+    execute_http_request(config, "GET", url, headers, "")?.into_success_body()
 }
 
 fn http_post_json(
@@ -3413,26 +3498,101 @@ fn http_post_json_response(
     headers: &[(&str, String)],
     body: &str,
 ) -> AgentResult<HttpResponse> {
+    execute_http_request(config, "POST", url, headers, body)
+}
+
+/// Loopback-only requests can hit a stale WSL2/Docker Desktop IPv6 port-forward
+/// (TCP connect succeeds but the socket is dead); retry the same request against
+/// the other loopback address family before surfacing an error.
+fn execute_http_request(
+    config: &AgentConfig,
+    method: &str,
+    url: &str,
+    headers: &[(&str, String)],
+    body: &str,
+) -> AgentResult<HttpResponse> {
     let parsed = parse_http_url(url)?;
-    let mut stream = connect_http_stream(&parsed)?;
     let crystals = crystals_headers();
-    log_http_request(config, "POST", url, headers, &crystals, body);
-    let mut request = format!(
-        "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
-        parsed.path,
-        parsed.host,
-        body.len()
-    );
-    for (name, value) in headers {
-        request.push_str(&format!("{}: {}\r\n", name, value));
+    log_http_request(config, method, url, headers, &crystals, body);
+    let candidates = loopback_candidate_hosts(&parsed.host);
+    let mut last_error: Option<AgentError> = None;
+    for (index, candidate_host) in candidates.iter().enumerate() {
+        match execute_http_request_once(
+            config,
+            method,
+            candidate_host,
+            &parsed,
+            headers,
+            body,
+            &crystals,
+        ) {
+            Ok(response) => return Ok(response),
+            Err(err) => {
+                if index + 1 < candidates.len() {
+                    log_communication(
+                        config,
+                        "http.failover",
+                        &format!(
+                            "method={method}\nurl={}\nfailed_candidate={candidate_host}\nerror={}\nretrying_candidate={}",
+                            redact_sensitive_text(url),
+                            err.0,
+                            candidates[index + 1]
+                        ),
+                    );
+                }
+                last_error = Some(err);
+            }
+        }
     }
-    append_request_headers(&mut request, &crystals);
+    Err(last_error.unwrap_or_else(|| AgentError("no loopback address available".to_string())))
+}
+
+fn execute_http_request_once(
+    config: &AgentConfig,
+    method: &str,
+    candidate_host: &str,
+    parsed: &ParsedUrl,
+    headers: &[(&str, String)],
+    body: &str,
+    crystals: &[(String, String)],
+) -> AgentResult<HttpResponse> {
+    let mut stream = connect_http_stream(candidate_host, parsed.port)
+        .map_err(|err| AgentError(format!("{candidate_host}:{} {}", parsed.port, err.0)))?;
+    let mut request = if method == "GET" {
+        format!(
+            "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
+            parsed.path, parsed.host
+        )
+    } else {
+        format!(
+            "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
+            parsed.path,
+            parsed.host,
+            body.len()
+        )
+    };
+    append_request_headers(&mut request, headers);
+    append_request_headers(&mut request, crystals);
     request.push_str("\r\n");
-    request.push_str(body);
+    if method != "GET" {
+        request.push_str(body);
+    }
     stream
         .write_all(request.as_bytes())
-        .map_err(|err| AgentError(format!("request failed: {err}")))?;
-    read_http_response(config, "POST", url, stream)
+        .map_err(|err| AgentError(format!("{candidate_host}:{} write failed: {err}", parsed.port)))?;
+    let candidate_url = format!("http://{candidate_host}:{}{}", parsed.port, parsed.path);
+    read_http_response(config, method, &candidate_url, stream)
+        .map_err(|err| AgentError(format!("{candidate_host}:{} {}", parsed.port, err.0)))
+}
+
+/// Order candidate loopback addresses so a broken forwarder on one address
+/// family (commonly stale IPv6 `::1` under WSL2) fails over to the other.
+fn loopback_candidate_hosts(host: &str) -> Vec<String> {
+    match host {
+        "localhost" => vec!["127.0.0.1".to_string(), "::1".to_string()],
+        "::1" | "[::1]" => vec!["::1".to_string(), "127.0.0.1".to_string()],
+        other => vec![other.to_string()],
+    }
 }
 
 fn log_http_request(
@@ -3492,8 +3652,8 @@ struct ParsedUrl {
     path: String,
 }
 
-fn connect_http_stream(parsed: &ParsedUrl) -> AgentResult<TcpStream> {
-    let stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
+fn connect_http_stream(host: &str, port: u16) -> AgentResult<TcpStream> {
+    let stream = TcpStream::connect((host, port))
         .map_err(|err| AgentError(format!("connect failed: {err}")))?;
     stream
         .set_read_timeout(Some(HTTP_IO_TIMEOUT))
@@ -3833,7 +3993,7 @@ fn unescape_field(value: &str) -> String {
 #[cfg(windows)]
 mod windows_tray {
     use super::{
-        cga_admin_web_url, tray_backend_available, tray_icon_resource_id, tray_login_menu_label,
+        cga_admin_web_url, tray_backend_check, tray_icon_resource_id, tray_login_menu_label,
         tray_login_status, tray_tooltip, tray_user_group_summary, AgentConfig, AgentError,
         AgentResult, TrayLoginStatus, BACKEND_NOTIFICATION_MESSAGE, BACKEND_NOTIFICATION_TITLE,
         PROJECT_AUTHOR, PROJECT_DISPLAY_NAME, PROJECT_LICENSE, PROJECT_REPOSITORY, PROJECT_SUPPORT,
@@ -3841,6 +4001,8 @@ mod windows_tray {
     };
     use std::ffi::c_void;
     use std::mem::{size_of, zeroed};
+    use std::os::windows::process::CommandExt;
+    use std::sync::{Arc, Mutex};
     use std::ptr::{null, null_mut};
     use std::thread;
 
@@ -3869,6 +4031,7 @@ mod windows_tray {
     const ID_MENU_LOGS: usize = 1003;
     const ID_MENU_EXIT: usize = 1004;
     const ID_MENU_OPEN_CGA_WEB: usize = 1005;
+    const ID_MENU_RELAUNCH: usize = 1006;
     const MF_DISABLED: Uint = 0x00000002;
     const MF_GRAYED: Uint = 0x00000001;
     const MF_SEPARATOR: Uint = 0x00000800;
@@ -3962,6 +4125,7 @@ mod windows_tray {
         login: TrayLoginStatus,
         backend_available: Option<bool>,
         backend_check_in_flight: bool,
+        backend_error: Arc<Mutex<String>>,
         warning_icon_visible: bool,
         account_label: Vec<u16>,
         cga_admin_web_url: Vec<u16>,
@@ -4143,6 +4307,7 @@ mod windows_tray {
             login,
             backend_available: None,
             backend_check_in_flight: false,
+            backend_error: Arc::new(Mutex::new(String::new())),
             warning_icon_visible: false,
             account_label: wide_null(&account_label),
             cga_admin_web_url: wide_null(&cga_admin_web_url(config)),
@@ -4236,6 +4401,7 @@ mod windows_tray {
         append_menu_item(menu, ID_MENU_SETTINGS, "Settings");
         append_menu_item(menu, ID_MENU_LOGS, "Logs");
         append_menu_item(menu, ID_MENU_ABOUT, "About");
+        append_menu_item(menu, ID_MENU_RELAUNCH, "Relaunch");
         append_menu_item(menu, ID_MENU_EXIT, "Exit");
 
         let mut point = Point { x: 0, y: 0 };
@@ -4294,8 +4460,15 @@ mod windows_tray {
         }
         state.backend_check_in_flight = true;
         let config = state.config.clone();
+        let backend_error = Arc::clone(&state.backend_error);
         let _ = thread::spawn(move || {
-            let backend_available = tray_backend_available(&config);
+            let result = tray_backend_check(&config);
+            let backend_available = result.is_ok();
+            if let Err(error) = &result {
+                if let Ok(mut slot) = backend_error.lock() {
+                    *slot = error.0.clone();
+                }
+            }
             unsafe {
                 PostMessageW(
                     hwnd,
@@ -4323,7 +4496,12 @@ mod windows_tray {
         let icon_resource_id = active_tray_icon_resource_id(state);
         modify_icon(hwnd, h_instance, &tooltip, icon_resource_id);
         if !backend_available {
-            show_backend_unavailable_notification(hwnd);
+            let detail = state
+                .backend_error
+                .lock()
+                .map(|slot| slot.clone())
+                .unwrap_or_default();
+            show_backend_unavailable_notification(hwnd, &detail);
         }
     }
 
@@ -4350,11 +4528,16 @@ mod windows_tray {
         }
     }
 
-    unsafe fn show_backend_unavailable_notification(hwnd: Hwnd) {
+    unsafe fn show_backend_unavailable_notification(hwnd: Hwnd, error_detail: &str) {
         let mut data = notify_icon_data(hwnd);
         data.u_flags = NIF_INFO;
         fill_wide_buffer(&mut data.sz_info_title, BACKEND_NOTIFICATION_TITLE);
-        fill_wide_buffer(&mut data.sz_info, BACKEND_NOTIFICATION_MESSAGE);
+        let message = if error_detail.is_empty() {
+            BACKEND_NOTIFICATION_MESSAGE.to_string()
+        } else {
+            format!("{BACKEND_NOTIFICATION_MESSAGE}\nDetail: {error_detail}")
+        };
+        fill_wide_buffer(&mut data.sz_info, &message);
         data.dw_info_flags = NIIF_WARNING;
         data.u_version_or_timeout = 10_000;
         Shell_NotifyIconW(NIM_MODIFY, &mut data);
@@ -4397,12 +4580,54 @@ mod windows_tray {
                     open_shell_target(hwnd, state.log_dir.as_ptr());
                 }
             }
+            ID_MENU_RELAUNCH => {
+                if relaunch_process(hwnd) {
+                    delete_icon(hwnd);
+                    DestroyWindow(hwnd);
+                }
+            }
             ID_MENU_EXIT => {
                 delete_icon(hwnd);
                 DestroyWindow(hwnd);
             }
             _ => {}
         }
+    }
+
+    unsafe fn relaunch_process(hwnd: Hwnd) -> bool {
+        let executable = match std::env::current_exe() {
+            Ok(path) => path,
+            Err(error) => {
+                show_relaunch_error(
+                    hwnd,
+                    &format!("Windows could not locate CGA-Relay: {error}"),
+                );
+                return false;
+            }
+        };
+        let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+        let mut command = std::process::Command::new(executable);
+        command.args(arguments).arg("--relaunch");
+        command.creation_flags(super::CREATE_NO_WINDOW);
+        if let Err(error) = command.spawn() {
+            show_relaunch_error(
+                hwnd,
+                &format!("Windows could not relaunch CGA-Relay: {error}"),
+            );
+            return false;
+        }
+        true
+    }
+
+    unsafe fn show_relaunch_error(hwnd: Hwnd, message: &str) {
+        let text = wide_null(message);
+        let caption = wide_null("CGA-Relay");
+        MessageBoxW(
+            hwnd,
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        );
     }
 
     unsafe fn open_shell_target(hwnd: Hwnd, target: *const u16) {

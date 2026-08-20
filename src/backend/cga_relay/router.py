@@ -17,6 +17,7 @@ from backend.auth.context import _current_project_db_id, _current_project_extern
 from backend.auth.crystals import require_crystal_suite
 from backend.auth.database import get_db, insert_audit_log
 from backend.auth.dependencies import get_current_user
+from backend.auth.router import _effective_output_rules
 from backend.graph.registry import _current_project_name
 from backend.tools import server as mcp_server
 
@@ -393,6 +394,17 @@ async def receive_cga_relay_sync(payload: CgaRelaySync, request: Request) -> dic
     }
 
 
+@router.get("/output-rules")
+async def get_project_output_rules_for_relay(
+    request: Request,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict[str, Any]:
+    """Return the server-managed rules that the local relay should materialize."""
+    context = _project_context(request)
+    rules = await _effective_output_rules(db, int(context["project_db_id"]))
+    return rules.model_dump()
+
+
 @account_router.post("/mcp-tool")
 async def call_account_cga_relay_tool(
     payload: CgaRelayToolCall,
@@ -405,6 +417,18 @@ async def call_account_cga_relay_tool(
     result = await _dispatch_with_project_context(payload.tool, payload.arguments, context)
     result["actor_type"] = "account"
     return result
+
+
+@account_router.get("/output-rules")
+async def get_account_output_rules_for_relay(
+    project_id: str,
+    _: None = Depends(require_crystal_suite),
+    user: dict = Depends(get_current_user),
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict[str, Any]:
+    context = await _account_project_context(db, project_id, user)
+    rules = await _effective_output_rules(db, int(context["project_db_id"]))
+    return rules.model_dump()
 
 
 @account_router.post("/sync")

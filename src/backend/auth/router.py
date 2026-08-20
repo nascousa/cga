@@ -36,6 +36,9 @@ from backend.auth.models import (
     ProjectIndexTriggerOut,
     ProjectIndexStatus,
     ProjectOut,
+    EffectiveOutputRulesOut,
+    OutputRuleProfileUpdate,
+    ProjectOutputRuleUpdate,
     ProjectTokenOut,
     ProjectUpdate,
     TokenResponse,
@@ -52,6 +55,7 @@ from backend.auth.models import (
     UserOut,
     UserProfileUpdate,
 )
+from backend.auth.output_rules import decode_rules, encode_rules, render_markdown, resolve_rules, validate_rules
 from backend.auth.oauth import (
     deactivate_oauth_connection,
     get_oauth_connection_status,
@@ -1269,6 +1273,163 @@ async def update_project(
     if not row:
         raise HTTPException(status_code=404, detail="Project not found")
     return ProjectOut(**dict(row))
+
+
+# ── Output rules ────────────────────────────────────────────────────────────
+
+async def _effective_output_rules(
+    db, project_id: int | None = None, profile_name: str | None = None
+) -> EffectiveOutputRulesOut:
+    base_profile = profile_name or "concise"
+    overrides: dict = {}
+    project_version = 1
+    if project_id is not None:
+        async with db.execute(
+            "SELECT base_profile, overrides_json, version FROM project_output_rules WHERE project_id = ?",
+            (project_id,),
+        ) as cur:
+            project_row = await cur.fetchone()
+        if project_row:
+            base_profile = project_row["base_profile"]
+            overrides = decode_rules(project_row["overrides_json"])
+            project_version = int(project_row["version"])
+    async with db.execute(
+        "SELECT rules_json, version FROM output_rule_profiles WHERE profile_name = ?",
+        (base_profile,),
+    ) as cur:
+        profile = await cur.fetchone()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Output rule profile not found")
+    resolved, provenance = resolve_rules(decode_rules(profile["rules_json"]), overrides)
+    version = max(project_version, int(profile["version"]))
+    return EffectiveOutputRulesOut(
+        project_id=project_id,
+        base_profile=base_profile,
+        resolved=resolved,
+        markdown=render_markdown(
+            resolved, base_profile=base_profile, version=version, project_id=project_id
+        ),
+        version=version,
+        provenance=provenance,
+    )
+
+
+@router.get("/output-rules/profiles", response_model=dict[str, EffectiveOutputRulesOut])
+async def list_output_rule_profiles(
+    _: dict = Depends(require_admin),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    async with db.execute(
+        "SELECT profile_name, rules_json, version FROM output_rule_profiles ORDER BY profile_name"
+    ) as cur:
+        rows = await cur.fetchall()
+    result = {}
+    for row in rows:
+        rules = decode_rules(row["rules_json"])
+        result[row["profile_name"]] = EffectiveOutputRulesOut(
+            base_profile=row["profile_name"],
+            resolved=rules,
+            markdown=render_markdown(
+                rules,
+                base_profile=row["profile_name"],
+                version=int(row["version"]),
+                project_id=None,
+            ),
+            version=int(row["version"]),
+            provenance={key: "global" for key in rules},
+        )
+    return result
+
+
+@router.put("/output-rules/profiles/{profile_name}", response_model=EffectiveOutputRulesOut)
+async def update_output_rule_profile(
+    profile_name: str,
+    body: OutputRuleProfileUpdate,
+    _: dict = Depends(require_admin),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    try:
+        rules = validate_rules(body.rules)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    async with db.execute(
+        "SELECT version FROM output_rule_profiles WHERE profile_name = ?", (profile_name,)
+    ) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Output rule profile not found")
+    await db.execute(
+        """
+        UPDATE output_rule_profiles
+        SET rules_json = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP
+        WHERE profile_name = ?
+        """,
+        (encode_rules(rules), profile_name),
+    )
+    await db.commit()
+    return await _effective_output_rules(db, profile_name=profile_name)
+
+
+@router.get("/projects/{project_id}/output-rules", response_model=EffectiveOutputRulesOut)
+async def get_project_output_rules(
+    project_id: int,
+    user: dict = Depends(get_current_user),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    await require_project_access(db, user, project_id)
+    async with db.execute(
+        "SELECT id FROM projects WHERE id = ? AND is_active = 1", (project_id,)
+    ) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Project not found")
+    return await _effective_output_rules(db, project_id)
+
+
+@router.put("/projects/{project_id}/output-rules", response_model=EffectiveOutputRulesOut)
+async def update_project_output_rules(
+    project_id: int,
+    body: ProjectOutputRuleUpdate,
+    _: dict = Depends(require_admin),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    try:
+        overrides = validate_rules(body.overrides)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    async with db.execute(
+        "SELECT id FROM projects WHERE id = ? AND is_active = 1", (project_id,)
+    ) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Project not found")
+    async with db.execute(
+        "SELECT 1 FROM output_rule_profiles WHERE profile_name = ?", (body.base_profile,)
+    ) as cur:
+        if not await cur.fetchone():
+            raise HTTPException(status_code=404, detail="Output rule profile not found")
+    await db.execute(
+        """
+        INSERT INTO project_output_rules(project_id, base_profile, overrides_json)
+        VALUES(?, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET
+            base_profile = excluded.base_profile,
+            overrides_json = excluded.overrides_json,
+            version = project_output_rules.version + 1,
+            updated_at = CURRENT_TIMESTAMP
+        """,
+        (project_id, body.base_profile, encode_rules(overrides)),
+    )
+    await db.commit()
+    return await _effective_output_rules(db, project_id)
+
+
+@router.delete("/projects/{project_id}/output-rules", response_model=EffectiveOutputRulesOut)
+async def delete_project_output_rules(
+    project_id: int,
+    _: dict = Depends(require_admin),
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    await db.execute("DELETE FROM project_output_rules WHERE project_id = ?", (project_id,))
+    await db.commit()
+    return await _effective_output_rules(db, project_id)
 
 
 # ── Tokens ─────────────────────────────────────────────────────────────────
