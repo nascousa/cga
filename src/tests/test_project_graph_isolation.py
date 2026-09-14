@@ -69,6 +69,7 @@ class Registry:
         self.counts = {}
         self.generations = {}
         self.deleted = []
+        self.delete_attempts = []
         self.queries = []
         self.selected = []
         self.connection = SimpleNamespace(
@@ -99,6 +100,7 @@ class Registry:
         return self.get(_current_project_name.get())
 
     def delete(self, name, *, expected_generation=None):
+        self.delete_attempts.append((name, expected_generation))
         if expected_generation is not None and self.generations.get(name, "generation-1") != expected_generation:
             raise GraphGenerationChanged("Graph changed during promotion")
         self.deleted.append(name)
@@ -520,6 +522,45 @@ async def test_job_status_keeps_retrying_active_without_reenqueue(projects, monk
     server._producer.submit_incremental_index.assert_not_awaited()
 
 
+def test_admin_status_treats_retrying_as_active_even_with_old_timestamp(projects):
+    status = auth_router._build_index_job_status(
+        {
+            "job_id": "recovery-job", "job_type": "index_full", "repo_path": str(projects.alpha),
+            "status": "retrying", "created_at": "2020-01-01T00:00:00+00:00",
+            "updated_at": "2020-01-01T00:00:00+00:00",
+        },
+        {"recovery-job": 2},
+        20,
+        5,
+    )
+    assert status.status == "retrying"
+    assert status.is_stale is False
+    assert status.queue_position == 2
+    assert status.eta_seconds == 45
+
+
+@pytest.mark.asyncio
+async def test_admin_recovery_returns_retrying_without_enqueuing_a_second_job(projects, monkeypatch):
+    monkeypatch.setattr(auth_router, "_get_active_project", AsyncMock(return_value=projects.record_a))
+    monkeypatch.setattr(auth_router, "_resolve_project_repo_path", lambda _: str(projects.alpha))
+    monkeypatch.setattr(auth_router, "_project_repo_status_paths", lambda _: [str(projects.alpha)])
+    consumer = SimpleNamespace(recover_stale_jobs_by_repo=AsyncMock(return_value=[{
+        "job_id": "recovery-job", "job_type": "index_full", "repo_path": str(projects.alpha),
+        "status": "retrying", "stream_id": "42-0", "recovery_action": "pending_replay",
+    }]))
+    result = await auth_router.recover_project_stale_index_jobs(
+        1, _={"role": "admin"}, db=Database(projects.record_a), consumer=consumer,
+    )
+    assert result.recovered_count == 1
+    assert result.recovered_jobs[0].status == "retrying"
+    assert result.recovered_jobs[0].is_stale is False
+    consumer.recover_stale_jobs_by_repo.assert_awaited_once_with(
+        [str(projects.alpha)], auth_router.INDEX_STALE_AFTER_SEC,
+    )
+    server._producer.submit_full_index.assert_not_awaited()
+    server._producer.submit_incremental_index.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("ref", ["", "feature/job"])
 async def test_worker_revalidates_job_root_from_db_without_request_context(projects, monkeypatch, ref):
@@ -815,11 +856,59 @@ async def test_promotion_uses_full_rebuild_and_deletes_only_after_success(projec
     assert result["status"] == "done"
     assert result["rebuild_mode"] == "full"
     assert isolated_services.deleted == ([] if source_changes else [source])
+    assert isolated_services.delete_attempts == [(source, "generation-1")]
     assert result["deleted_ref_graph"] is not source_changes
     if source_changes:
         assert result["reason"] == "target_published_source_changed_and_retained"
     assert all(name == "alpha" and "count(f)" in query for name, query, _ in isolated_services.queries)
     assert all("RETURN f.path" not in query for _, query, _ in isolated_services.queries)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("change_phase", ["target_submission", "conditional_delete"])
+async def test_promotion_uses_pre_submission_source_generation_for_atomic_delete(
+    projects, isolated_services, monkeypatch, change_phase,
+):
+    source = context.branch_graph_name(projects.scope_a.project_id, "feature/promote")
+    isolated_services.keys.add(source)
+    initial_source_generation = "source-before-promotion"
+    isolated_services.generations[source] = initial_source_generation
+
+    async def full(**kwargs):
+        if change_phase == "target_submission":
+            isolated_services.generations[source] = "source-committed-during-submission"
+        return {"status": "queued", "job_id": "promotion-cas-job"}
+
+    async def wait(**kwargs):
+        isolated_services.keys.add("alpha")
+        isolated_services.counts["alpha"] = 1
+        isolated_services.generations["alpha"] = "target-published"
+        return {
+            "status": "done", "errors": 0, "files": 1,
+            "project_name": "alpha", "repo_path": str(projects.alpha),
+        }
+
+    original_delete = isolated_services.delete
+
+    def delete_after_concurrent_commit(name, *, expected_generation=None):
+        if change_phase == "conditional_delete":
+            isolated_services.generations[name] = "source-committed-before-delete-lock"
+        original_delete(name, expected_generation=expected_generation)
+
+    monkeypatch.setattr(server, "index_full", full)
+    monkeypatch.setattr(server, "wait_for_index_ready", wait)
+    monkeypatch.setattr(isolated_services, "delete", delete_after_concurrent_commit)
+    with context.bind_project_scope(projects.scope_a):
+        result = await relay._promote_ref({
+            "repo_path": str(projects.alpha), "ref_id": "feature/promote", "delete_ref_graph": True,
+        }, "alpha")
+    assert result["status"] == "done"
+    assert result["reason"] == "target_published_source_changed_and_retained"
+    assert result["deleted_ref_graph"] is False
+    assert isolated_services.deleted == []
+    assert isolated_services.delete_attempts == [(source, initial_source_generation)]
+    assert source in isolated_services.keys
+    assert isolated_services.generations[source] != initial_source_generation
 
 
 @pytest.mark.asyncio

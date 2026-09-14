@@ -215,6 +215,15 @@ its status and retry deliberately rather than treating a timeout as success.
 An empty-scan protection failure returns `failed`; an empty rebuild or
 unpublished/empty target returns `noop`. Neither permits source deletion.
 
+The source generation is captured before submitting the target job. Source
+deletion compares this captured generation under the same distributed graph
+write lock as the deletion itself; a separate check followed by ordinary
+deletion would not be safe. If a newer source generation was committed during
+promotion, the target can still report `done`, but `deleted_ref_graph` is
+`false` and `reason` is `target_published_source_changed_and_retained`. The newer
+source is retained. Review and merge those newer changes before trying another
+promotion; do not automatically retry source cleanup.
+
 The response includes `status` (`done`, `pending`, `noop` or `failed`), `reason`, `rebuild_mode=full`,
 `source_graph_name`, `target_graph_name`, `deleted_ref_graph`, `submitted_job`
 and `index_result`. There is no `promoted_files` list because the complete

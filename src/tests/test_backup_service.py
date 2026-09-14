@@ -46,7 +46,7 @@ def tool_result(
 
 @pytest.fixture
 def service(tmp_path: Path) -> BackupService:
-    return BackupService("postgresql://unit:unit@never-connect.invalid/unit", str(tmp_path))
+    return BackupService("postgresql://never-connect.invalid/unit", str(tmp_path))
 
 
 @pytest.fixture

@@ -17,7 +17,13 @@ import pytest
 from redis.exceptions import WatchError
 
 from backend.auth import access
-from backend.auth.context import ProjectScope, bind_project_scope, branch_graph_name, require_project_scope
+from backend.auth.context import (
+    ProjectScope,
+    bind_project_ref,
+    bind_project_scope,
+    branch_graph_name,
+    require_project_scope,
+)
 from backend.indexer import consumer as indexer_module
 from backend.indexer import paths as indexer_paths
 from backend.queue.models import IndexJob, JobType
@@ -986,34 +992,41 @@ async def test_symlink_swapped_after_publication_is_revalidated(registered_check
 
 
 @pytest.mark.asyncio
-async def test_mcp_producer_validates_registration_without_request_context(registered_checkout):
+async def test_mcp_producer_requires_scope_and_canonicalizes_scoped_payload(registered_checkout):
     root, outside, _ = registered_checkout
     redis = FakeRedis()
     producer = MCPProducer("redis://unused.invalid")
     producer._producer._client = redis
+    with pytest.raises(HTTPException) as no_scope:
+        await producer.submit_full_index(str(root), "authorized")
+    assert no_scope.value.status_code == 403
     with pytest.raises(HTTPException):
-        await producer.submit_full_index(str(root))
-    with pytest.raises(HTTPException):
-        await producer.submit_full_index(str(root), "other-project")
-    with pytest.raises(HTTPException):
-        await producer.submit_incremental_index(str(root), ["source.py"], "other-project")
-    with pytest.raises(HTTPException):
-        await producer.submit_full_index(str(outside), "authorized")
-    full = await producer.submit_full_index(str(root), "authorized")
-    result = await producer.submit_incremental_index(str(root), ["source.py"], "authorized")
+        await producer.submit_incremental_index(str(root), ["source.py"], "authorized")
+    assert redis.messages == {}
+    with bind_project_scope(ProjectScope("project-id", 1, "authorized", str(root))):
+        with pytest.raises(HTTPException):
+            await producer.submit_full_index(str(root), "other-project")
+        with pytest.raises(HTTPException):
+            await producer.submit_incremental_index(str(root), ["source.py"], "other-project")
+        with pytest.raises(HTTPException):
+            await producer.submit_full_index(str(outside), "authorized")
+        full = await producer.submit_full_index(str(root))
+        result = await producer.submit_incremental_index(str(root), ["source.py"], "  AUTHORIZED  ")
     assert len(redis.messages) == 2
     assert full["stream_id"] in redis.messages
     queued = IndexJob.model_validate_json(redis.messages[result["stream_id"]]["payload"])
     assert queued.project_name == "authorized"
+    assert queued.repo_path == str(root)
+    assert IndexJob.model_validate_json(redis.messages[full["stream_id"]]["payload"]).project_name == "authorized"
     assert queued.changed_paths == [indexer_paths.resolve_changed_path(str(root), root, "source.py")]
 
 
 @pytest.mark.asyncio
-async def test_producer_and_worker_do_not_route_using_ambient_context(registered_checkout, monkeypatch):
+async def test_internal_producer_and_worker_ignore_ambient_request_context(registered_checkout, monkeypatch):
     root, outside, _ = registered_checkout
     redis = FakeRedis()
-    producer = MCPProducer("redis://unused.invalid")
-    producer._producer._client = redis
+    producer = JobProducer("redis://unused.invalid")
+    producer._client = redis
     registry = MagicMock()
     worker = indexer_module.IndexerConsumer("redis://unused.invalid", registry)
     worker._consumer = make_consumer(redis)
@@ -1022,10 +1035,12 @@ async def test_producer_and_worker_do_not_route_using_ambient_context(registered
     monkeypatch.setattr(indexer_module, "IndexPipeline", lambda **kwargs: pipeline)
     unrelated = ProjectScope("other-project-id", 2, "unrelated", str(outside))
 
-    # The request handler authorizes enqueueing; queued work is bound to its
-    # explicit DB-validated graph, never an inherited request ContextVar.
+    # Trusted internal publishing and workers use explicit DB authority. The MCP
+    # facade separately enforces the caller's project/ref scope.
     with bind_project_scope(unrelated):
-        await producer.submit_full_index(str(root), "authorized")
+        await producer.publish(IndexJob(
+            job_type=JobType.INDEX_FULL, repo_path=str(root), project_name="authorized",
+        ))
         assert require_project_scope() is unrelated
         [(message_id, job)] = await worker._consumer.consume(block_ms=1)
         await worker._process(message_id, job)
@@ -1034,6 +1049,52 @@ async def test_producer_and_worker_do_not_route_using_ambient_context(registered
     registry.get.assert_called_once_with("authorized")
     pipeline.index_full.assert_called_once_with(str(root))
     assert status(redis, job)["status"] == "done"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("incremental", [False, True])
+async def test_mcp_producer_rejects_even_registered_foreign_project(registered_checkout, incremental):
+    root, outside, records = registered_checkout
+    records.append({
+        "id": 2, "project_id": "foreign-id", "project_name": "foreign", "repo_path": str(outside),
+    })
+    redis = FakeRedis()
+    producer = MCPProducer("redis://unused.invalid")
+    producer._producer._client = redis
+    with bind_project_scope(ProjectScope("project-id", 1, "authorized", str(root))):
+        with pytest.raises(HTTPException) as denied:
+            if incremental:
+                await producer.submit_incremental_index(str(outside), ["source.py"], "foreign")
+            else:
+                await producer.submit_full_index(str(outside), "foreign")
+    assert denied.value.status_code == 403
+    assert redis.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("incremental", [False, True])
+async def test_mcp_producer_binds_ref_and_rejects_other_refs(registered_checkout, incremental):
+    root, _, _ = registered_checkout
+    redis = FakeRedis()
+    producer = MCPProducer("redis://unused.invalid")
+    producer._producer._client = redis
+    with bind_project_scope(ProjectScope("project-id", 1, "authorized", str(root))):
+        with bind_project_ref("feature/current") as graph_name:
+            for forbidden in ["authorized", branch_graph_name("project-id", "feature/other")]:
+                with pytest.raises(HTTPException) as denied:
+                    if incremental:
+                        await producer.submit_incremental_index(str(root), ["source.py"], forbidden)
+                    else:
+                        await producer.submit_full_index(str(root), forbidden)
+                assert denied.value.status_code == 403
+            assert redis.messages == {}
+            if incremental:
+                result = await producer.submit_incremental_index(str(root), ["source.py"])
+            else:
+                result = await producer.submit_full_index(str(root))
+    queued = IndexJob.model_validate_json(redis.messages[result["stream_id"]]["payload"])
+    assert queued.project_name == graph_name
+    assert queued.repo_path == str(root)
 
 
 @pytest.mark.asyncio
