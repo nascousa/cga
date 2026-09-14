@@ -18,7 +18,12 @@ from backend.auth.context import (
     validate_project_graph_name,
 )
 from backend.auth.pgshim import Connection
-from backend.indexer.paths import RepositoryPathError, resolve_changed_path, resolve_repo_root
+from backend.indexer.paths import (
+    RepositoryPathError,
+    matches_registered_root,
+    resolve_changed_path,
+    resolve_repo_root,
+)
 
 
 def registered_project_scope(project: dict) -> ProjectScope:
@@ -77,7 +82,7 @@ def authorized_repo_root(repo_path: str | None = None) -> Path:
         raise HTTPException(status_code=403, detail="Project repository root is not registered")
     try:
         allowed = resolve_repo_root(scope.repo_path)
-        if repo_path is not None and resolve_repo_root(repo_path) != allowed:
+        if repo_path is not None and not matches_registered_root(repo_path, scope.repo_path, allowed):
             raise RepositoryPathError("Repository root does not match the authenticated project")
         return allowed
     except RepositoryPathError as exc:

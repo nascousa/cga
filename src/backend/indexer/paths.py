@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path, PureWindowsPath
+import ntpath
+import os
+import posixpath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 class RepositoryPathError(ValueError):
@@ -36,15 +39,56 @@ def normalize_repo_path(repo_path: str) -> str:
             tail = parts[marker + 1:]
             if not tail or any(part in {".", ".."} or ":" in part for part in tail):
                 raise RepositoryPathError("Invalid container repository mapping")
-            mount = Path("/repos").resolve()
-            candidate = (mount / Path(*tail)).resolve()
-            if not candidate.is_relative_to(mount):
-                raise RepositoryPathError("Repository mapping escapes the repositories mount")
+            candidate = Path("/repos").joinpath(*tail)
             return str(candidate)
         return normalized
-    if candidate.exists():
-        return str(candidate.resolve(strict=True))
     return str(candidate)
+
+
+def _lexical_identity(value: str) -> tuple[str, str]:
+    cleaned = _clean_path(value)
+    windows = PureWindowsPath(cleaned)
+    if windows.drive:
+        if not windows.is_absolute():
+            raise RepositoryPathError("Drive-relative paths are not allowed")
+        return "windows", ntpath.normcase(ntpath.normpath(cleaned))
+    if os.name == "nt" and not cleaned.startswith("/"):
+        return "relative-windows", ntpath.normcase(ntpath.normpath(cleaned))
+    return "posix", posixpath.normpath(cleaned)
+
+
+def matches_registered_root(requested: str, registered: str, canonical: Path) -> bool:
+    """Compare logical aliases without inspecting any request-controlled path."""
+    aliases = {_lexical_identity(registered), _lexical_identity(str(canonical))}
+    registration = _clean_path(registered)
+    windows = PureWindowsPath(registration)
+    mapped = registration
+    if windows.is_absolute():
+        marker = next((i for i, part in enumerate(windows.parts) if part.casefold() == "repos"), None)
+        if marker is not None:
+            tail = windows.parts[marker + 1:]
+            if tail and all(part not in {".", ".."} and ":" not in part for part in tail):
+                mapped = str(PurePosixPath("/repos").joinpath(*tail))
+                aliases.add(_lexical_identity(mapped))
+    # The historical desktop mount defaults to D:/Repos. Other host mounts must
+    # be configured by the operator, never inferred from a request's basename.
+    for trusted_path in (mapped, _clean_path(str(canonical))):
+        try:
+            relative = PurePosixPath(posixpath.normpath(trusted_path)).relative_to("/repos")
+        except ValueError:
+            continue
+        host_root = _clean_path(os.getenv("CGA_HOST_REPOS_ROOT", "D:/Repos"))
+        host = PureWindowsPath(host_root)
+        if host.is_absolute():
+            alias = str(host.joinpath(*relative.parts))
+        elif PurePosixPath(host_root).is_absolute():
+            alias = str(PurePosixPath(host_root).joinpath(*relative.parts))
+        else:
+            raise RepositoryPathError("CGA_HOST_REPOS_ROOT must be absolute")
+        # An explicit registered Windows drive remains the authority.
+        if not windows.is_absolute():
+            aliases.add(_lexical_identity(alias))
+    return _lexical_identity(requested) in aliases
 
 
 def resolve_repo_root(repo_path: str) -> Path:
@@ -95,7 +139,16 @@ def resolve_changed_path(repo_path: str, resolved_root: Path, changed_path: str)
     parts = candidate.parts[1:] if candidate.is_absolute() else candidate.parts
     if any(":" in part for part in parts):
         raise RepositoryPathError("Alternate data streams are not allowed")
-    resolved = candidate.resolve()
-    if not resolved.is_relative_to(root) or resolved == root:
+    lexical = os.path.abspath(str(candidate))
+    root_prefix = os.path.join(str(root), "")
+    if not os.path.normcase(lexical).startswith(os.path.normcase(root_prefix)):
+        raise RepositoryPathError("File path is outside the registered repository")
+    relative = Path(lexical).relative_to(root)
+    if not relative.parts or any(part in {".", ".."} for part in relative.parts):
+        raise RepositoryPathError("File path is outside the registered repository")
+    # Rebuild under the trusted root from individual, validated filenames.
+    bounded = root.joinpath(*(os.path.basename(part) for part in relative.parts))
+    resolved = bounded.resolve()
+    if not os.path.normcase(str(resolved)).startswith(os.path.normcase(root_prefix)):
         raise RepositoryPathError("File path is outside the registered repository")
     return str(resolved)

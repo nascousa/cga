@@ -40,19 +40,29 @@ not renamed or deleted by this change.
 ## Repository Authorization
 
 MCP project tokens and account-authenticated Relay calls bind the project's
-registered `projects.repo_path` from the database. A requested `repo_path` must
-resolve to that same directory; naming a readable checkout or supplying only
-apparently safe `changed_paths` does not grant access to it.
+registered `projects.repo_path` from the database. A requested `repo_path` selects
+that root using purely lexical comparison against registered/canonical aliases;
+the requested path is never probed to discover whether an unrelated directory
+exists. Naming a readable checkout or supplying only apparently safe
+`changed_paths` does not grant access to it.
 
 - If `repo_path` is empty in the DB, the server's configured repository search
   roots/default roots are used to discover the registered project checkout.
   Ambiguous matching directories fail closed; set an explicit DB `repo_path`.
 - Existing Windows-to-container mapping is supported, for example a registered
   `D:\Repos\Example` checkout mounted as `/repos/Example`.
+- Aliases are derived from the registration and trusted mount configuration,
+  not a request's `Repos` suffix or basename. An explicit Windows registration
+  fixes the allowed drive. For a native `/repos/Example` registration, the
+  historical host alias is `D:\Repos\Example`; configure `CGA_HOST_REPOS_ROOT`
+  when the host mount differs. Windows aliases are case-insensitive; POSIX
+  aliases remain case-sensitive.
 - Index entry points, Git discovery, queue submission, changed files, deletion
   paths, source snippets and server-side keyword fallback all enforce the
   project boundary. Absolute paths and symlink targets outside the checkout are
-  rejected. Missing files are allowed only as in-root tombstones.
+  rejected. Files must pass a lexical boundary check before symlink resolution
+  and a physical boundary check afterward. Missing files are allowed only as
+  in-root tombstones.
 - An absent authenticated scope or unregistered root does not fall back to the
   API's current working directory or a process-wide repository root.
 - Existing administrator index routes still enforce their administrator
@@ -66,9 +76,10 @@ returns a canonical **absolute** in-root filename, including missing files.
 These helpers establish filesystem boundaries; they do not replace the
 request-layer database authorization.
 `normalize_repo_path(path) -> str` supports directory and file-path
-normalization, including missing Windows-to-container tombstones. It does not
-validate project ownership or require the leaf to exist. Network/device paths
-are rejected before filesystem probing.
+normalization, including missing Windows-to-container tombstones. It performs
+no filesystem I/O and does not establish project ownership. Only the registered
+authority is resolved as a root. Network/device paths are rejected before
+filesystem probing.
 Workers can additionally call
 `await backend.auth.access.authorized_job_repo_root(repo_path, graph_name)`
 to revalidate queued work against current active DB registrations without an

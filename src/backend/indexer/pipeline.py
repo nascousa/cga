@@ -29,6 +29,7 @@ from backend.indexer.snapshot import (
     INDEX_FORMAT_VERSION, FileSnapshot, SymbolResolver, call_key, parse_snapshot,
 )
 from backend.indexer.paths import (
+    RepositoryPathError,
     normalize_repo_path as _normalize_repo_path,
     resolve_repo_root as _resolve_repo_root,
     resolve_changed_path as _resolve_changed_path,
@@ -137,11 +138,14 @@ class IndexPipeline:
             cached: dict[str, FileSnapshot] = {}
             legacy: set[str] = set()
             for path, content_hash, metadata, version in stage.query(S.QUERY_FILE_SNAPSHOTS).result_set:
-                resolved = Path(_normalize_repo_path(path)).resolve()
-                if not resolved.is_relative_to(root):
+                try:
+                    normalized = _resolve_changed_path(
+                        str(root), root, _normalize_repo_path(path)
+                    )
+                except RepositoryPathError:
+                    log.warning("pipeline.foreign_metadata_ignored", repo_path=str(root))
                     continue
                 old_paths.add(path)
-                normalized = str(resolved)
                 if not full and version == INDEX_FORMAT_VERSION and metadata:
                     snapshot = FileSnapshot.deserialize(metadata)
                     if snapshot.parsed.path != normalized or snapshot.content_hash != content_hash:

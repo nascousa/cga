@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
@@ -171,6 +172,67 @@ def test_shared_path_helper_rejects_escape(projects, kind):
     }[kind]
     with pytest.raises(paths.RepositoryPathError):
         paths.resolve_changed_path(str(projects.alpha), projects.alpha, attempted)
+
+
+def test_path_normalization_has_no_filesystem_side_effects(monkeypatch):
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Lexical normalization must not inspect the filesystem")
+
+    for method in ("exists", "is_dir", "stat", "resolve"):
+        monkeypatch.setattr(Path, method, forbidden)
+    for value in ("/repos/alpha/missing.py", r"D:\Repos\alpha\missing.py", "src/owned.py"):
+        assert isinstance(paths.normalize_repo_path(value), str)
+
+
+@pytest.mark.parametrize("kind", ["existing", "missing", "sibling-prefix", "wrong-drive"])
+def test_rejected_repository_selection_does_not_probe_candidate(projects, monkeypatch, kind):
+    requested = {
+        "existing": str(projects.bravo),
+        "missing": str(projects.bravo / "not-present"),
+        "sibling-prefix": str(projects.alpha) + "2",
+        "wrong-drive": r"Z:\Repos\alpha",
+    }[kind]
+    candidate = os.path.normcase(os.path.abspath(requested))
+    for method in ("exists", "is_dir", "stat", "resolve"):
+        original = getattr(Path, method)
+
+        def guarded(path, *args, _original=original, **kwargs):
+            assert os.path.normcase(os.path.abspath(str(path))) != candidate, "Unauthorized candidate was inspected"
+            return _original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, method, guarded)
+    with context.bind_project_scope(projects.scope_a):
+        assert_forbidden(lambda: access.authorized_repo_root(requested))
+
+
+@pytest.mark.parametrize("kind", ["relative", "absolute", "sibling-prefix"])
+def test_lexical_file_escape_is_rejected_before_resolve(projects, monkeypatch, kind):
+    requested = {
+        "relative": "../bravo/private.py",
+        "absolute": str(projects.bravo / "private.py"),
+        "sibling-prefix": str(projects.alpha) + "2/private.py",
+    }[kind]
+    original = Path.resolve
+
+    def guarded(path, *args, **kwargs):
+        lexical = Path(os.path.abspath(str(path)))
+        assert lexical == projects.alpha or lexical.is_relative_to(projects.alpha), "Out-of-root candidate was resolved"
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", guarded)
+    with context.bind_project_scope(projects.scope_a):
+        assert_forbidden(lambda: access.authorized_file_path(requested))
+
+
+def test_root_aliases_derive_only_from_registration(monkeypatch):
+    canonical = Path("/repos/Alpha")
+    assert paths.matches_registered_root(r"d:\repos\ALPHA", r"D:\Repos\Alpha", canonical)
+    assert paths.matches_registered_root("/repos/Alpha", r"D:\Repos\Alpha", canonical)
+    assert not paths.matches_registered_root(r"E:\Repos\Alpha", r"D:\Repos\Alpha", canonical)
+    assert not paths.matches_registered_root("/repos/alpha", r"D:\Repos\Alpha", canonical)
+    monkeypatch.setenv("CGA_HOST_REPOS_ROOT", "E:/Workspace")
+    assert paths.matches_registered_root(r"E:\Workspace\Alpha", "/repos/Alpha", canonical)
+    assert not paths.matches_registered_root(r"D:\Repos\Alpha", "/repos/Alpha", canonical)
 
 
 def test_shared_path_helper_keeps_missing_tombstones_inside_root(projects):
