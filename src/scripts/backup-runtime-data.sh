@@ -49,14 +49,19 @@ mkdir -p "$AUTH_BACKUP_DIR" "$FALKOR_BACKUP_DIR"
 
 take_lock() {
   lock_dir="$1"
+  if [ -d "$lock_dir" ]; then
+    echo "[backup] legacy lock directory exists; stop old workers and verify it before removal" >&2
+    return 1
+  fi
+  if ! command -v flock >/dev/null 2>&1; then
+    echo "[backup] flock is required for crash-released backup locks" >&2
+    return 1
+  fi
+  exec 9>> "$lock_dir" || return 1
   waited=0
-  while ! mkdir "$lock_dir" 2>/dev/null; do
-    if [ ! -d "$lock_dir" ]; then
-      echo "[backup] cannot create lock $lock_dir" >&2
-      return 1
-    fi
+  while ! flock -n -x 9; do
     if [ "$waited" -ge "$BACKUP_LOCK_TIMEOUT_SECONDS" ]; then
-      echo "[backup] timed out waiting for lock $lock_dir; never remove a live backup/restore lock" >&2
+      echo "[backup] timed out waiting for active backup/restore lock $lock_dir" >&2
       return 1
     fi
     sleep 1 || return 1
@@ -88,7 +93,7 @@ cleanup() {
     rm -rf -- "$stage" || echo "[backup] cannot clean staging directory $stage" >&2
   fi
   if [ "$lock_owned" = 1 ]; then
-    rmdir "$lock_dir" || echo "[backup] cannot release lock $lock_dir" >&2
+    exec 9>&-
   fi
   exit "$result"
 }

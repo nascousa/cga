@@ -371,6 +371,19 @@ def _fetch_relation_summary(qualified_name: str, limit: int = 3) -> dict:
 # Write tools (async – go through MQ)
 # ---------------------------------------------------------------------------
 
+def _repository_unavailable(repo_path: str) -> dict:
+    log.warning("index.repository_unavailable", repo_path=repo_path)
+    return {
+        "status": "relay_required",
+        "mode": "relay",
+        "reason": "repo_path_unavailable",
+        "changed_count": 0,
+        "destructive_count": 0,
+        "repo_path": repo_path,
+        "message": "The CGA indexer cannot read this repository path. Mount the checkout into the API/indexer runtime or use a cga-relay connected to a runtime that can read this registered checkout.",
+    }
+
+
 @mcp.tool()
 async def index_full(repo_path: str, project_name: str | None = None) -> dict:
     """Enqueue a full index job for the given repository path."""
@@ -385,15 +398,7 @@ async def index_full(repo_path: str, project_name: str | None = None) -> dict:
             repo_path=repo_path,
             fallback_mode="cga_relay_or_mount_required",
         )
-        return {
-            "status": "relay_required",
-            "mode": "relay",
-            "reason": "repo_path_unavailable",
-            "changed_count": 0,
-            "destructive_count": 0,
-            "repo_path": repo_path,
-            "message": "The CGA indexer cannot read this repository path. Mount the checkout into the API/indexer runtime or run a local cga-relay configured for this project.",
-        }
+        return _repository_unavailable(repo_path)
     submitted = await _producer.submit_full_index(str(root), project_name=resolved_project_name)
     # Invalidate cache so stale reads are avoided after re-index
     if _cache:
@@ -414,7 +419,10 @@ async def index_incremental(repo_path: str, changed_paths: list[str], project_na
     if not _producer:
         raise RuntimeError("MCP server not initialized")
     resolved_project_name = _resolve_project_name(project_name)
-    root = authorized_repo_root(repo_path)
+    try:
+        root = authorized_repo_root(repo_path)
+    except FileNotFoundError:
+        return _repository_unavailable(repo_path)
     safe_paths = _validated_changed_paths(repo_path, root, changed_paths)
     submitted = await _producer.submit_incremental_index(
         str(root), safe_paths, project_name=resolved_project_name
@@ -458,7 +466,10 @@ async def index_repo_changes(
     if not _producer:
         raise RuntimeError("MCP server not initialized")
     resolved_project_name = _resolve_project_name(project_name)
-    root = authorized_repo_root(repo_path)
+    try:
+        root = authorized_repo_root(repo_path)
+    except FileNotFoundError:
+        return _repository_unavailable(repo_path)
 
     try:
         discovered = await _collect_git_changed_paths(repo_path, include_untracked=include_untracked)

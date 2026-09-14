@@ -56,7 +56,7 @@ from backend.auth.models import (
     UserOut,
     UserProfileUpdate,
 )
-from backend.auth.output_rules import decode_rules, encode_rules, render_markdown, resolve_rules, validate_rules
+from backend.auth.output_rules import complete_profile, decode_rules, encode_rules, render_markdown, resolve_rules, validate_rules
 from backend.auth.oauth import (
     deactivate_oauth_connection,
     get_oauth_connection_status,
@@ -1326,7 +1326,7 @@ async def list_output_rule_profiles(
         rows = await cur.fetchall()
     result = {}
     for row in rows:
-        rules = decode_rules(row["rules_json"])
+        rules = complete_profile(decode_rules(row["rules_json"]))
         result[row["profile_name"]] = EffectiveOutputRulesOut(
             base_profile=row["profile_name"],
             resolved=rules,
@@ -1350,7 +1350,7 @@ async def update_output_rule_profile(
     db: aiosqlite.Connection = Depends(get_db),
 ):
     try:
-        rules = validate_rules(body.rules)
+        rules = complete_profile(body.rules)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     async with db.execute(

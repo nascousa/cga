@@ -602,6 +602,22 @@ async def test_index_repo_changes_requires_relay_when_git_status_fails(tmp_path)
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool", ["index_repo_changes", "index_incremental"])
+async def test_indexing_unavailable_registered_checkout_returns_visibility_result(tmp_path, tool):
+    missing = tmp_path / "not-mounted"
+    mcp_srv._producer = _mock_producer()
+    with bind_project_scope(ProjectScope("CGA123", 1, "contextgraph", str(missing))):
+        if tool == "index_repo_changes":
+            result = await mcp_srv.index_repo_changes(str(missing))
+        else:
+            result = await mcp_srv.index_incremental(str(missing), ["a.py"])
+    assert result["status"] == "relay_required"
+    assert result["reason"] == "repo_path_unavailable"
+    mcp_srv._producer.submit_full_index.assert_not_awaited()
+    mcp_srv._producer.submit_incremental_index.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_get_index_job_status(tmp_path):
     producer = _mock_producer("5002-0")
     producer.get_job_status.return_value = {

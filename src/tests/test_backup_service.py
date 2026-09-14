@@ -162,7 +162,7 @@ async def test_restore_fails_on_sql_errors_with_single_transaction_and_stop_on_e
     assert "--no-psqlrc" in psql_commands[0]
     assert any(arg in {"--set=ON_ERROR_STOP=1", "--set=ON_ERROR_STOP=on"} for arg in psql_commands[0])
     assert gzip.decompress(source.read_bytes()) == SELECTED_SQL
-    assert not (service._backup_dir / ".auth.lock").exists()
+    assert (service._backup_dir / ".auth.lock").is_file()
 
 
 @pytest.mark.parametrize("content", [b"not gzip", gzip.compress(SELECTED_SQL)[:-5]])
@@ -275,7 +275,7 @@ async def test_backup_filesystem_error_is_not_misreported_as_missing_pg_dump(
     with pytest.raises(BackupError, match="backup write failed:.*storage disconnected"):
         await service.run_backup()
     assert pg_tools == []
-    assert not (service._backup_dir / ".auth.lock").exists()
+    assert (service._backup_dir / ".auth.lock").is_file()
 
 
 async def test_latest_publication_failure_does_not_prune_previous_good(
@@ -469,7 +469,7 @@ async def test_crc_error_after_multiple_chunks_prevents_safety_dump(
     with pytest.raises(BackupError, match="snapshot read failed.*CRC"):
         await service.restore(source.name)
     assert pg_tools == []
-    assert not (service._backup_dir / ".auth.lock").exists()
+    assert (service._backup_dir / ".auth.lock").is_file()
 
 
 @pytest.mark.parametrize("failure", ["create", "write", "fsync"])
@@ -512,7 +512,7 @@ async def test_restore_staging_io_errors_do_not_run_database_commands(
     assert "not installed" not in str(error.value)
     assert pg_tools == []
     assert gzip.decompress(source.read_bytes()) == SELECTED_SQL
-    assert not (service._backup_dir / ".auth.lock").exists()
+    assert (service._backup_dir / ".auth.lock").is_file()
 
 
 async def test_failed_safety_backup_closes_frozen_readonly_descriptor(
@@ -622,3 +622,33 @@ async def test_incompatible_dump_is_not_published(service, monkeypatch, output):
 
     assert gzip.decompress(latest.read_bytes()) == SELECTED_SQL
     assert service.list_snapshots() == []
+
+
+async def test_crashed_worker_releases_backup_lock(service, pg_tools, monkeypatch):
+    monkeypatch.setenv("BACKUP_LOCK_TIMEOUT_SECONDS", "0")
+    script = """
+import sys, time
+from backend.backup.service import BackupService
+service = BackupService('postgresql://never-connect.invalid/unit', sys.argv[1])
+def hold():
+    print('LOCKED', flush=True)
+    time.sleep(60)
+service._run_locked(hold)
+"""
+    env = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1])}
+    process = subprocess.Popen(
+        [sys.executable, "-u", "-c", script, str(service._backup_dir)],
+        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        assert process.stdout.readline().strip() == "LOCKED"
+        with pytest.raises(BackupError, match="lock"):
+            await service.run_backup()
+        process.kill()
+        process.wait(timeout=10)
+        result = await service.run_backup()
+        assert result["size_bytes"] > 0
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.communicate(timeout=10)

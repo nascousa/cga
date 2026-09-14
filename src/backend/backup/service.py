@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+from contextlib import contextmanager
+import errno
 import gzip
 import json
 import logging
@@ -43,6 +45,49 @@ _STDERR_LIMIT = 64 * 1024
 
 class BackupError(Exception):
     """Raised for user-visible backup/restore failures."""
+
+
+@contextmanager
+def _advisory_lock(path: Path, timeout: float):
+    try:
+        lock = path.open("a+b")
+    except OSError as exc:
+        if path.is_dir():
+            raise BackupError("Legacy backup lock directory exists; stop old workers and verify it before removal") from exc
+        raise BackupError(f"Could not open backup lock: {exc}") from exc
+    with lock:
+        if os.name == "nt":
+            import msvcrt
+
+            if os.fstat(lock.fileno()).st_size == 0:
+                lock.write(b"\0")
+                lock.flush()
+            lock.seek(0)
+        else:
+            import fcntl
+
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                if os.name == "nt":
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise BackupError(f"Could not acquire backup lock: {exc}") from exc
+                if time.monotonic() >= deadline:
+                    raise BackupError("Timed out waiting for an active backup/restore lock") from exc
+                time.sleep(0.05)
+        try:
+            yield lock
+        finally:
+            if os.name == "nt":
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 @dataclass
@@ -110,6 +155,7 @@ class BackupService:
         self._config = self._load_config()
         self._task: Optional[asyncio.Task] = None
         self._lock = asyncio.Lock()
+        self._operation_lock: BinaryIO | None = None
         self._last_run_at: Optional[float] = None
         self._last_run_status: Optional[str] = None
         self._last_run_error: Optional[str] = None
@@ -186,9 +232,7 @@ class BackupService:
             return await asyncio.to_thread(self._run_locked, self._do_backup_sync, reason)
 
     def _run_locked(self, operation: Callable[..., _T], *args: object) -> _T:
-        # mkdir is shared with the POSIX sidecar, including on mounted host folders.
-        # The worker owns this lock: cancelling an asyncio request must not unlock
-        # an ongoing pg_dump/psql process. Never steal a possibly-live stale lock.
+        # Never unlink this file: its inode carries the kernel-managed lock.
         lock = self._backup_dir / ".auth.lock"
         try:
             timeout = float(os.environ.get("BACKUP_LOCK_TIMEOUT_SECONDS", "300"))
@@ -196,27 +240,18 @@ class BackupService:
                 raise ValueError("expected a finite non-negative number")
         except ValueError as exc:
             raise BackupError(f"invalid BACKUP_LOCK_TIMEOUT_SECONDS: {exc}") from exc
-        deadline = time.monotonic() + timeout
-        while True:
+        with _advisory_lock(lock, timeout) as handle:
+            self._operation_lock = handle
             try:
-                lock.mkdir()
-                break
-            except FileExistsError:
-                if time.monotonic() >= deadline:
-                    raise BackupError(
-                        "timed out waiting for auth backup lock; another backup, restore "
-                        "or delete may be running (do not remove a live .auth.lock)"
-                    ) from None
-                time.sleep(0.05)
-            except OSError as exc:
-                raise BackupError(f"could not acquire auth backup lock: {exc}") from exc
-        try:
-            return operation(*args)
-        finally:
-            try:
-                lock.rmdir()
-            except OSError as exc:
-                log.warning("backup.lock_release_failed", extra={"error": str(exc)})
+                return operation(*args)
+            finally:
+                self._operation_lock = None
+
+    def _subprocess_lock_options(self) -> dict:
+        if os.name != "nt" and self._operation_lock is not None:
+            # An orphaned POSIX pg_dump/psql must retain the lease until it exits.
+            return {"pass_fds": (self._operation_lock.fileno(),)}
+        return {}
 
     def _do_backup_sync(self, reason: str, *, protected: frozenset[str] = frozenset()) -> dict:
         started = time.time()
@@ -252,6 +287,7 @@ class BackupService:
                         stdout=dump,
                         stderr=errors,
                         check=False,
+                        **self._subprocess_lock_options(),
                     )
                 except FileNotFoundError as exc:
                     raise BackupError(f"pg_dump not installed: {exc}") from exc
@@ -411,6 +447,7 @@ class BackupService:
                             stdout=subprocess.DEVNULL,
                             stderr=errors,
                             check=False,
+                            **self._subprocess_lock_options(),
                         )
                     except FileNotFoundError as exc:
                         raise BackupError(f"psql not installed: {exc}") from exc

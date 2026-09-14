@@ -218,7 +218,20 @@ snapshot. Restore errors roll back; the service does not silently remove SQL
 statements from a selected backup to make it appear successful.
 
 The API and sidecar serialize auth backup, restore, publication and deletion
-using the same `.auth.lock` directory in the stack's auth backup folder.
+using a kernel-managed advisory lock on the same persistent `.auth.lock` file
+in the stack's auth backup folder. Linux uses `flock`; native Windows uses a
+byte-range file lock. A crashed worker releases its lock without stale-directory
+cleanup. Never delete an advisory lock file while workers might be running:
+its inode is part of the lock identity. POSIX database child processes inherit
+the descriptor, keeping the lock if their parent exits first.
+
+Do not share one backup directory between native Windows services and Linux
+containers: cross-kernel lock interoperability is filesystem-dependent.
+The default stack-specific folders already keep these runtimes separate.
+When forcibly stopping a native Windows restore, terminate its entire process
+tree before starting another restore. If an older development build left a
+`.auth.lock` **directory**, stop all old workers and verify no restore is active
+before removing that legacy directory once; it is never stolen automatically.
 Restore streams the selected gzip to a private, disk-backed staging file,
 validates gzip EOF/CRC, and flushes/fsyncs it **before** capturing the pre-restore
 safety dump. A retained read-only file descriptor supplies `psql` stdin without

@@ -89,6 +89,7 @@ esac
     )
     # Bound the old infinite-loop implementation as well as the fixed one-shot path.
     command("sleep", "exit 91\n")
+    command("flock", 'test "${FAKE_FLOCK_FAIL:-0}" != 1\n')
     env = os.environ.copy()
     env.update(
         {
@@ -143,7 +144,7 @@ def test_pg_dump_failure_is_visible_and_keeps_previous_good_and_latest(shell: st
     assert result.returncode != 0
     assert "injected pg_dump connection failure" in result.stderr
     assert_previous_auth_backup(runtime)
-    assert not (runtime["auth"] / ".auth.lock").exists()
+    assert (runtime["auth"] / ".auth.lock").is_file()
 
 
 def test_gzip_failure_keeps_previous_good_and_latest(shell: str, runtime: dict) -> None:
@@ -160,7 +161,7 @@ def test_successful_backup_counts_only_immutable_snapshots_for_retention(shell: 
     assert gzip.decompress((runtime["auth"] / "auth-latest.sql.gz").read_bytes()) == b"-- new good SQL\n"
     assert (runtime["auth"] / "auth-20000101T000000Z.sql.gz").is_file()
     assert len(list(runtime["auth"].glob("auth-*.sql.gz"))) == 3
-    assert not (runtime["auth"] / ".auth.lock").exists()
+    assert (runtime["auth"] / ".auth.lock").is_file()
 
 
 def test_graph_backup_requests_save_and_archives_only_frozen_rdb(shell: str, runtime: dict) -> None:
@@ -171,7 +172,7 @@ def test_graph_backup_requests_save_and_archives_only_frozen_rdb(shell: str, run
         dump = archive.extractfile("dump.rdb")
         assert dump is not None
         assert dump.read() == b"REDIS0011fresh-snapshot"
-    assert not (runtime["graph"] / ".falkordb.lock").exists()
+    assert (runtime["graph"] / ".falkordb.lock").is_file()
 
 
 def test_first_graph_snapshot_does_not_require_a_previous_rdb(shell: str, runtime: dict) -> None:

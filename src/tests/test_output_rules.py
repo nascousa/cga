@@ -20,3 +20,18 @@ def test_rendered_rules_are_marked_as_server_managed():
     markdown = render_markdown(DEFAULT_RULES, base_profile="concise", version=2, project_id=7)
     assert "CGA-MANAGED" in markdown
     assert "project 7" in markdown
+
+
+def test_partial_global_profile_is_completed_without_changing_partial_overrides():
+    resolved, provenance = resolve_rules({"summary": "none"}, {"tool_updates": "all"})
+    assert set(resolved) == set(DEFAULT_RULES)
+    assert resolved["summary"] == "none"
+    assert provenance["preamble"] == "global"
+    assert provenance["tool_updates"] == "project"
+    assert validate_rules({"summary": "none"}) == {"summary": "none"}
+
+
+def test_legacy_partial_profile_can_be_rendered():
+    markdown = render_markdown({"summary": "none"}, base_profile="concise", version=1, project_id=None)
+    assert "Summary: `none`" in markdown
+    assert "Preamble: `none`" in markdown
