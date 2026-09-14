@@ -2,10 +2,10 @@
 
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.124
+- **Version:** 1.30.125
 - **Status:** Published
 - **Author:** Nate Scott
-- **Date:** 2026-07-28 (per-user collapsible Settings sections, 51 parser language icon badges, text-only Mojo extension label, refresh-stable Admin tabs, managed Azure Policy proxy, and 30-minute monitoring)
+- **Date:** 2026-09-14 (project isolation, atomic graph generations, deterministic relationships, recoverable indexing jobs, and backup/restore safeguards)
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
@@ -92,6 +92,7 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 - **Schedule Automation:** admin-defined recurring jobs for BrowserAgent page tests, agent activation calls, generic HTTP tasks, and project extensions.
 - **Project Extensions:** project-scoped extension pages and runs, starting with Azure Policy Change Monitor for cloud parity, GUID/version consistency, risky-effect scans, and Docker Desktop `/repos` path mapping.
 - **Runtime Backup:** PostgreSQL and FalkorDB snapshots for local-first persistence and recovery.
+- **Safe Graph Updates:** isolated generation builds retain the last successful graph on failure, with versioned parse evidence and deterministic cross-file relationships. See [graph integrity and recovery](docs/graph-reliability.md).
 - **Upgrade Center:** admin-visible upgrade readiness, backup status, schema compatibility, relay guidance, and copyable upgrade commands.
 
 ## Supported Languages And Formats

@@ -37,12 +37,8 @@ if (-not (Test-Path $ReleaseRoot)) {
     New-Item -ItemType Directory -Path $ReleaseRoot | Out-Null
 }
 
-if (Test-Path $versionedFolder) {
-    Remove-Item -Path $versionedFolder -Recurse -Force
-}
-
-if (Test-Path $zipPath) {
-    Remove-Item -Path $zipPath -Force
+if ((Test-Path -LiteralPath $versionedFolder) -or (Test-Path -LiteralPath $zipPath)) {
+    throw "Release output already exists. Choose a new version or ReleaseRoot; existing bundles, repositories, configuration and backups will not be overwritten."
 }
 
 & $portableBuilder -OutputFolder $versionedFolder

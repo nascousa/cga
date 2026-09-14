@@ -13,6 +13,19 @@ from backend.auth import router as auth_router
 from backend.cga_relay import router as relay_router
 
 
+def test_retrying_index_job_has_pending_queue_metadata() -> None:
+    result = auth_router._build_index_job_status(
+        {"job_id": "retry-job", "job_type": "index_full", "status": "retrying"},
+        {"retry-job": 1},
+        30,
+        5,
+    )
+    assert result.status == "retrying"
+    assert result.queue_position == 1
+    assert result.eta_seconds == 35
+    assert result.is_stale is False
+
+
 async def _seed_project(
     db: pgshim.Connection,
     *,

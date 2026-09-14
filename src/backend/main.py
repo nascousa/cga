@@ -80,13 +80,13 @@ from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.124"
+APP_VERSION = "1.30.125"
 AUTH_SCHEMA_VERSION = 1
-GRAPH_SCHEMA_VERSION = 1
+GRAPH_SCHEMA_VERSION = 2
 RUNTIME_CONFIG_VERSION = 1
 WORK_BRIEFING_SCHEMA_VERSION = 1
 MIN_RELAY_VERSION = "1.30.119"
-RECOMMENDED_RELAY_VERSION = os.getenv("CGA_RECOMMENDED_RELAY_VERSION", MIN_RELAY_VERSION)
+RECOMMENDED_RELAY_VERSION = os.getenv("CGA_RECOMMENDED_RELAY_VERSION", APP_VERSION)
 
 FALKORDB_HOST = os.getenv("FALKORDB_HOST", "localhost")
 FALKORDB_PORT = int(os.getenv("FALKORDB_PORT", "6379"))
@@ -251,7 +251,10 @@ def _upgrade_status_payload() -> dict:
             "id": "graph-schema",
             "label": "Graph index compatibility",
             "status": "ok",
-            "detail": f"graph schema v{GRAPH_SCHEMA_VERSION}; reindex not required for this version",
+            "detail": (
+                f"graph schema v{GRAPH_SCHEMA_VERSION}; existing graphs remain readable. "
+                "A successful index rebuilds legacy relationship evidence without deleting the live generation first."
+            ),
         },
         {
             "id": "relay",
@@ -1290,5 +1293,4 @@ if _FRONTEND.is_dir():
 
 if __name__ == "__main__":
     uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=False)
-
 

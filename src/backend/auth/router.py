@@ -18,7 +18,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from backend import runtime_config
-from backend.auth.access import accessible_project_ids, id_filter_sql, require_project_access
+from backend.auth.access import accessible_project_ids, id_filter_sql, registered_project_scope, require_project_access
+from backend.auth.context import bind_project_scope
 from backend.auth.crystals import require_crystal_suite
 from backend.auth.database import get_db
 from backend.auth.dependencies import get_current_user, require_admin, get_consumer, get_registry
@@ -369,7 +370,7 @@ def _build_index_job_status(
 
     if is_stale:
         job_status = "stale"
-    elif job_status == "pending":
+    elif job_status in {"pending", "retrying"}:
         queue_position = pending_by_id.get(job_id)
         if queue_position:
             eta_seconds = int(queue_position * avg_duration_sec + processing_remaining)
@@ -1645,7 +1646,8 @@ async def trigger_project_index(
             detail=f"Repository path not found for project_name '{project['project_name']}'",
         )
 
-    result = await mcp_server.index_repo_changes(repo_path=repo_path, project_name=project["project_name"])
+    with bind_project_scope(registered_project_scope(project)):
+        result = await mcp_server.index_repo_changes(repo_path=repo_path, project_name=project["project_name"])
     return ProjectIndexTriggerOut(
         project_id=project["id"],
         project_name=project["project_name"],
@@ -1676,7 +1678,8 @@ async def trigger_project_full_index(
             detail=f"Repository path not found for project_name '{project['project_name']}'",
         )
 
-    result = await mcp_server.index_full(repo_path=repo_path, project_name=project["project_name"])
+    with bind_project_scope(registered_project_scope(project)):
+        result = await mcp_server.index_full(repo_path=repo_path, project_name=project["project_name"])
     return ProjectIndexTriggerOut(
         project_id=project["id"],
         project_name=project["project_name"],

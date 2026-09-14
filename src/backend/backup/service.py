@@ -4,6 +4,7 @@ Design goals
 ------------
 * Online snapshots via ``pg_dump`` (no service interruption).
 * Restore via ``psql`` against a transactional script.
+* Bounded-memory streaming through private disk-backed staging files.
 * Configurable auto-backup loop (enabled / interval / retention).
 * Pure-stdlib persistence of config to a JSON sidecar file.
 
@@ -16,19 +17,28 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import gzip
 import json
 import logging
+import math
 import os
+import re
 import shutil
 import subprocess
+import tempfile
 import time
+import uuid
+import zlib
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import BinaryIO, Callable, Optional, TypeVar
 from urllib.parse import urlparse
 
 log = logging.getLogger(__name__)
+_T = TypeVar("_T")
+_IO_CHUNK_SIZE = 1024 * 1024
+_STDERR_LIMIT = 64 * 1024
 
 
 class BackupError(Exception):
@@ -55,6 +65,16 @@ class BackupConfig:
 
 def _iso_now() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _process_error(stderr: BinaryIO) -> str:
+    stderr.flush()
+    stderr.seek(0)
+    data = stderr.read(_STDERR_LIMIT + 1)
+    message = data[:_STDERR_LIMIT].decode("utf-8", errors="replace").strip()
+    if len(data) > _STDERR_LIMIT:
+        message += " [stderr truncated]"
+    return message or "unknown error"
 
 
 def _pg_env_from_dsn(dsn: str) -> dict[str, str]:
@@ -163,13 +183,47 @@ class BackupService:
 
     async def run_backup(self, *, reason: str = "manual") -> dict:
         async with self._lock:
-            return await asyncio.to_thread(self._do_backup_sync, reason)
+            return await asyncio.to_thread(self._run_locked, self._do_backup_sync, reason)
 
-    def _do_backup_sync(self, reason: str) -> dict:
+    def _run_locked(self, operation: Callable[..., _T], *args: object) -> _T:
+        # mkdir is shared with the POSIX sidecar, including on mounted host folders.
+        # The worker owns this lock: cancelling an asyncio request must not unlock
+        # an ongoing pg_dump/psql process. Never steal a possibly-live stale lock.
+        lock = self._backup_dir / ".auth.lock"
+        try:
+            timeout = float(os.environ.get("BACKUP_LOCK_TIMEOUT_SECONDS", "300"))
+            if not math.isfinite(timeout) or timeout < 0:
+                raise ValueError("expected a finite non-negative number")
+        except ValueError as exc:
+            raise BackupError(f"invalid BACKUP_LOCK_TIMEOUT_SECONDS: {exc}") from exc
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                lock.mkdir()
+                break
+            except FileExistsError:
+                if time.monotonic() >= deadline:
+                    raise BackupError(
+                        "timed out waiting for auth backup lock; another backup, restore "
+                        "or delete may be running (do not remove a live .auth.lock)"
+                    ) from None
+                time.sleep(0.05)
+            except OSError as exc:
+                raise BackupError(f"could not acquire auth backup lock: {exc}") from exc
+        try:
+            return operation(*args)
+        finally:
+            try:
+                lock.rmdir()
+            except OSError as exc:
+                log.warning("backup.lock_release_failed", extra={"error": str(exc)})
+
+    def _do_backup_sync(self, reason: str, *, protected: frozenset[str] = frozenset()) -> dict:
         started = time.time()
         ts = _iso_now()
-        target = self._backup_dir / f"auth-{ts}.sql.gz"
-        tmp = target.with_suffix(".gz.tmp")
+        target = self._backup_dir / f"auth-{ts}-{uuid.uuid4().hex}.sql.gz"
+        tmp = self._backup_dir / f".{target.name}.tmp"
+        latest_tmp = self._backup_dir / f".{target.name}.latest.tmp"
         env = _pg_env_from_dsn(self._dsn)
         # ``pg_dump --clean --if-exists`` produces a self-contained script
         # that can be replayed against an empty or existing database.
@@ -182,71 +236,94 @@ class BackupService:
             "--format=plain",
         ]
         try:
-            with tmp.open("wb") as out:
-                # Pipe pg_dump | gzip; we use gzip via Python for portability.
-                import gzip
-
-                with gzip.GzipFile(fileobj=out, mode="wb") as gz:
+            with (
+                tmp.open("xb") as out,
+                tempfile.TemporaryFile(
+                    mode="w+b", prefix=".cga-pg-dump-", dir=self._backup_dir
+                ) as dump,
+                tempfile.TemporaryFile(
+                    mode="w+b", prefix=".cga-pg-errors-", dir=self._backup_dir
+                ) as errors,
+            ):
+                try:
                     proc = subprocess.run(
                         cmd,
                         env=env,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.PIPE,
+                        stdout=dump,
+                        stderr=errors,
                         check=False,
                     )
-                    if proc.returncode != 0:
-                        stderr = proc.stderr.decode("utf-8", errors="replace").strip()
-                        raise BackupError(f"pg_dump failed: {stderr or 'unknown error'}")
-                    gz.write(proc.stdout)
+                except FileNotFoundError as exc:
+                    raise BackupError(f"pg_dump not installed: {exc}") from exc
+                except OSError as exc:
+                    raise BackupError(f"could not start pg_dump: {exc}") from exc
+                if proc.returncode != 0:
+                    raise BackupError(f"pg_dump failed: {_process_error(errors)}")
+                dump.flush()
+                dump.seek(0)
+                header = dump.read(16384)
+                source_version = re.search(rb"-- Dumped from database version (\d+)", header)
+                client_version = re.search(rb"-- Dumped by pg_dump version (\d+)", header)
+                if source_version is None or client_version is None:
+                    raise BackupError("pg_dump output is missing its PostgreSQL version headers")
+                if source_version.group(1) != client_version.group(1):
+                    raise BackupError(
+                        "pg_dump major version must match the PostgreSQL server "
+                        f"({client_version.group(1).decode()} != {source_version.group(1).decode()}); "
+                        "install matching client tools before creating a restorable backup"
+                    )
+                dump.seek(0)
+                with gzip.GzipFile(fileobj=out, mode="wb") as gz:
+                    shutil.copyfileobj(dump, gz, length=_IO_CHUNK_SIZE)
+                out.flush()
+                os.fsync(out.fileno())
             tmp.replace(target)
-        except FileNotFoundError as exc:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-            self._record_run(False, f"pg_dump not installed: {exc}")
-            raise BackupError(f"pg_dump not installed: {exc}") from exc
-        except BackupError:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-            self._record_run(False, "pg_dump failed")
+
+            if "auth-latest.sql.gz" not in protected:
+                try:
+                    shutil.copyfile(target, latest_tmp)
+                    with latest_tmp.open("r+b") as fh:
+                        os.fsync(fh.fileno())
+                    latest_tmp.replace(self._backup_dir / "auth-latest.sql.gz")
+                except OSError as exc:
+                    raise BackupError(f"backup latest update failed: {exc}") from exc
+            size_bytes = target.stat().st_size
+        except BackupError as exc:
+            self._record_run(False, str(exc))
             raise
         except OSError as exc:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
             self._record_run(False, str(exc))
             raise BackupError(f"backup write failed: {exc}") from exc
+        finally:
+            for pending in (tmp, latest_tmp):
+                try:
+                    pending.unlink(missing_ok=True)
+                except OSError as exc:
+                    log.warning("backup.staging_cleanup_failed", extra={"error": str(exc)})
 
-        # Maintain a stable "latest" pointer file.
-        latest = self._backup_dir / "auth-latest.sql.gz"
-        try:
-            shutil.copyfile(target, latest)
-        except OSError as exc:
-            log.warning("backup.latest_update_failed", extra={"error": str(exc)})
-
-        self._prune()
+        self._prune(protected | {target.name})
         self._record_run(True, None)
         return {
             "name": target.name,
-            "size_bytes": target.stat().st_size,
+            "size_bytes": size_bytes,
             "duration_ms": int((time.time() - started) * 1000),
             "reason": reason,
         }
 
-    def _prune(self) -> None:
+    def _prune(self, protected: frozenset[str] = frozenset()) -> None:
         # Prune only the pg_dump-format snapshots; legacy SQLite snapshots
         # are left in place for the operator to manage manually.
-        snapshots = sorted(
-            self._backup_dir.glob("auth-2*.sql.gz"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
+        dated = []
+        for path in self._backup_dir.glob("auth-2*.sql.gz"):
+            try:
+                dated.append((path.stat().st_mtime_ns, path))
+            except OSError:
+                continue
+        snapshots = [path for _, path in sorted(dated, reverse=True)]
         excess = snapshots[self._config.keep_count :]
         for path in excess:
+            if path.name in protected:
+                continue
             try:
                 path.unlink()
             except OSError as exc:
@@ -260,48 +337,106 @@ class BackupService:
     # ── restore ───────────────────────────────────────────────────────────
     async def restore(self, name: str) -> dict:
         async with self._lock:
-            return await asyncio.to_thread(self._do_restore_sync, name)
+            return await asyncio.to_thread(self._run_locked, self._do_restore_sync, name)
+
+    def _freeze_restore_source(self, src: Path, name: str) -> BinaryIO:
+        # Disk-backed, private, delete-on-close (anonymous where supported).
+        # Never use the system temp directory, which may be a memory filesystem.
+        try:
+            with tempfile.TemporaryFile(
+                mode="w+b", prefix=".cga-restore-", dir=self._backup_dir
+            ) as staging:
+                has_sql = False
+                try:
+                    with gzip.open(src, "rb") as gz:
+                        for chunk in iter(lambda: gz.read(_IO_CHUNK_SIZE), b""):
+                            has_sql = has_sql or bool(chunk.strip())
+                            try:
+                                staging.write(chunk)
+                            except OSError as exc:
+                                raise BackupError(f"restore staging write failed: {exc}") from exc
+                except (OSError, EOFError, zlib.error) as exc:
+                    raise BackupError(f"snapshot read failed ({name}): {exc}") from exc
+                if not has_sql:
+                    raise BackupError(f"snapshot is empty ({name})")
+                # Reaching gzip EOF above verifies its trailer/CRC before any
+                # safety dump. Retain only a read-only stream for the frozen FD.
+                staging.flush()
+                os.fsync(staging.fileno())
+                staging.seek(0)
+                fd = os.dup(staging.fileno())
+                try:
+                    frozen = os.fdopen(fd, "rb")
+                except BaseException:
+                    os.close(fd)
+                    raise
+                try:
+                    staging.close()
+                except BaseException:
+                    frozen.close()
+                    raise
+                return frozen
+        except OSError as exc:
+            raise BackupError(f"restore staging failed: {exc}") from exc
 
     def _do_restore_sync(self, name: str) -> dict:
         src = self.snapshot_path(name)
+        # The frozen FD is independent of the original path and remains open
+        # throughout safety publication/pruning and the transactional restore.
+        with self._freeze_restore_source(src, name) as frozen:
+            try:
+                safety = self._do_backup_sync(
+                    reason="pre-restore-safety", protected=frozenset({name, src.name})
+                )
+            except BackupError as exc:
+                raise BackupError(f"failed to capture pre-restore safety dump: {exc}") from exc
 
-        # Capture a pre-restore safety snapshot first.
-        try:
-            safety = self._do_backup_sync(reason="pre-restore-safety")
-        except BackupError as exc:
-            raise BackupError(f"failed to capture pre-restore safety dump: {exc}") from exc
-
-        env = _pg_env_from_dsn(self._dsn)
-        try:
-            import gzip
-
-            with gzip.open(src, "rb") as gz:
-                script = gz.read()
-            proc = subprocess.run(
-                ["psql", "--quiet", "--no-psqlrc", "--single-transaction"],
-                env=env,
-                input=script,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                check=False,
-            )
-            if proc.returncode != 0:
-                stderr = proc.stderr.decode("utf-8", errors="replace").strip()
-                raise BackupError(f"psql restore failed: {stderr or 'unknown error'}")
-        except FileNotFoundError as exc:
-            raise BackupError(f"psql not installed: {exc}") from exc
-        except OSError as exc:
-            raise BackupError(f"restore failed: {exc}") from exc
+            env = _pg_env_from_dsn(self._dsn)
+            try:
+                with tempfile.TemporaryFile(
+                    mode="w+b", prefix=".cga-psql-errors-", dir=self._backup_dir
+                ) as errors:
+                    try:
+                        proc = subprocess.run(
+                            [
+                                "psql",
+                                "--quiet",
+                                "--no-psqlrc",
+                                "--single-transaction",
+                                "--set=ON_ERROR_STOP=1",
+                                "--file=-",
+                            ],
+                            env=env,
+                            stdin=frozen,
+                            stdout=subprocess.DEVNULL,
+                            stderr=errors,
+                            check=False,
+                        )
+                    except FileNotFoundError as exc:
+                        raise BackupError(f"psql not installed: {exc}") from exc
+                    except OSError as exc:
+                        raise BackupError(f"could not start psql: {exc}") from exc
+                    if proc.returncode != 0:
+                        raise BackupError(f"psql restore failed: {_process_error(errors)}")
+            except OSError as exc:
+                raise BackupError(f"restore diagnostics I/O failed: {exc}") from exc
 
         return {
-            "restored_from": src.name,
+            "restored_from": name,
             "pre_restore_snapshot": safety.get("name"),
             "note": "Restart the CGA service to ensure all components pick up the restored database.",
         }
 
     async def delete(self, name: str) -> None:
+        async with self._lock:
+            await asyncio.to_thread(self._run_locked, self._do_delete_sync, name)
+
+    def _do_delete_sync(self, name: str) -> None:
         path = self.snapshot_path(name)
-        await asyncio.to_thread(path.unlink)
+        try:
+            path.unlink()
+        except OSError as exc:
+            raise BackupError(f"snapshot delete failed: {exc}") from exc
 
     # ── status ────────────────────────────────────────────────────────────
     def status(self) -> dict:

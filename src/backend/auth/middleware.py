@@ -8,9 +8,11 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+from fastapi import HTTPException
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from backend.auth.context import _current_project_db_id, _current_project_external_id
+from backend.auth.access import registered_project_scope
+from backend.auth.context import bind_project_scope
 from backend.auth import pgshim
 from backend.auth.crystals import validate_crystal_suite_headers
 from backend.auth.security import hash_token
@@ -126,7 +128,7 @@ class ProjectTokenMiddleware:
                     """
                     SELECT pt.id, pt.project_id, pt.token_type,
                            p.project_id AS project_external_id,
-                           p.project_name
+                           p.project_name, p.repo_path
                     FROM project_tokens pt
                     JOIN projects p ON p.id = pt.project_id
                     WHERE pt.token_hash = ? AND pt.is_active = 1 AND p.is_active = 1
@@ -157,6 +159,17 @@ class ProjectTokenMiddleware:
             )
             return
 
+        try:
+            project_scope = registered_project_scope({
+                "id": row["project_id"],
+                "project_id": row["project_external_id"],
+                "project_name": row["project_name"],
+                "repo_path": row["repo_path"],
+            })
+        except HTTPException as exc:
+            await _send_error(send, {"detail": exc.detail}, exc.status_code)
+            return
+
         # Store auth context in ASGI scope state (readable via request.state)
         if "state" not in scope:
             scope["state"] = {}
@@ -165,17 +178,9 @@ class ProjectTokenMiddleware:
         scope["state"]["project_name"] = row["project_name"]
         scope["state"]["project_token_id"] = row["id"]
         scope["state"]["project_token_type"] = row["token_type"]
+        scope["state"]["registered_project_scope"] = project_scope
 
         # Set ContextVar so MCP tool functions pick up the right project graph.
         # Pure ASGI middleware propagates ContextVars correctly (unlike BaseHTTPMiddleware).
-        from backend.graph.registry import _current_project_name
-
-        token_var = _current_project_name.set(row["project_name"].strip().lower())
-        project_id_var = _current_project_external_id.set(effective_project_id)
-        project_db_var = _current_project_db_id.set(int(row["project_id"]))
-        try:
+        with bind_project_scope(project_scope):
             await self.app(scope, receive, send)
-        finally:
-            _current_project_db_id.reset(project_db_var)
-            _current_project_external_id.reset(project_id_var)
-            _current_project_name.reset(token_var)

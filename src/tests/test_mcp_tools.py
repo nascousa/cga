@@ -9,14 +9,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from backend import runtime_config
-from backend.auth.context import _current_project_external_id
+from backend.auth.context import _current_project_external_id, ProjectScope, bind_project_scope
 import backend.tools.server as mcp_srv
 from backend.workbriefing.service import WorkBriefingService
 from backend.workbriefing.store import PgVectorActivityStore
 
 
 @pytest.fixture(autouse=True)
-def reset_server_state():
+def reset_server_state(tmp_path):
     """Reset module-level singletons between tests."""
     mcp_srv._registry = None
     mcp_srv._graph = mcp_srv._GraphProxy()
@@ -24,7 +24,8 @@ def reset_server_state():
     mcp_srv._cache = None
     mcp_srv._recorder = None
     mcp_srv._work_briefing_service = None
-    yield
+    with bind_project_scope(ProjectScope("CGA123", 1, "contextgraph", str(tmp_path))):
+        yield
     mcp_srv._registry = None
     mcp_srv._graph = mcp_srv._GraphProxy()
     mcp_srv._producer = None
@@ -250,27 +251,26 @@ def test_retrieve_context_records_task_correlation_in_trace_args():
 
 
 @pytest.mark.asyncio
-async def test_index_full_queues_job():
+async def test_index_full_queues_job(tmp_path):
     mcp_srv._producer = _mock_producer("5000-0")
-    with patch("backend.tools.server._resolve_repo_root", return_value=Path("/repo/myproject")):
-        result = await mcp_srv.index_full(repo_path="/repo/myproject")
+    result = await mcp_srv.index_full(repo_path=str(tmp_path))
     assert result["status"] == "queued"
     assert result["stream_id"] == "5000-0"
     assert result["job_id"] == "job-1"
     mcp_srv._producer.submit_full_index.assert_awaited_once_with(
-        "/repo/myproject",
+        str(tmp_path),
         project_name="contextgraph",
     )
 
 
 @pytest.mark.asyncio
-async def test_index_full_uses_explicit_project_name_override():
+async def test_index_full_uses_explicit_project_name_override(tmp_path):
     mcp_srv._producer = _mock_producer("5000-1")
-    with patch("backend.tools.server._resolve_repo_root", return_value=Path("/repo/osagent")):
-        result = await mcp_srv.index_full(repo_path="/repo/osagent", project_name="osagent")
+    with bind_project_scope(ProjectScope("OSAGENT123", 2, "osagent", str(tmp_path))):
+        result = await mcp_srv.index_full(repo_path=str(tmp_path), project_name="osagent")
     assert result["job_id"] == "job-1"
     mcp_srv._producer.submit_full_index.assert_awaited_once_with(
-        "/repo/osagent",
+        str(tmp_path),
         project_name="osagent",
     )
 
@@ -278,7 +278,7 @@ async def test_index_full_uses_explicit_project_name_override():
 @pytest.mark.asyncio
 async def test_index_full_requires_visible_repo_path():
     mcp_srv._producer = _mock_producer("5000-2")
-    with patch("backend.tools.server._resolve_repo_root", side_effect=FileNotFoundError("missing")):
+    with patch("backend.tools.server.authorized_repo_root", side_effect=FileNotFoundError("missing")):
         result = await mcp_srv.index_full(repo_path="D:/Repos/missing")
     assert result["status"] == "relay_required"
     assert result["reason"] == "repo_path_unavailable"
@@ -287,10 +287,10 @@ async def test_index_full_requires_visible_repo_path():
 
 
 @pytest.mark.asyncio
-async def test_index_incremental_queues_job():
+async def test_index_incremental_queues_job(tmp_path):
     mcp_srv._producer = _mock_producer("5001-0")
     result = await mcp_srv.index_incremental(
-        repo_path="/repo", changed_paths=["a.py", "b.py"]
+        repo_path=str(tmp_path), changed_paths=["a.py", "b.py"]
     )
     assert result["changed_count"] == 2
     assert result["job_id"] == "job-2"
@@ -298,17 +298,18 @@ async def test_index_incremental_queues_job():
 
 
 @pytest.mark.asyncio
-async def test_index_incremental_uses_explicit_project_name_override():
+async def test_index_incremental_uses_explicit_project_name_override(tmp_path):
     mcp_srv._producer = _mock_producer("5001-1")
-    result = await mcp_srv.index_incremental(
-        repo_path="/repo",
-        changed_paths=["a.py"],
-        project_name="osagent",
-    )
+    with bind_project_scope(ProjectScope("OSAGENT123", 2, "osagent", str(tmp_path))):
+        result = await mcp_srv.index_incremental(
+            repo_path=str(tmp_path),
+            changed_paths=["a.py"],
+            project_name="osagent",
+        )
     assert result["changed_count"] == 1
     mcp_srv._producer.submit_incremental_index.assert_awaited_once_with(
-        "/repo",
-        ["a.py"],
+        str(tmp_path),
+        [str(tmp_path / "a.py")],
         project_name="osagent",
     )
 
@@ -449,35 +450,35 @@ async def test_workassist_get_activity_briefing_uses_authenticated_project_conte
 
 
 @pytest.mark.asyncio
-async def test_index_repo_changes_uses_explicit_project_name_override():
+async def test_index_repo_changes_uses_explicit_project_name_override(tmp_path):
     mcp_srv._producer = _mock_producer("5011-0")
-    with patch(
+    with bind_project_scope(ProjectScope("OSAGENT123", 2, "osagent", str(tmp_path))), patch(
         "backend.tools.server._collect_git_changed_paths",
         return_value={"changed_paths": ["src/a.py"], "destructive_paths": []},
     ):
-        result = await mcp_srv.index_repo_changes(repo_path="/repo", project_name="osagent")
+        result = await mcp_srv.index_repo_changes(repo_path=str(tmp_path), project_name="osagent")
     assert result["mode"] == "incremental"
     mcp_srv._producer.submit_incremental_index.assert_awaited_once_with(
-        "/repo",
-        ["src/a.py"],
+        str(tmp_path),
+        [str(tmp_path / "src" / "a.py")],
         project_name="osagent",
     )
 
 
 @pytest.mark.asyncio
-async def test_collect_git_changed_paths_parses_modified_and_untracked():
+async def test_collect_git_changed_paths_parses_modified_and_untracked(tmp_path):
     proc = _FakeGitStatusProcess(stdout=" M src/a.py\n?? docs/b.md\n")
     with patch("backend.tools.server.asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
-        result = await mcp_srv._collect_git_changed_paths("/repo", include_untracked=True)
+        result = await mcp_srv._collect_git_changed_paths(str(tmp_path), include_untracked=True)
     assert result["changed_paths"] == ["src/a.py", "docs/b.md"]
     assert result["destructive_paths"] == []
 
 
 @pytest.mark.asyncio
-async def test_collect_git_changed_paths_uses_normalized_repo_path():
+async def test_collect_git_changed_paths_uses_normalized_repo_path(tmp_path):
     proc = _FakeGitStatusProcess(stdout=" M src/a.py\n")
     create_proc = AsyncMock(return_value=proc)
-    with patch("backend.tools.server._normalize_repo_path", return_value="/repos/project"), patch(
+    with patch("backend.tools.server.authorized_repo_root", return_value=tmp_path), patch(
         "backend.tools.server.asyncio.create_subprocess_exec", new=create_proc
     ):
         result = await mcp_srv._collect_git_changed_paths("D:/Repos/project", include_untracked=True)
@@ -486,7 +487,7 @@ async def test_collect_git_changed_paths_uses_normalized_repo_path():
     create_proc.assert_awaited_once_with(
         "git",
         "-C",
-        "/repos/project",
+        str(tmp_path),
         "status",
         "--porcelain=v1",
         "--untracked-files=all",
@@ -496,23 +497,23 @@ async def test_collect_git_changed_paths_uses_normalized_repo_path():
 
 
 @pytest.mark.asyncio
-async def test_collect_git_changed_paths_marks_delete_and_rename_destructive():
+async def test_collect_git_changed_paths_marks_delete_and_rename_destructive(tmp_path):
     proc = _FakeGitStatusProcess(stdout=" D src/old.py\nR  src/old2.py -> src/new2.py\n")
     with patch("backend.tools.server.asyncio.create_subprocess_exec", new=AsyncMock(return_value=proc)):
-        result = await mcp_srv._collect_git_changed_paths("/repo", include_untracked=True)
+        result = await mcp_srv._collect_git_changed_paths(str(tmp_path), include_untracked=True)
     assert "src/old.py" in result["destructive_paths"]
     assert "src/new2.py" in result["changed_paths"]
     assert "src/old2.py" in result["destructive_paths"]
 
 
 @pytest.mark.asyncio
-async def test_index_repo_changes_returns_noop_when_git_clean():
+async def test_index_repo_changes_returns_noop_when_git_clean(tmp_path):
     mcp_srv._producer = _mock_producer("5010-0")
     with patch(
         "backend.tools.server._collect_git_changed_paths",
         return_value={"changed_paths": [], "destructive_paths": []},
     ):
-        result = await mcp_srv.index_repo_changes(repo_path="/repo")
+        result = await mcp_srv.index_repo_changes(repo_path=str(tmp_path))
     assert result["status"] == "noop"
     assert result["mode"] == "none"
     mcp_srv._producer.submit_incremental_index.assert_not_called()
@@ -520,13 +521,13 @@ async def test_index_repo_changes_returns_noop_when_git_clean():
 
 
 @pytest.mark.asyncio
-async def test_index_repo_changes_queues_incremental_for_safe_git_changes():
+async def test_index_repo_changes_queues_incremental_for_safe_git_changes(tmp_path):
     mcp_srv._producer = _mock_producer("5011-0")
     with patch(
         "backend.tools.server._collect_git_changed_paths",
         return_value={"changed_paths": ["src/a.py", "docs/b.md"], "destructive_paths": []},
     ):
-        result = await mcp_srv.index_repo_changes(repo_path="/repo")
+        result = await mcp_srv.index_repo_changes(repo_path=str(tmp_path))
     assert result["status"] == "queued"
     assert result["mode"] == "incremental"
     assert result["changed_count"] == 2
@@ -535,32 +536,32 @@ async def test_index_repo_changes_queues_incremental_for_safe_git_changes():
 
 
 @pytest.mark.asyncio
-async def test_index_repo_changes_uses_incremental_for_destructive_git_changes_by_default():
+async def test_index_repo_changes_uses_incremental_for_destructive_git_changes_by_default(tmp_path):
     mcp_srv._producer = _mock_producer("5012-0")
     with patch(
         "backend.tools.server._collect_git_changed_paths",
         return_value={"changed_paths": ["src/new.py"], "destructive_paths": ["src/old.py"]},
     ):
-        result = await mcp_srv.index_repo_changes(repo_path="/repo")
+        result = await mcp_srv.index_repo_changes(repo_path=str(tmp_path))
     assert result["status"] == "queued"
     assert result["mode"] == "incremental"
     assert result["changed_count"] == 2
     mcp_srv._producer.submit_incremental_index.assert_awaited_once_with(
-        "/repo",
-        ["src/old.py", "src/new.py"],
+        str(tmp_path),
+        [str(tmp_path / "src" / "old.py"), str(tmp_path / "src" / "new.py")],
         project_name="contextgraph",
     )
     mcp_srv._producer.submit_full_index.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_index_repo_changes_can_still_promote_to_full_on_destructive_git_changes():
+async def test_index_repo_changes_can_still_promote_to_full_on_destructive_git_changes(tmp_path):
     mcp_srv._producer = _mock_producer("5013-0")
     with patch(
         "backend.tools.server._collect_git_changed_paths",
         return_value={"changed_paths": ["src/new.py"], "destructive_paths": ["src/old.py"]},
     ):
-        result = await mcp_srv.index_repo_changes(repo_path="/repo", auto_full_on_destructive=True)
+        result = await mcp_srv.index_repo_changes(repo_path=str(tmp_path), auto_full_on_destructive=True)
     assert result["status"] == "queued"
     assert result["mode"] == "full"
     assert result["reason"] == "destructive_git_change"
@@ -569,13 +570,13 @@ async def test_index_repo_changes_can_still_promote_to_full_on_destructive_git_c
 
 
 @pytest.mark.asyncio
-async def test_index_repo_changes_requires_relay_when_git_binary_missing():
+async def test_index_repo_changes_requires_relay_when_git_binary_missing(tmp_path):
     mcp_srv._producer = _mock_producer("5014-0")
     with patch(
         "backend.tools.server._collect_git_changed_paths",
         side_effect=FileNotFoundError("git"),
     ):
-        result = await mcp_srv.index_repo_changes(repo_path="/repo")
+        result = await mcp_srv.index_repo_changes(repo_path=str(tmp_path))
     assert result["status"] == "relay_required"
     assert result["mode"] == "relay"
     assert result["reason"] == "git_unavailable"
@@ -585,13 +586,13 @@ async def test_index_repo_changes_requires_relay_when_git_binary_missing():
 
 
 @pytest.mark.asyncio
-async def test_index_repo_changes_requires_relay_when_git_status_fails():
+async def test_index_repo_changes_requires_relay_when_git_status_fails(tmp_path):
     mcp_srv._producer = _mock_producer("5015-0")
     with patch(
         "backend.tools.server._collect_git_changed_paths",
         side_effect=RuntimeError("git status failed"),
     ):
-        result = await mcp_srv.index_repo_changes(repo_path="/repo")
+        result = await mcp_srv.index_repo_changes(repo_path=str(tmp_path))
     assert result["status"] == "relay_required"
     assert result["mode"] == "relay"
     assert result["reason"] == "git_status_failed"
@@ -601,9 +602,12 @@ async def test_index_repo_changes_requires_relay_when_git_status_fails():
 
 
 @pytest.mark.asyncio
-async def test_get_index_job_status():
+async def test_get_index_job_status(tmp_path):
     producer = _mock_producer("5002-0")
-    producer.get_job_status.return_value = {"job_id": "job-2", "status": "processing"}
+    producer.get_job_status.return_value = {
+        "job_id": "job-2", "status": "processing",
+        "project_name": "contextgraph", "repo_path": str(tmp_path),
+    }
     mcp_srv._producer = producer
 
     result = await mcp_srv.get_index_job_status("job-2")
@@ -612,15 +616,21 @@ async def test_get_index_job_status():
 
 
 @pytest.mark.asyncio
-async def test_wait_for_index_ready():
+async def test_wait_for_index_ready(tmp_path):
     producer = _mock_producer("5003-0")
     producer.wait_for_job_status.return_value = {
         "job_id": "job-3",
         "status": "done",
         "ready": True,
         "timeout": False,
+        "project_name": "contextgraph",
+        "repo_path": str(tmp_path),
     }
     mcp_srv._producer = producer
+    producer.get_job_status.return_value = {
+        "job_id": "job-3", "status": "processing",
+        "project_name": "contextgraph", "repo_path": str(tmp_path),
+    }
 
     result = await mcp_srv.wait_for_index_ready("job-3", timeout_sec=5.0, poll_interval_sec=0.2)
     assert result["ready"] is True
@@ -703,18 +713,12 @@ def test_strategy_query_uses_server_strategy(tmp_path, monkeypatch):
     monkeypatch.setattr(runtime_config, "RUNTIME_CONFIG_PATH", tmp_path / "runtime-config.json")
     runtime_config.update_runtime_config({"indexing": {"default_token_budget": 2400}})
     mcp_srv._graph = MagicMock()
-    with patch("backend.tools.server.run_cg_first_strategy") as mocked:
-        mocked.return_value = {
-            "strategy": "cg-first",
-            "source": "contextgraph-server",
-            "used_fallback": False,
-            "graph_context": [{"qualified_name": "pkg.mod.fn"}],
-        }
+    with patch("backend.tools.server.retrieve_context", return_value=[]) as mocked:
         result = mcp_srv.strategy_query(query="index flow")
 
     assert result["strategy"] == "cg-first"
-    mocked.assert_called_once()
-    assert mocked.call_args.kwargs["token_budget"] == 2400
+    mocked.assert_called_once_with(query="index flow", limit=8)
+    assert result["token_budget"] == 2400
 
 
 # ---------------------------------------------------------------------------
@@ -825,4 +829,3 @@ def test_analyze_import_surface():
     assert result[0]["file_path"] == "src/core.py"
     assert result[0]["internal_imports"] == 5
     assert result[0]["incoming_imports"] == 8
-

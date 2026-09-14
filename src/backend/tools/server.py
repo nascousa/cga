@@ -27,15 +27,21 @@ import time
 from pathlib import Path
 
 import structlog
+from fastapi import HTTPException
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 from backend import runtime_config
-from backend.auth.context import _current_project_external_id
-from backend.agent.query_strategy import run_cg_first_strategy
+from backend.auth.access import authorized_file_path, authorized_repo_root, project_owns_graph
+from backend.auth.context import (
+    _current_project_external_id,
+    authorized_graph_name,
+    require_project_scope,
+)
+from backend.agent.query_strategy import decide_fallback, trim_items_to_budget
 from backend.graph.registry import GraphRegistry
 from backend.graph import schema as S
-from backend.indexer.pipeline import _normalize_repo_path, _resolve_repo_root
+from backend.indexer.paths import RepositoryPathError, resolve_changed_path
 from backend.perf.context_quality import benchmark_context_quality as run_context_quality_benchmark
 from backend.perf.token_efficiency import benchmark_token_efficiency as run_token_efficiency_benchmark
 from backend.tools.producer import MCPProducer
@@ -77,7 +83,7 @@ class _GraphProxy:
     def query(self, cypher: str, params: dict | None = None):
         if _registry is None:
             raise RuntimeError("MCP server not initialized")
-        return _registry.current().query(cypher, params)
+        return _registry.get(_resolve_project_name()).query(cypher, params)
 
     def __bool__(self) -> bool:  # enables ``if not _graph:`` checks
         return _registry is not None
@@ -85,11 +91,7 @@ class _GraphProxy:
 
 _graph = _GraphProxy()
 def _resolve_project_name(project_name: str | None = None) -> str:
-    from backend.graph.registry import _current_project_name
-
-    if project_name:
-        return project_name.strip().lower()
-    return _current_project_name.get()
+    return authorized_graph_name(project_name)
 
 
 async def _collect_git_changed_paths(repo_path: str, include_untracked: bool = True) -> dict[str, list[str]]:
@@ -104,7 +106,7 @@ async def _collect_git_changed_paths(repo_path: str, include_untracked: bool = T
     We classify deletes and renames as destructive because the current incremental
     pipeline does not remove stale symbols for files that disappeared from disk.
     """
-    resolved_repo_path = _normalize_repo_path(repo_path)
+    resolved_repo_path = str(authorized_repo_root(repo_path))
     untracked_flag = "--untracked-files=all" if include_untracked else "--untracked-files=no"
     proc = await asyncio.create_subprocess_exec(
         "git", "-C", resolved_repo_path, "status", "--porcelain=v1", untracked_flag,
@@ -264,16 +266,32 @@ async def _enrich_job_response(job_id: str, base_response: dict) -> dict:
 
 def _cached_read(tool: str, args: dict, fetch_fn, trace_args: dict | None = None):
     """Check cache → call fetch_fn → store → record trace → return."""
-    cache_args = {**args, "graph_name": _resolve_project_name()}
-    if _cache:
-        hit = _cache.get(tool, cache_args)
+    scope = require_project_scope()
+    graph_name = _resolve_project_name()
+    cache_args = {
+        **args,
+        "graph_name": graph_name,
+        "project_id": scope.project_id,
+        "registered_repo_path": scope.repo_path,
+        "authorization_version": 2,
+    }
+    cache = None
+    if _cache and _registry is not None:
+        generation = getattr(_registry.get(graph_name), "cache_generation", None)
+        if callable(generation):
+            value = generation()
+            if isinstance(value, str) and value:
+                cache_args["graph_generation"] = value
+                cache = _cache
+    if cache is not None:
+        hit = cache.get(tool, cache_args)
         if hit is not None:
             return hit
     t0 = time.perf_counter()
     result = fetch_fn()
     latency_ms = (time.perf_counter() - t0) * 1000.0
-    if _cache:
-        _cache.set(tool, cache_args, result)
+    if cache is not None:
+        cache.set(tool, cache_args, result)
     if _recorder:
         _recorder.record(tool, trace_args or args, result, latency_ms)
     return result
@@ -300,9 +318,7 @@ def _with_correlation_args(
 
 
 def _read_symbol_snippet(file_path: str, line_start: int, line_end: int, context_lines: int = 2, max_chars: int = 900) -> str:
-    path = Path(file_path)
-    if not path.is_absolute():
-        path = (_repo_root / file_path).resolve()
+    path = authorized_file_path(file_path)
     if not path.exists() or not path.is_file():
         return ""
     try:
@@ -360,8 +376,9 @@ async def index_full(repo_path: str, project_name: str | None = None) -> dict:
     """Enqueue a full index job for the given repository path."""
     if not _producer:
         raise RuntimeError("MCP server not initialized")
+    resolved_project_name = _resolve_project_name(project_name)
     try:
-        _resolve_repo_root(repo_path)
+        root = authorized_repo_root(repo_path)
     except FileNotFoundError:
         log.warning(
             "index_full.repo_unavailable",
@@ -377,8 +394,7 @@ async def index_full(repo_path: str, project_name: str | None = None) -> dict:
             "repo_path": repo_path,
             "message": "The CGA indexer cannot read this repository path. Mount the checkout into the API/indexer runtime or run a local cga-relay configured for this project.",
         }
-    resolved_project_name = _resolve_project_name(project_name)
-    submitted = await _producer.submit_full_index(repo_path, project_name=resolved_project_name)
+    submitted = await _producer.submit_full_index(str(root), project_name=resolved_project_name)
     # Invalidate cache so stale reads are avoided after re-index
     if _cache:
         _cache.invalidate_all()
@@ -398,8 +414,10 @@ async def index_incremental(repo_path: str, changed_paths: list[str], project_na
     if not _producer:
         raise RuntimeError("MCP server not initialized")
     resolved_project_name = _resolve_project_name(project_name)
+    root = authorized_repo_root(repo_path)
+    safe_paths = _validated_changed_paths(repo_path, root, changed_paths)
     submitted = await _producer.submit_incremental_index(
-        repo_path, changed_paths, project_name=resolved_project_name
+        str(root), safe_paths, project_name=resolved_project_name
     )
     if _cache:
         _cache.invalidate_all()
@@ -411,6 +429,13 @@ async def index_incremental(repo_path: str, changed_paths: list[str], project_na
     }
     # Enrich with queue position and ETA
     return await _enrich_job_response(submitted["job_id"], base_response)
+
+
+def _validated_changed_paths(repo_path: str, root: Path, changed_paths: list[str]) -> list[str]:
+    try:
+        return [resolve_changed_path(repo_path, root, path) for path in changed_paths]
+    except RepositoryPathError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
 
 
 @mcp.tool()
@@ -433,6 +458,7 @@ async def index_repo_changes(
     if not _producer:
         raise RuntimeError("MCP server not initialized")
     resolved_project_name = _resolve_project_name(project_name)
+    root = authorized_repo_root(repo_path)
 
     try:
         discovered = await _collect_git_changed_paths(repo_path, include_untracked=include_untracked)
@@ -470,6 +496,8 @@ async def index_repo_changes(
 
     changed_paths = discovered["changed_paths"]
     destructive_paths = discovered["destructive_paths"]
+    changed_paths = _validated_changed_paths(repo_path, root, changed_paths)
+    destructive_paths = _validated_changed_paths(repo_path, root, destructive_paths)
     incremental_paths: list[str] = []
     seen_paths: set[str] = set()
     for path in destructive_paths + changed_paths:
@@ -486,7 +514,7 @@ async def index_repo_changes(
         }
 
     if destructive_paths and auto_full_on_destructive:
-        submitted = await _producer.submit_full_index(repo_path, project_name=resolved_project_name)
+        submitted = await _producer.submit_full_index(str(root), project_name=resolved_project_name)
         if _cache:
             _cache.invalidate_all()
         base_response = {
@@ -503,7 +531,7 @@ async def index_repo_changes(
         return await _enrich_job_response(submitted["job_id"], base_response)
 
     submitted = await _producer.submit_incremental_index(
-        repo_path,
+        str(root),
         incremental_paths,
         project_name=resolved_project_name,
     )
@@ -527,9 +555,11 @@ async def get_index_job_status(job_id: str) -> dict:
     """Get status for an indexing job id, including queue position and ETA if queued."""
     if not _producer:
         raise RuntimeError("MCP server not initialized")
+    _resolve_project_name()
     status = await _producer.get_job_status(job_id)
     if status is None:
         return {"job_id": job_id, "status": "not_found"}
+    _require_job_access(status)
     # Enrich with queue position and ETA
     return await _enrich_job_response(job_id, status)
 
@@ -543,11 +573,29 @@ async def wait_for_index_ready(
     """Wait until an indexing job reaches terminal state (done or failed)."""
     if not _producer:
         raise RuntimeError("MCP server not initialized")
-    return await _producer.wait_for_job_status(
+    _resolve_project_name()
+    existing = await _producer.get_job_status(job_id)
+    if existing is not None:
+        _require_job_access(existing)
+    result = await _producer.wait_for_job_status(
         job_id,
         timeout_sec=timeout_sec,
         poll_interval_sec=poll_interval_sec,
     )
+    if result.get("status") != "not_found":
+        _require_job_access(result)
+    return result
+
+
+def _require_job_access(job_status: dict) -> None:
+    project_name = job_status.get("project_name")
+    repo_path = job_status.get("repo_path")
+    if not project_name or not repo_path:
+        raise HTTPException(status_code=403, detail="Job ownership cannot be verified; administrator action is required")
+    scope = require_project_scope()
+    if not project_owns_graph(scope, str(project_name)):
+        raise HTTPException(status_code=403, detail="Job is not owned by the authenticated project")
+    authorized_repo_root(str(repo_path))
 
 
 # ---------------------------------------------------------------------------
@@ -878,7 +926,11 @@ def retrieve_context(
             file_path = row[2]
             line_start = row[3]
             line_end = row[4]
-            snippet = _read_symbol_snippet(file_path, line_start, line_end)
+            try:
+                safe_path = authorized_file_path(file_path)
+            except (HTTPException, FileNotFoundError):
+                continue
+            snippet = _read_symbol_snippet(str(safe_path), line_start, line_end)
             relations = _fetch_relation_summary(qualified_name)
             items.append(
                 {
@@ -987,7 +1039,7 @@ def run_eval() -> dict:
     if not _graph:
         raise RuntimeError("MCP server not initialized")
     from backend.eval.runner import EvalRunner
-    runner = EvalRunner(_registry.current())
+    runner = EvalRunner(_registry.get(_resolve_project_name()))
     return runner.run().as_dict()
 
 
@@ -1037,7 +1089,7 @@ def benchmark_token_efficiency(
     if cg_file_paths:
         payload["cg"]["filePaths"] = cg_file_paths
 
-    return run_token_efficiency_benchmark(payload=payload, repo_root=_repo_root)
+    return run_token_efficiency_benchmark(payload=payload, repo_root=authorized_repo_root())
 
 
 @mcp.tool()
@@ -1053,7 +1105,7 @@ def benchmark_context_quality(
     payload = {"cases": cases or []}
     if weights:
         payload["weights"] = weights
-    return run_context_quality_benchmark(payload=payload, repo_root=_repo_root)
+    return run_context_quality_benchmark(payload=payload, repo_root=authorized_repo_root())
 
 
 # ---------------------------------------------------------------------------
@@ -1274,19 +1326,93 @@ def strategy_query(
     """Run the default CG-first agent routing strategy through MCP itself."""
     if not _graph:
         raise RuntimeError("MCP server not initialized")
+    root = authorized_repo_root()
+    _resolve_project_name()
     resolved_token_budget = runtime_config.get_indexing_token_budget() if token_budget is None else token_budget
-    return run_cg_first_strategy(
+    budget = max(runtime_config.MIN_INDEXING_TOKEN_BUDGET, resolved_token_budget)
+    hits = retrieve_context(query=query, limit=max(1, graph_top_k))
+    for hit in hits:
+        qualified_name = str(hit.get("qualified_name") or "")
+        if qualified_name and not (hit.get("callers") or hit.get("callees")):
+            try:
+                relations = find_call_graph(qualified_name, depth=max(1, relation_depth))
+                hit["callers"] = relations.get("callers", [])
+                hit["callees"] = relations.get("callees", [])
+            except Exception as exc:
+                hit["relation_error"] = str(exc)
+    graph_context, graph_tokens = trim_items_to_budget(hits, budget)
+    used_fallback, fallback_reason, quality = decide_fallback(
+        trimmed_items=graph_context,
         query=query,
-        repo_root=_repo_root,
-        retrieve_graph_hits=retrieve_context,
-        get_call_graph=find_call_graph,
-        graph_top_k=max(1, graph_top_k),
         min_graph_hits=max(1, min_graph_hits),
-        token_budget=max(runtime_config.MIN_INDEXING_TOKEN_BUDGET, resolved_token_budget),
-        relation_depth=max(1, relation_depth),
-        fallback_max_files=max(1, fallback_max_files),
-        source_label="contextgraph-server",
+        quality_threshold=0.55,
     )
+    fallback, fallback_tokens = [], 0
+    if used_fallback:
+        fallback = _project_fallback_snippets(query, root, hits, max(1, fallback_max_files))
+        fallback, fallback_tokens = trim_items_to_budget(fallback, max(0, budget - graph_tokens))
+    return {
+        "strategy": "cg-first",
+        "query": query,
+        "source": "contextgraph-server",
+        "token_budget": budget,
+        "estimated_tokens": graph_tokens + fallback_tokens,
+        "graph_hits_total": len(hits),
+        "graph_context": graph_context,
+        "quality_score": quality["quality_score"],
+        "avg_item_score": quality["avg_item_score"],
+        "matched_items": quality["matched_items"],
+        "quality_threshold": 0.55,
+        "fallback_reason": fallback_reason,
+        "used_fallback": used_fallback,
+        "fallback_context": fallback,
+    }
+
+
+def _project_fallback_snippets(query: str, root: Path, hits: list[dict], limit: int) -> list[dict]:
+    """Server fallback reads are project-bound even when the graph is poisoned."""
+    fallback: list[dict] = []
+    for hit in hits[:limit]:
+        try:
+            path = authorized_file_path(str(hit.get("file_path") or ""))
+            start, end = int(hit.get("line_start") or 1), int(hit.get("line_end") or 1)
+            snippet = _read_symbol_snippet(str(path), start, end, context_lines=3, max_chars=1200)
+        except (HTTPException, OSError, RepositoryPathError):
+            continue
+        if snippet:
+            fallback.append({
+                "source": "symbol-snippet", "file_path": str(path),
+                "line_start": start, "line_end": end, "snippet": snippet,
+            })
+    if fallback or not query.strip():
+        return fallback
+
+    needle = query.strip().lower()
+    scanned = 0
+    for pattern in ("*.py", "*.ts", "*.tsx", "*.js", "*.jsx"):
+        for candidate in root.rglob(pattern):
+            scanned += 1
+            if scanned > 300:
+                return fallback
+            try:
+                path = authorized_file_path(str(candidate))
+                text = path.read_text(encoding="utf-8", errors="replace")
+                index = text.lower().find(needle)
+                if index < 0:
+                    continue
+                start = text[:index].count("\n") + 1
+                end = min(start + 20, start + text[index:].count("\n"))
+                snippet = _read_symbol_snippet(str(path), start, end, context_lines=3, max_chars=1200)
+            except (HTTPException, OSError, RepositoryPathError):
+                continue
+            if snippet:
+                fallback.append({
+                    "source": "keyword-fallback", "file_path": path.relative_to(root).as_posix(),
+                    "line_start": start, "line_end": end, "snippet": snippet,
+                })
+                if len(fallback) >= limit:
+                    return fallback
+    return fallback
 
 
 # ---------------------------------------------------------------------------
@@ -1435,4 +1561,3 @@ async def workassist_cleanup_duplicate_activity(project_id: str | None = None, d
     service = _require_work_briefing_service()
     resolved_project_id = _resolve_project_external_id(project_id)
     return await service.cleanup_exact_duplicates(project_id=resolved_project_id, dry_run=dry_run)
-

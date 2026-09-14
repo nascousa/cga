@@ -50,7 +50,7 @@ These controls remove routine symbol and path disclosure and raise the cost of s
 GitHub Release assets are uploaded with flat file names. Download `SHA256SUMS.txt` and every file named by it into one directory, then run `sha256sum --check SHA256SUMS.txt`. To verify only the Windows Relay assets from PowerShell, compare each asset to its sidecar and require a valid Authenticode signature before execution:
 
 ```powershell
-$version = '1.30.124'
+$version = '1.30.125'
 $assets = @('cga-relay.exe', "cga-relay-$version-windows-x64.zip")
 foreach ($asset in $assets) {
 	$expected = ((Get-Content ".\$asset.sha256" -Raw) -split '\s+')[0]

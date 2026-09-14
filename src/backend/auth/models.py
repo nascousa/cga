@@ -6,6 +6,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+from backend.auth.context import validate_project_graph_name
+
 _IDENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$")
 
 
@@ -176,6 +178,7 @@ class ProjectCreate(BaseModel):
     @field_validator("project_name")
     @classmethod
     def validate_project_name(cls, v: str) -> str:
+        validate_project_graph_name(v)
         if not _IDENT_RE.fullmatch(v):
             raise ValueError("project_name may only contain letters, digits, dot, underscore, and hyphen")
         return v
@@ -206,6 +209,7 @@ class ProjectUpdate(BaseModel):
     def validate_optional_project_name(cls, v: str | None) -> str | None:
         if v is None:
             return v
+        validate_project_graph_name(v)
         if not _IDENT_RE.fullmatch(v):
             raise ValueError("project_name may only contain letters, digits, dot, underscore, and hyphen")
         return v

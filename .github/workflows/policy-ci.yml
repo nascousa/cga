@@ -146,6 +146,12 @@ jobs:
         run: |
           pip-audit -r requirements.txt
 
+      - name: Build and smoke-test the desktop API image
+        run: |
+          docker build -f Dockerfile.dev -t cga-ci-api .
+          docker run --rm --network none --entrypoint python cga-ci-api \
+            -c "from backend.main import APP_VERSION, app; from backend.indexer.parser import SourceParser; print(APP_VERSION)"
+
   pr-policy-checklist:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

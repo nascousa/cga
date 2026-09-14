@@ -8,7 +8,7 @@ services:
     container_name: cga-desktop-api
     restart: unless-stopped
     ports:
-      - "${CGA_DESKTOP_API_PORT:-18001}:8000"
+      - "${CGA_API_BIND_ADDRESS:-127.0.0.1}:${CGA_DESKTOP_API_PORT:-18001}:8000"
     env_file:
       - path: .env
         required: false
@@ -31,6 +31,7 @@ services:
       # to, so the admin UI lists exactly the snapshots the scheduler
       # produces.  Structure: <host>/cga-desktop/auth/auth-<ts>.sql.gz
       - BACKUP_DIR=/backups/cga-desktop/auth
+      - BACKUP_LOCK_TIMEOUT_SECONDS=${CGA_BACKUP_LOCK_TIMEOUT_SECONDS:-300}
     volumes:
       - ${CGA_BACKUP_DIR:-./data/backups}:/backups
       - ${CGA_REPOS_MOUNT:-.}:/repos:ro
@@ -54,8 +55,10 @@ services:
     container_name: cga-desktop-falkordb
     restart: unless-stopped
     ports:
-      - "${CGA_DESKTOP_FALKORDB_PORT:-16381}:6379"
-      - "${CGA_DESKTOP_BROWSER_PORT:-13001}:3000"
+      - "${CGA_DB_BIND_ADDRESS:-127.0.0.1}:${CGA_DESKTOP_FALKORDB_PORT:-16381}:6379"
+      - "${CGA_DB_BIND_ADDRESS:-127.0.0.1}:${CGA_DESKTOP_BROWSER_PORT:-13001}:3000"
+    environment:
+      - REDIS_ARGS=--dir /var/lib/falkordb/data --dbfilename dump.rdb --save 60 1 --stop-writes-on-bgsave-error yes ${CGA_FALKORDB_DURABILITY_ARGS:-}
     volumes:
       - falkordb_data:/var/lib/falkordb/data
     healthcheck:
@@ -83,7 +86,7 @@ services:
     container_name: cga-desktop-postgres
     restart: unless-stopped
     ports:
-      - "${CGA_DESKTOP_POSTGRES_PORT:-15432}:5432"
+      - "${CGA_DB_BIND_ADDRESS:-127.0.0.1}:${CGA_DESKTOP_POSTGRES_PORT:-15432}:5432"
     environment:
       - POSTGRES_DB=${POSTGRES_DB:-appdb}
       - POSTGRES_USER=${POSTGRES_USER:-app}
@@ -111,6 +114,11 @@ services:
       - PGDATABASE=${POSTGRES_DB:-appdb}
       - PGPASSWORD=${POSTGRES_PASSWORD:-app}
       - FALKORDB_DATA_DIR=/falkordb-data
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - FALKORDB_SERVER_DATA_DIR=/var/lib/falkordb/data
+      - FALKORDB_SNAPSHOT_TIMEOUT_SECONDS=${CGA_FALKORDB_SNAPSHOT_TIMEOUT_SECONDS:-300}
+      - BACKUP_LOCK_TIMEOUT_SECONDS=${CGA_BACKUP_LOCK_TIMEOUT_SECONDS:-300}
       - BACKUP_INTERVAL_SECONDS=${CGA_BACKUP_INTERVAL_SECONDS:-3600}
       - BACKUP_KEEP_COUNT=${CGA_BACKUP_KEEP_COUNT:-168}
     volumes:

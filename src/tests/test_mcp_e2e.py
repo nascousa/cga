@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import textwrap
+import uuid
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -13,6 +14,7 @@ from backend.graph.client import GraphClient
 from backend.indexer.pipeline import IndexPipeline
 from backend.indexer.parser import path_to_module
 import backend.tools.server as mcp_srv
+from backend.auth.context import ProjectScope, bind_project_scope
 
 
 pytestmark = [pytest.mark.live_graph, pytest.mark.live_graph_e2e]
@@ -22,7 +24,7 @@ def _connect_live_graph() -> GraphClient:
     client = GraphClient(
         host=os.getenv("FALKORDB_HOST", "localhost"),
         port=int(os.getenv("FALKORDB_PORT", "16379")),
-        graph_name="contextgraph_mcp_e2e",
+        graph_name=f"mcp_e2e_{uuid.uuid4().hex}",
     )
     try:
         client.connect()
@@ -64,25 +66,27 @@ def test_mcp_tools_work_on_real_indexed_graph(tmp_path: Path) -> None:
 
         registry = MagicMock()
         registry.current.return_value = graph
+        registry.get.return_value = graph
         mcp_srv.init(registry=registry, producer=MagicMock(), cache=None, recorder=None)
         module_qname = path_to_module(str(file_path))
         render_scope = f"{module_qname}.render"
 
-        flows = mcp_srv.get_variable_flows(render_scope, limit=20)
-        assert any(item["flow_type"] == "argument" for item in flows)
-        assert any(item["flow_type"] == "call_return" for item in flows)
+        with bind_project_scope(ProjectScope("E2E", 1, graph._graph_name, str(repo_root))):
+            flows = mcp_srv.get_variable_flows(render_scope, limit=20)
+            assert any(item["flow_type"] == "argument" for item in flows)
+            assert any(item["flow_type"] == "call_return" for item in flows)
 
-        explanation = mcp_srv.explain_data_flow(render_scope, limit=20)
-        assert explanation["scope_qname"] == render_scope
-        assert "narrative" in explanation and explanation["narrative"]
-        assert "Return value is influenced by these inputs" in explanation["narrative"]
-        assert explanation["narrative"].isascii()
+            explanation = mcp_srv.explain_data_flow(render_scope, limit=20)
+            assert explanation["scope_qname"] == render_scope
+            assert "narrative" in explanation and explanation["narrative"]
+            assert "Return value is influenced by these inputs" in explanation["narrative"]
+            assert explanation["narrative"].isascii()
 
-        influence = mcp_srv.analyze_return_influence(render_scope, limit=10)
-        assert any(param.endswith(":input_text") for param in influence["influenced_by_parameters"])
+            influence = mcp_srv.analyze_return_influence(render_scope, limit=10)
+            assert any(param.endswith(":input_text") for param in influence["influenced_by_parameters"])
     finally:
         try:
-            graph.query("MATCH (n) DETACH DELETE n")
+            graph.delete()
         except Exception:
             pass
         graph.close()
