@@ -1,4 +1,6 @@
-FROM python:3.12-slim
+FROM postgres:16-bookworm AS postgres-client
+
+FROM python:3.12-slim-bookworm AS runtime-base
 
 WORKDIR /app
 
@@ -6,8 +8,16 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
 	curl \
 	git \
-	postgresql-client \
+	libpq5 libreadline8 liblz4-1 libzstd1 \
 	&& rm -rf /var/lib/apt/lists/*
+
+COPY --from=postgres-client /usr/lib/postgresql/16/bin/pg_dump /usr/lib/postgresql/16/bin/psql /usr/local/bin/
+COPY --from=postgres-client /usr/lib/*/libpq.so.5* /usr/local/lib/
+COPY --from=postgres-client /usr/share/doc/postgresql-client-16/copyright /usr/share/doc/cga-postgresql-client-16/copyright
+COPY --from=postgres-client /usr/share/doc/libpq5/copyright /usr/share/doc/cga-libpq/copyright
+RUN ldconfig && pg_dump --version && psql --version
+
+FROM runtime-base AS runtime
 
 # Install dependencies
 COPY requirements.txt .

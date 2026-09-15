@@ -10,7 +10,7 @@ $repoRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
 $portableRoot = $OutputFolder
 
 if (Test-Path $portableRoot) {
-    Remove-Item -Path $portableRoot -Recurse -Force
+    throw "Output folder already exists: $portableRoot. Choose a NEW output folder; never overwrite an installed bundle's repos, configuration or backups. Read docs\runtime-operations.md before upgrading an existing runtime."
 }
 
 New-Item -ItemType Directory -Path $portableRoot | Out-Null
@@ -30,6 +30,7 @@ $filesToCopy = @(
     @{ Source = Join-Path $repoRoot 'SECURITY.md'; Target = Join-Path $portableRoot 'SECURITY.md' },
     @{ Source = Join-Path $repoRoot 'CONTRIBUTING.md'; Target = Join-Path $portableRoot 'CONTRIBUTING.md' },
     @{ Source = Join-Path $repoRoot 'CODE_OF_CONDUCT.md'; Target = Join-Path $portableRoot 'CODE_OF_CONDUCT.md' },
+    @{ Source = Join-Path $repoRoot 'docs\runtime-operations.md'; Target = Join-Path $portableRoot 'RUNTIME-OPERATIONS.md' },
     @{ Source = Join-Path $PSScriptRoot 'start-desktop.ps1'; Target = Join-Path $portableRoot 'start-desktop.ps1' },
     @{ Source = Join-Path $PSScriptRoot 'start-cga-desktop.cmd'; Target = Join-Path $portableRoot 'start-cga-desktop.cmd' },
     @{ Source = Join-Path $PSScriptRoot 'open-cga-desktop.cmd'; Target = Join-Path $portableRoot 'open-cga-desktop.cmd' },
@@ -129,7 +130,7 @@ services:
     image: cga-desktop-portable-cga:local
     restart: unless-stopped
     ports:
-      - "$D{CGA_DESKTOP_API_PORT:-18001}:8000"
+      - "$D{CGA_API_BIND_ADDRESS:-127.0.0.1}:$D{CGA_DESKTOP_API_PORT:-18001}:8000"
     env_file:
       - path: .env
         required: false
@@ -151,9 +152,11 @@ services:
       - CGA_POSTGRES_DSN=postgresql://$D{POSTGRES_USER:-app}:$D{POSTGRES_PASSWORD:-app}@postgres:5432/$D{POSTGRES_DB:-appdb}
       - WORKBRIEFING_POSTGRES_DSN=postgresql://$D{POSTGRES_USER:-app}:$D{POSTGRES_PASSWORD:-app}@postgres:5432/$D{POSTGRES_DB:-appdb}
       - BACKUP_DIR=/backups/cga-desktop-portable/auth
+      - BACKUP_LOCK_TIMEOUT_SECONDS=$D{CGA_BACKUP_LOCK_TIMEOUT_SECONDS:-300}
     volumes:
       - $D{CGA_BACKUP_DIR:-./data/backups}:/backups
       - "$D{CGA_REPOS_MOUNT:-./repos}:/repos:ro"
+      - runtime_data:/app/data
     depends_on:
       postgres:
         condition: service_healthy
@@ -188,10 +191,14 @@ services:
     image: falkordb/falkordb:latest
     restart: unless-stopped
     ports:
-      - "$D{CGA_DESKTOP_FALKORDB_PORT:-16381}:6379"
-      - "$D{CGA_DESKTOP_BROWSER_PORT:-13001}:3000"
+      - "$D{CGA_DB_BIND_ADDRESS:-127.0.0.1}:$D{CGA_DESKTOP_FALKORDB_PORT:-16381}:6379"
+      - "$D{CGA_DB_BIND_ADDRESS:-127.0.0.1}:$D{CGA_DESKTOP_BROWSER_PORT:-13001}:3000"
+    environment:
+      - REDIS_ARGS=--dir /var/lib/falkordb/data --dbfilename dump.rdb --save 60 1 --stop-writes-on-bgsave-error yes $D{CGA_FALKORDB_DURABILITY_ARGS:-}
     volumes:
-      - falkordb_data:/data
+      # Existing /data bundles MUST migrate before first recreation.
+      # See RUNTIME-OPERATIONS.md; keep this volume key and project name.
+      - falkordb_data:/var/lib/falkordb/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -223,6 +230,11 @@ services:
       - PGDATABASE=$D{POSTGRES_DB:-appdb}
       - PGPASSWORD=$D{POSTGRES_PASSWORD:-app}
       - FALKORDB_DATA_DIR=/falkordb-data
+      - FALKORDB_HOST=falkordb
+      - FALKORDB_PORT=6379
+      - FALKORDB_SERVER_DATA_DIR=/var/lib/falkordb/data
+      - FALKORDB_SNAPSHOT_TIMEOUT_SECONDS=$D{CGA_FALKORDB_SNAPSHOT_TIMEOUT_SECONDS:-300}
+      - BACKUP_LOCK_TIMEOUT_SECONDS=$D{CGA_BACKUP_LOCK_TIMEOUT_SECONDS:-300}
       - BACKUP_INTERVAL_SECONDS=$D{CGA_BACKUP_INTERVAL_SECONDS:-3600}
       - BACKUP_KEEP_COUNT=$D{CGA_BACKUP_KEEP_COUNT:-168}
     volumes:
@@ -240,6 +252,7 @@ volumes:
   postgres_data:
   falkordb_data:
   redis_data:
+  runtime_data:
 "@
 
 $portableCompose = $portableCompose.Replace([char]0x7f, '$')
@@ -247,6 +260,8 @@ Set-Content -Path (Join-Path $portableRoot 'docker-compose.yml') -Value $portabl
 
 $portableEnv = @"
 # CGA portable Docker Desktop bundle settings
+CGA_API_BIND_ADDRESS=127.0.0.1
+CGA_DB_BIND_ADDRESS=127.0.0.1
 CGA_DESKTOP_API_PORT=18001
 CGA_DESKTOP_FALKORDB_PORT=16381
 CGA_DESKTOP_BROWSER_PORT=13001
@@ -259,6 +274,12 @@ CGA_REPOS_MOUNT=./repos
 CGA_BACKUP_DIR=./data/backups
 CGA_BACKUP_INTERVAL_SECONDS=3600
 CGA_BACKUP_KEEP_COUNT=168
+CGA_BACKUP_LOCK_TIMEOUT_SECONDS=300
+CGA_FALKORDB_SNAPSHOT_TIMEOUT_SECONDS=300
+
+# RDB snapshots every 60 seconds after a change. Do not enable AOF on an
+# existing RDB-only database by simply restarting; see RUNTIME-OPERATIONS.md.
+CGA_FALKORDB_DURABILITY_ARGS=
 
 # Auth / app
 JWT_SECRET_KEY=change-me-at-least-32-chars!!!!!
@@ -350,11 +371,19 @@ environment.
 
 ## Backups
 
-- The bundled ``backup`` sidecar runs ``pg_dump`` of the auth database and a
-  tar of FalkorDB data every hour by default into ``./data/backups``.
+- The bundled ``backup`` sidecar checks ``pg_dump`` and compression separately,
+  requests a completed FalkorDB ``SAVE``, and archives only the frozen RDB file
+  every hour by default into ``./data/backups``. Failed attempts retain the last
+  good backup; ``latest`` is published by atomic rename.
 - The admin UI's **System Settings -> Backup** panel reads and writes the same
   folder, so manual snapshots are visible to the sidecar and vice versa.
 - Tune ``CGA_BACKUP_INTERVAL_SECONDS`` / ``CGA_BACKUP_KEEP_COUNT`` in ``.env``.
+- Read ``RUNTIME-OPERATIONS.md`` for restore limits, lock recovery, the RDB
+  recovery window, and mandatory migration steps BEFORE upgrading an old
+  bundle that mounted FalkorDB at ``/data``. Do not recreate or remove the old
+  container until its actual ``/var/lib/falkordb/data`` has been secured.
+- Keep the existing Compose project name and named volumes during upgrades.
+  The portable builder refuses to overwrite an existing installation folder.
 
 ## Included Launchers
 

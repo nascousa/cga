@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -11,6 +12,44 @@ from backend.auth import pgshim
 from backend import runtime_config
 from backend.auth import router as auth_router
 from backend.cga_relay import router as relay_router
+from backend.auth.models import OutputRuleProfileUpdate
+from backend.auth.output_rules import DEFAULT_RULES
+
+
+def test_retrying_index_job_has_pending_queue_metadata() -> None:
+    result = auth_router._build_index_job_status(
+        {"job_id": "retry-job", "job_type": "index_full", "status": "retrying"},
+        {"retry-job": 1},
+        30,
+        5,
+    )
+    assert result.status == "retrying"
+    assert result.queue_position == 1
+    assert result.eta_seconds == 35
+    assert result.is_stale is False
+
+
+@pytest.mark.asyncio
+async def test_partial_global_profile_is_persisted_and_read_as_complete(auth_pg_pool):
+    async with auth_pg_pool.acquire() as db:
+        await db.execute(
+            "INSERT INTO output_rule_profiles(profile_name, rules_json, version) "
+            "VALUES (?, ?, 1) ON CONFLICT (profile_name) DO NOTHING",
+            ("concise", json.dumps(DEFAULT_RULES)),
+        )
+        result = await auth_router.update_output_rule_profile(
+            "concise", OutputRuleProfileUpdate(rules={"summary": "none"}),
+            _={"role": "admin"}, db=db,
+        )
+        assert set(result.resolved) == set(DEFAULT_RULES)
+        assert result.resolved["summary"] == "none"
+        assert "CGA-MANAGED" in result.markdown
+        await db.execute(
+            "UPDATE output_rule_profiles SET rules_json = ? WHERE profile_name = ?",
+            (json.dumps({"summary": "none"}), "concise"),
+        )
+        profiles = await auth_router.list_output_rule_profiles(_={"role": "admin"}, db=db)
+        assert set(profiles["concise"].resolved) == set(DEFAULT_RULES)
 
 
 async def _seed_project(

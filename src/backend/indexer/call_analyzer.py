@@ -23,6 +23,7 @@ class RawCall:
     callee_name: str     # simple name; resolution happens in pipeline
     arg_names: list[str] | None = None
     result_var_name: str | None = None
+    callee_qualifier: str | None = None
 
 
 class CallAnalyzer:
@@ -86,6 +87,7 @@ class CallAnalyzer:
                         callee_name=name,
                         arg_names=self._extract_arg_names(node),
                         result_var_name=self._extract_result_var_name(node, parent_map),
+                        callee_qualifier=ast.unparse(node.func),
                     )
                 )
 

@@ -143,6 +143,13 @@ curl http://localhost:18001/health
 - Document progress, failed attempts, and environment issues in `.adc/cga-relay/scratchpad/session.md` before concluding a task.
 - Keep outputs deterministic for the same symbol and unchanged repository state.
 
+## Output Rules
+- The server-managed effective output rules are authoritative for response formatting.
+- The relay materializes them at `.adc/standards/output/effective.md`; treat the `CGA-MANAGED` marker as read-only.
+- Project-specific rules override the global profile only for explicitly configured fields.
+- If the server is unavailable, keep using the last successfully synchronized rules.
+- Without managed rules, use the legacy status header, topology summary, and `Logic Gap` warning protocol.
+
 ## Repository and Workflow Rules
 - For new features, write tests first.
 - Keep source logic in `src/`, scripts in `src/scripts/`, tests in `src/tests/`, and docs in `docs/`.
@@ -398,5 +405,3 @@ foreach ($file in $EmptyFiles) {
 }
 
 Write-Host "Success! Complete ADC template scaffolded at $TargetDir."
-
-

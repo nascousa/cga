@@ -31,6 +31,8 @@ cargo build --release
 Pop-Location
 ```
 
+Policy CI runs the Relay tests on Windows and Linux, plus Windows PE hardening and isolated replacement/rollback checks. Run Cargo from the crate directory so its `.cargo/config.toml` mitigation flags are loaded; `--manifest-path` from the repository root alone does not load that configuration. CI candidates are unsigned and are never installed or published by these checks; formal release signing remains mandatory.
+
 The crate has no third-party Rust dependencies. The release build produces a standalone `cga-relay.exe` at `src/cga-relay/target/release/cga-relay.exe`; install or copy that executable onto the developer machine and launch it directly. Project MCP config must call that installed executable, not `cargo`, Python, PowerShell scripts, or a per-project MCP server.
 
 On Windows MSVC targets, the crate config enables static CRT linking, fat LTO, symbol stripping, panic abort, Control Flow Guard, ASLR, high-entropy ASLR, DEP/NX, CET compatibility, and reproducible linker metadata. Build formal artifacts through the secure release script:
@@ -50,7 +52,7 @@ These controls remove routine symbol and path disclosure and raise the cost of s
 GitHub Release assets are uploaded with flat file names. Download `SHA256SUMS.txt` and every file named by it into one directory, then run `sha256sum --check SHA256SUMS.txt`. To verify only the Windows Relay assets from PowerShell, compare each asset to its sidecar and require a valid Authenticode signature before execution:
 
 ```powershell
-$version = '1.30.124'
+$version = '1.30.125'
 $assets = @('cga-relay.exe', "cga-relay-$version-windows-x64.zip")
 foreach ($asset in $assets) {
 	$expected = ((Get-Content ".\$asset.sha256" -Raw) -split '\s+')[0]
@@ -83,6 +85,9 @@ Scanner and sync limits:
 - `MAX_FILE_BYTES`: maximum source file size accepted by the scanner.
 - `MAX_BATCH_BYTES`: optional maximum serialized JSON request size. The default is `8388608` bytes (8 MiB). Each request is also limited to 500 snapshots or tombstones.
 - Relay HTTP responses are limited to `8388608` bytes (8 MiB), and connected sockets use 30-second read and write timeouts.
+- HTTP responses must have complete, unambiguous framing. Relay validates `Content-Length`, decodes chunked bodies, and rejects truncated responses without advancing sync checkpoints.
+- After connecting, only GET requests and deduplicated sync batches may fail over automatically. Other POST requests (including indexing and promotion) report an uncertain outcome instead of possibly creating duplicate work; inspect server job status before retrying.
+- MCP consumes and flushes responses one message at a time while stdin stays open. Newline-delimited JSON and legacy `Content-Length` input frames are supported; responses remain newline-delimited. Messages are limited to 8 MiB and legacy headers to 64 KiB. Invalid lengths or UTF-8 produce an explicit error instead of terminating through a panic.
 
 ## CLI
 
@@ -196,12 +201,35 @@ The relay allows plaintext HTTP only for loopback hosts such as `127.0.0.1` and 
 
 `--dry-run` never updates scan state. Normal scan mode writes local state under `STATE_DIR`. `sync` reads the central relay project registry, fails closed if login or token environment is missing or the only account JWT has expired, and submits changed text snapshots to the configured control API when not in dry-run mode. Scan progress is written to stderr after every 500 processed candidates and at completion; per-batch progress also uses stderr so stdout remains machine-readable JSON.
 
-Sync requests are deterministic and bounded by both 500 items and `MAX_BATCH_BYTES`. The scanner retains snapshot metadata instead of all changed source bodies in memory. Immediately before submission, the relay reads each file again and verifies its size and SHA-256 digest. Every accepted batch updates the local scan-state checkpoint, so a later batch failure resumes from the remaining changes instead of restarting the full first sync.
+Sync requests are deterministic and bounded by both 500 items and `MAX_BATCH_BYTES` (the server also enforces an 8 MiB limit). The scanner retains snapshot metadata instead of all changed source bodies in memory. Immediately before submission, the relay reads each file again and verifies its size and SHA-256 digest. Only a complete successful HTTP response with a valid `X-CGA-Sync-Receipt` header updates the local checkpoint, so a later batch failure resumes from the remaining changes.
+
+Sync retains the last acknowledged checkpoint for previously synced files that temporarily become oversized, binary, or invalid UTF-8. Skipping such a file does not send a tombstone; if the file is subsequently removed, relay still sends its tombstone. A completed scan must not overwrite the per-batch acknowledged checkpoint.
 
 The project-token backend bridge is exposed at `/api/project/cga-relay/mcp-tool` and `/api/project/cga-relay/sync`. These routes are protected by project tokens through the existing `/api/project` middleware and require the authenticated project identity to match the submitted `project_id`. The account-login bridge is exposed at `/api/auth/cga-relay/mcp-tool` and `/api/auth/cga-relay/sync` and is protected by the normal user JWT flow.
+
+### Durable Sync And Recovery
+
+Both sync endpoints persist complete validated snapshots and tombstone paths in the authentication PostgreSQL database before returning HTTP **202**, `accepted: true`, `durable: true`, `batch_id`, and `X-CGA-Sync-Receipt: <batch_id>`. The ID is a server-computed SHA-256 digest of the registered project's internal database ID, a newline, and the canonical batch JSON. Repeating a batch for the same registered project returns the same receipt without another stored batch. Storage failure never returns a receipt; audit logging failure is reported separately and cannot turn an unpersisted batch into success. The server limits both the raw request body before JSON parsing and the canonical stored payload to 8 MiB, and checks snapshot byte counts, hashes, relative paths, and snapshot/tombstone conflicts.
+
+Upgrade the server before upgrading clients. An older server's bare `accepted: true` is rejected by the new client. Existing checkpoints without the durable marker are migrated by resending present snapshots while preserving deletion history, including skipped files. Partial migration records acknowledged hashes only for successful batches; the remaining files stay pending. A local `scan` is not a durable server acknowledgement.
+
+Authenticated recovery APIs are available under both `/api/project/cga-relay` (project token) and `/api/auth/cga-relay` (account access to the project):
+
+- `GET /sync-batches?after_id=0&limit=100` lists batch metadata in ID order.
+- `GET /sync-batches/{batch_id}` retrieves the complete stored payload for replay or recovery.
+- Account routes additionally require `project_id` as a query parameter. Both routes bind database access to the authorized project; another project's batch is not visible.
+- Responses use `Cache-Control: no-store`. Pagination is a view of currently committed records, not a live event subscription; start at zero for a full recovery inventory.
+
+Sync storage is **not graph indexing or an independent backup**. It never writes submitted paths into the server checkout or applies tombstones to FalkorDB automatically. Keep the original checkout, use explicit indexing tools for graph construction, and include the PostgreSQL database in tested backups. Stored batches contain source code: restrict database access and monitor storage growth. Retention is explicit; batches must not be silently expired before recovery.
+
+Queue publication associates the message and its stream ID atomically. Retrying the same job ID and payload does not append another message; reusing an ID for a different payload is rejected. Recoverable `failed` states remain pending in waiters until recovery succeeds or an explicit terminal failure is recorded.
 
 ## Branch Graphs
 
 Relay MCP indexing and query tools support isolated temporary ref graphs through `ref_id`, `branch`, or `git_branch`. Parent aliases are `parent_ref`, `base_ref`, and `base_branch`. The `promote_ref` tool reindexes source-ref file paths from the merged target working tree into the parent/default graph and can then delete the source graph.
+
+Local Git incremental indexing uses NUL-delimited porcelain output, preserving spaces, Unicode names, and both sides of a rename. It forwards explicit ref/parent aliases and graph selection to backend validation instead of silently dropping branch context. Unsupported non-UTF-8 Git paths fail explicitly.
+
+Promotion results carry the exact `published_generation` receipt from their indexing job. Before deleting a source graph, Redis atomically verifies both the captured source generation and that target receipt. A concurrent source or target replacement retains the source. Missing legacy receipts, failed/recovering jobs, empty targets and verification failures never authorize deletion. Deploy matching API and worker versions; do not mix old and new queue/publication protocols.
 
 See [BRANCH-GRAPHS.md](BRANCH-GRAPHS.md) for graph naming, fallback behavior, promotion semantics, examples, and current limitations.

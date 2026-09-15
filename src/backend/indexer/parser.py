@@ -20,6 +20,7 @@ from typing import AbstractSet, Iterator
 
 from backend.indexer.language_definitions import REGISTERED_EXTENSIONS, REGISTERED_FILENAMES
 from backend.indexer.language_catalog import is_parser_file_enabled
+from backend.indexer.call_analyzer import RawCall
 
 
 @dataclass
@@ -36,14 +37,6 @@ class ParsedSymbol:
 class ParsedImport:
     source_path: str
     imported_module: str
-
-
-@dataclass
-class RawCall:
-    caller_qname: str
-    callee_name: str
-    arg_names: list[str] = field(default_factory=list)
-    result_var_name: str | None = None
 
 
 @dataclass
@@ -1353,7 +1346,10 @@ def discover_files(
         "node_modules", ".mypy_cache", ".pytest_cache", "dist", "build",
         ".next", "coverage",
     }
-    for root, dirs, files in os.walk(repo_path):
+    def fail_walk(error: OSError) -> None:
+        raise error
+
+    for root, dirs, files in os.walk(repo_path, onerror=fail_walk):
         dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
         for fname in files:
             fpath = os.path.join(root, fname)

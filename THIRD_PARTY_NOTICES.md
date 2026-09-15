@@ -23,7 +23,7 @@ The backend dependency manifest is `requirements.txt`.
 | MCP Python SDK | Model Context Protocol server/client SDK | MIT |
 | Pydantic | Data validation and models | MIT |
 | bcrypt | Password hashing | Apache-2.0 |
-| python-jose | JOSE/JWT support | MIT |
+| PyJWT | JWT signing and verification | MIT |
 | asyncpg | PostgreSQL async driver | Apache-2.0 |
 | redis-py | Redis client | MIT |
 | FalkorDB Python client | FalkorDB client access | Verify package metadata for the resolved version |
@@ -100,7 +100,8 @@ Known image and base-image references in the current source tree include:
 
 | Image or source | Purpose | Notice requirement |
 | --- | --- | --- |
-| `python:3.12-slim` | API/dev/prod base image | Preserve Python, Debian, and bundled package notices for distributed images. |
+| `python:3.12-slim-bookworm` | API/dev/prod base image | Preserve Python, Debian, and bundled package notices for distributed images. |
+| `postgres:16-bookworm` | Matching PostgreSQL 16 client binaries and libpq for API images | Preserve PostgreSQL, Debian, and bundled package notices. |
 | `node:20-alpine` | Frontend build stage | Preserve Node.js, Alpine Linux, and bundled package notices when distributing derived images. |
 | `nginx:1.27-alpine` | Frontend/gateway runtime | Preserve Nginx, Alpine Linux, and bundled package notices. |
 | `redis:7-alpine` | Queue/cache runtime | Preserve Redis, Alpine Linux, and bundled package notices. |
@@ -110,7 +111,7 @@ Known image and base-image references in the current source tree include:
 | `ghcr.io/nascousa/cga-api` | Published CGA API/runtime image | Include CGA license package plus all resolved image notices. |
 
 Dockerfiles also install operating-system packages such as `curl`, `git`,
-`postgresql-client`, and `wget`. Their licenses are inherited from the resolved
+`libpq5`, `libreadline8`, `liblz4-1`, `libzstd1`, and `wget`. Their licenses are inherited from the resolved
 Debian or Alpine package repositories in the exact image build.
 
 ## SBOM And Generated License Reports

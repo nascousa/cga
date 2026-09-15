@@ -18,6 +18,7 @@ $composeFile = Join-Path $repoRoot 'docker-compose.desktop.yml'
 $envExample = Join-Path $repoRoot '.env.example'
 $envFile = Join-Path $repoRoot '.env'
 $runtimeStateFile = Join-Path $repoRoot 'tmp\cga-desktop-runtime.json'
+. (Join-Path $PSScriptRoot 'desktop-graph-safety.ps1')
 
 function Test-PortAvailable {
     param([int]$Port)
@@ -127,6 +128,7 @@ $existingServices = @(docker compose -f $composeFile ps -q 2>$null | Where-Objec
 $stackExists = $existingServices.Count -gt 0
 
 if ($Command -in @('start', 'restart')) {
+    Assert-CgaGraphPersistence -ComposeFile $composeFile
     $apiPreferred = if ($env:CGA_DESKTOP_API_PORT) { [int]$env:CGA_DESKTOP_API_PORT } elseif ($savedState -and $savedState.apiPort -and ($stackExists -or (Test-PortAvailable -Port ([int]$savedState.apiPort)))) { [int]$savedState.apiPort } else { Resolve-FreePort -PreferredPort 18001 -FallbackStart 18011 }
     $graphPreferred = if ($env:CGA_DESKTOP_FALKORDB_PORT) { [int]$env:CGA_DESKTOP_FALKORDB_PORT } elseif ($savedState -and $savedState.graphPort -and ($stackExists -or (Test-PortAvailable -Port ([int]$savedState.graphPort)))) { [int]$savedState.graphPort } else { Resolve-FreePort -PreferredPort 16381 -FallbackStart 16391 }
     $browserPreferred = if ($env:CGA_DESKTOP_BROWSER_PORT) { [int]$env:CGA_DESKTOP_BROWSER_PORT } elseif ($savedState -and $savedState.browserPort -and ($stackExists -or (Test-PortAvailable -Port ([int]$savedState.browserPort)))) { [int]$savedState.browserPort } else { Resolve-FreePort -PreferredPort 13001 -FallbackStart 13011 }
@@ -159,10 +161,9 @@ switch ($Command) {
         }
     }
     'stop' {
-        Invoke-Compose @('down')
+        Invoke-Compose @('stop')
     }
     'restart' {
-        Invoke-Compose @('down')
         Invoke-Compose @('up', '-d', '--build')
         Save-DesktopRuntimeState -ApiPort $apiPreferred -GraphPort $graphPreferred -BrowserPort $browserPreferred
         Write-Host "Admin UI: http://localhost:$apiPreferred/admin"

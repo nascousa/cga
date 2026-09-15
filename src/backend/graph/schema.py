@@ -40,6 +40,16 @@ SET f.language = $language,
   f.variables_hash = $variables_hash
 """
 
+QUERY_FILE_SNAPSHOTS = """
+MATCH (f:File)
+RETURN f.path, f.content_hash, f.index_metadata, f.index_version
+"""
+
+SET_FILE_SNAPSHOT = """
+MATCH (f:File {path: $path})
+SET f.index_metadata = $metadata, f.index_version = $version
+"""
+
 DELETE_FILE_VARIABLES = """
 MATCH (v:Variable {file_path: $file_path})
 DETACH DELETE v
@@ -362,7 +372,8 @@ SET v.name        = row.name,
     v.scope_qname = row.scope_qname,
     v.file_path   = row.file_path,
     v.line_number = row.line_number,
-    v.role        = row.role
+    v.role        = row.role,
+    v.parameter_index = row.parameter_index
 """
 
 BATCH_EDGE_SYMBOL_HAS_VARIABLE = """
@@ -397,5 +408,5 @@ BATCH_QUERY_SCOPE_PARAMETERS = """
 UNWIND $scope_qnames AS sq
 MATCH (:Symbol {qualified_name: sq})-[:USES_VARIABLE]->(v:Variable {role: 'parameter'})
 RETURN sq, v.qualified_name, v.line_number, v.name
-ORDER BY sq, v.line_number, v.name
+ORDER BY sq, v.parameter_index, v.line_number, v.name
 """

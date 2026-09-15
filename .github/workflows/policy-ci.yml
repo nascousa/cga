@@ -10,6 +10,29 @@ permissions:
   contents: read
 
 jobs:
+  relay-reliability:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: src/cga-relay
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Test Relay
+        run: cargo test --locked
+      - name: Verify hardened Windows candidate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --locked --release --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\scripts\verify-release-binary.ps1 -BinaryPath .\target\x86_64-pc-windows-msvc\release\cga-relay.exe
+          .\scripts\tests\release-process.Tests.ps1
+
   quality-security:
     runs-on: ubuntu-latest
     services:
@@ -54,6 +77,9 @@ jobs:
         id: coverage
         continue-on-error: true
         env:
+          RELAY_SYNC_TEST_POSTGRES_DSN: postgresql://localhost:15432/appdb
+          PGUSER: app
+          PGPASSWORD: app
           FALKORDB_HOST: localhost
           FALKORDB_PORT: "16379"
           QUEUE_REDIS_URL: redis://localhost:6380/1
@@ -145,6 +171,12 @@ jobs:
       - name: Run dependency vulnerability audit
         run: |
           pip-audit -r requirements.txt
+
+      - name: Build and smoke-test the desktop API image
+        run: |
+          docker build -f Dockerfile.dev -t cga-ci-api .
+          docker run --rm --network none --entrypoint python cga-ci-api \
+            -c "from backend.main import APP_VERSION, app; from backend.indexer.parser import SourceParser; print(APP_VERSION)"
 
   pr-policy-checklist:
     if: github.event_name == 'pull_request'

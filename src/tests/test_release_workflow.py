@@ -13,3 +13,8 @@ def test_relay_checksums_use_flat_release_asset_names() -> None:
     assert "cd relay-dist" in workflow
     assert 'sha256sum cga-relay.exe "cga-relay-${version}-windows-x64.zip"' in workflow
     assert "relay-dist/*" in workflow
+
+
+def test_source_archive_excludes_old_generated_release_binaries() -> None:
+    attributes = (ROOT / ".gitattributes").read_text(encoding="utf-8")
+    assert "/dist export-ignore" in attributes

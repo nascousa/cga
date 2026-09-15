@@ -187,14 +187,14 @@ fn snapshot_count(request: &str) -> usize {
 
 fn write_http_response(stream: &mut TcpStream, status: u16) {
     let (reason, body) = match status {
-        202 => ("Accepted", "{\"accepted\":true}"),
+        202 => ("Accepted", "{\"accepted\":true,\"durable\":true,\"batch_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"),
         401 => ("Unauthorized", "{\"detail\":\"invalid account session\"}"),
         403 => ("Forbidden", "{\"detail\":\"project mismatch\"}"),
         413 => ("Payload Too Large", "{\"detail\":\"batch limit exceeded\"}"),
         _ => ("Internal Server Error", "{\"detail\":\"test failure\"}"),
     };
     let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nX-Test-Marker: {RESPONSE_HEADER_MARKER}\r\nContent-Length: {}\r\n\r\n{body}",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nX-CGA-Sync-Receipt: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nX-Test-Marker: {RESPONSE_HEADER_MARKER}\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     );
     stream
@@ -721,7 +721,7 @@ fn tray_status_reports_notification_area_mode_without_starting_loop() {
     assert!(out.contains("\"logged_in\":false"));
     assert!(out.contains("\"username\":\"\""));
     assert!(out.contains(
-        "\"menu\":[\"Not signed in\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Exit\"]"
+        "\"menu\":[\"Not signed in\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]"
     ));
     assert!(out.contains("\"name\":\"CGA-Relay\""));
     assert!(out.contains("\"user_groups\":[]"));
@@ -833,7 +833,7 @@ fn tray_status_uses_color_icon_and_username_when_signed_in() {
     assert!(out.contains("\"logged_in\":true"));
     assert!(out.contains("\"username\":\"dev@example.com\""));
     assert!(out.contains(
-        "\"menu\":[\"Signed in: dev@example.com\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Exit\"]"
+        "\"menu\":[\"Signed in: dev@example.com\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]"
     ));
     assert!(out.contains("\"user_groups\":[\"Team Alpha\"]"));
     assert!(out.contains("\"user_group_count\":1"));
@@ -1852,6 +1852,119 @@ fn sync_batches_checkpoints_progress_and_metadata_only_logs() {
 }
 
 #[test]
+fn sync_preserves_skipped_file_checkpoints_for_later_deletion() {
+    let tmp = TestDir::new("sync-skipped-checkpoint");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("changed.txt"), "new").unwrap();
+    fs::write(repo.join("large.txt"), "x".repeat(65)).unwrap();
+    fs::write(repo.join("binary.txt"), [0, 1]).unwrap();
+    fs::write(repo.join("invalid.txt"), [255]).unwrap();
+    let (port, server) = spawn_sync_status_server(vec![202]);
+    let config = write_safe_config(tmp.path(), &repo, &[
+        ("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}")),
+    ]);
+    let login = run_agent(&["login", "--config", config.to_str().unwrap(),
+        "--email", "dev@example.test", "--token-env", "CGA_TEST_DEVELOPER_TOKEN"]);
+    assert!(login.status.success());
+    let add = run_agent(&["projects", "add", "--config", config.to_str().unwrap(),
+        "--project-tag", "repo", "--root", repo.to_str().unwrap()]);
+    assert!(add.status.success());
+    let state = tmp.path().join("state").join("scan-state").join("default_repo.state");
+    fs::create_dir_all(state.parent().unwrap()).unwrap();
+    fs::write(&state, "version\t1\nfile\tlarge.txt\told\t3\nfile\tbinary.txt\told\t3\nfile\tinvalid.txt\told\t3\n").unwrap();
+    let output = Command::new(agent_bin())
+        .args(["sync", "--config", config.to_str().unwrap(), "--all"])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET).output().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    server.join().unwrap();
+    let checkpoint = fs::read_to_string(&state).unwrap();
+    for name in ["large.txt", "binary.txt", "invalid.txt"] {
+        assert!(checkpoint.contains(name), "forgot acknowledged file {name}");
+        fs::remove_file(repo.join(name)).unwrap();
+    }
+    let output = Command::new(agent_bin())
+        .args(["sync", "--config", config.to_str().unwrap(), "--all", "--dry-run"])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET).output().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("\"tombstone\":3"), "{}", stdout(&output));
+}
+
+#[test]
+fn sync_migrates_legacy_acknowledgements_and_preserves_tombstones() {
+    let tmp = TestDir::new("sync-legacy-receipt");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("keep.txt"), "unchanged").unwrap();
+    fs::write(repo.join("remove.txt"), "old").unwrap();
+    let (port, server) = spawn_accepting_sync_server(8 * 1024 * 1024, 3);
+    let config = write_safe_config(tmp.path(), &repo, &[
+        ("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}")),
+    ]);
+    assert!(run_agent(&["login", "--config", config.to_str().unwrap(),
+        "--email", "dev@example.test", "--token-env", "CGA_TEST_DEVELOPER_TOKEN"]).status.success());
+    assert!(run_agent(&["projects", "add", "--config", config.to_str().unwrap(),
+        "--project-tag", "repo", "--root", repo.to_str().unwrap()]).status.success());
+    let sync = || Command::new(agent_bin())
+        .args(["sync", "--config", config.to_str().unwrap(), "--all"])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET).output().unwrap();
+    let first = sync();
+    assert!(first.status.success(), "{}", stderr(&first));
+    let state = tmp.path().join("state").join("scan-state").join("default_repo.state");
+    let legacy = fs::read_to_string(&state).unwrap().replace("durable\ttrue\n", "");
+    fs::write(&state, legacy).unwrap();
+    fs::remove_file(repo.join("remove.txt")).unwrap();
+    let migrated = sync();
+    assert!(migrated.status.success(), "{}", stderr(&migrated));
+    assert!(stderr(&migrated).contains("migrating legacy checkpoint"));
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(snapshot_count(&requests[1]), 1);
+    assert!(request_body(&requests[1]).contains("\"tombstones\":[\"remove.txt\"]"));
+    assert!(fs::read_to_string(&state).unwrap().contains("durable\ttrue"));
+}
+
+#[test]
+fn sync_rejects_truncated_success_without_advancing_checkpoint() {
+    assert_sync_rejected_without_checkpoint(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 100\r\n\r\n{}");
+}
+
+#[test]
+fn sync_rejects_missing_invalid_or_duplicate_durable_receipt() {
+    for response in [
+        "HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\n{\"accepted\":true}",
+        "HTTP/1.1 202 Accepted\r\nX-CGA-Sync-Receipt: invalid\r\nContent-Length: 2\r\n\r\n{}",
+        "HTTP/1.1 202 Accepted\r\nX-CGA-Sync-Receipt: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nX-CGA-Sync-Receipt: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nContent-Length: 2\r\n\r\n{}",
+    ] {
+        assert_sync_rejected_without_checkpoint(response);
+    }
+}
+
+fn assert_sync_rejected_without_checkpoint(response: &'static str) {
+    let tmp = TestDir::new("sync-truncated");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("pending.txt"), "new").unwrap();
+    let (port, server) = spawn_malformed_sync_server(response);
+    let config = write_safe_config(tmp.path(), &repo, &[
+        ("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}")),
+    ]);
+    let login = run_agent(&["login", "--config", config.to_str().unwrap(),
+        "--email", "dev@example.test", "--token-env", "CGA_TEST_DEVELOPER_TOKEN"]);
+    assert!(login.status.success());
+    let add = run_agent(&["projects", "add", "--config", config.to_str().unwrap(),
+        "--project-tag", "repo", "--root", repo.to_str().unwrap()]);
+    assert!(add.status.success());
+    let output = Command::new(agent_bin())
+        .args(["sync", "--config", config.to_str().unwrap(), "--all"])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET).output().unwrap();
+    server.join().unwrap();
+    assert!(!output.status.success(), "unverified success must not be acknowledged");
+    assert!(!tmp.path().join("state").join("scan-state").join("default_repo.state").exists());
+}
+
+#[test]
 fn sync_respects_configured_batch_byte_limit() {
     let tmp = TestDir::new("sync-batch-bytes");
     let repo = tmp.path().join("repo");
@@ -1932,6 +2045,7 @@ fn run_mcp(config: &Path, input: &str, extra_env: &[(&str, &str)]) -> Output {
     let mut child = command
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
     child
@@ -1998,6 +2112,88 @@ fn concurrent_processes_allow_exactly_one_mutex_holder() {
         .find(|output| !output.status.success())
         .expect("one relay process should be rejected");
     assert!(stderr(rejected).contains("CGA-Relay is already running"));
+}
+
+#[test]
+fn config_accepts_documented_browser_allowed_origins() {
+    let tmp = TestDir::new("config-origins");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[
+        ("BROWSER_ALLOWED_ORIGINS", "https://admin.example.test".to_string()),
+    ]);
+    let output = run_agent(&["doctor", "--config", config.to_str().unwrap(), "--json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+}
+
+#[test]
+fn mcp_replies_before_stdin_closes() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+    use std::sync::mpsc;
+
+    for framed in [false, true] {
+        let tmp = TestDir::new("mcp-live");
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let config = write_safe_config(tmp.path(), &repo, &[]);
+        let mut child = Command::new(agent_bin())
+            .args(["mcp", "--config", config.to_str().unwrap()])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut input = child.stdin.take().unwrap();
+        let output = child.stdout.take().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        let reader = thread::spawn(move || {
+            for line in BufReader::new(output).lines() {
+                if sender.send(line.unwrap()).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut received = Vec::new();
+        for id in [1, 2] {
+            let body = format!("{{\"jsonrpc\":\"2.0\",\"id\":{id},\"method\":\"ping\"}}");
+            if framed {
+                write!(input, "Content-Length: {}\r\n\r\n{body}", body.len()).unwrap();
+            } else {
+                writeln!(input, "{body}").unwrap();
+            }
+            input.flush().unwrap();
+            match receiver.recv_timeout(Duration::from_secs(3)) {
+                Ok(line) => received.push(line),
+                Err(_) => break,
+            }
+        }
+        drop(input);
+        child.kill().ok();
+        child.wait().unwrap();
+        reader.join().unwrap();
+        assert_eq!(received.len(), 2, "MCP must respond while stdin remains open");
+        assert!(received[0].contains("\"id\":1"));
+        assert!(received[1].contains("\"id\":2"));
+    }
+}
+
+#[test]
+fn mcp_invalid_frame_length_fails_without_panicking() {
+    let tmp = TestDir::new("mcp-invalid-frame");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[]);
+    for input in [
+        "Content-Length: 1\r\n\r\né",
+        "Content-Length: 18446744073709551615\r\n\r\n{}",
+        "Content-Length: 2\r\nContent-Length: 2\r\n\r\n{}",
+    ] {
+        let output = run_mcp(&config, input, &[]);
+        assert!(!output.status.success());
+        assert!(stderr(&output).contains("error:"), "{}", stderr(&output));
+        assert!(!stderr(&output).contains("panicked"), "{}", stderr(&output));
+    }
 }
 
 #[test]
@@ -2209,13 +2405,16 @@ fn mcp_index_git_incremental_uses_local_git_and_forwards_incremental_paths() {
     let port = listener.local_addr().unwrap().port();
     let server = thread::spawn(move || {
         let mut stream = listener.accept().unwrap().0;
-        let mut buffer = [0_u8; 8192];
-        let read = stream.read(&mut buffer).unwrap();
-        let request = String::from_utf8_lossy(&buffer[..read]).into_owned();
+        let request = read_http_request(&mut stream);
         assert!(request.contains("POST /api/project/cga-relay/mcp-tool HTTP/1.1"));
         assert!(request.contains("\"tool\":\"index_incremental\""));
         assert!(request.contains("\"changed_paths\""));
         assert!(request.contains("a.py"));
+        assert!(request.contains("file with space.py"));
+        assert!(request.contains("\u{6587}\u{4ef6}.py"));
+        assert!(!request.contains("\\\"src/"));
+        assert!(request.contains("\"ref_id\":\"feature/relay\""));
+        assert!(request.contains("\"parent_ref\":\"main\""));
         assert!(!request.contains("\"tool\":\"index_git_incremental\""));
         let body = "{\"ok\":true,\"project_id\":\"PROJECT123\"}";
         let response = format!(
@@ -2232,9 +2431,11 @@ fn mcp_index_git_incremental_uses_local_git_and_forwards_incremental_paths() {
     let init = Command::new("git").arg("init").arg(&repo).output().unwrap();
     assert!(init.status.success(), "stderr: {}", stderr(&init));
     fs::write(repo.join("src").join("a.py"), "print('a')\n").unwrap();
+    fs::write(repo.join("src").join("file with space.py"), "pass\n").unwrap();
+    fs::write(repo.join("src").join("\u{6587}\u{4ef6}.py"), "pass\n").unwrap();
     let api = format!("http://127.0.0.1:{port}");
     let config = write_safe_config(tmp.path(), &repo, &[("API_BASE_URL", api)]);
-    let input = "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\",\"params\":{\"name\":\"index_git_incremental\",\"arguments\":{}}}\n";
+    let input = "{\"jsonrpc\":\"2.0\",\"id\":30,\"method\":\"tools/call\",\"params\":{\"name\":\"index_git_incremental\",\"arguments\":{\"ref_id\":\"feature/relay\",\"parent_ref\":\"main\"}}}\n";
     let output = run_mcp(&config, input, &[("CGA_TEST_API_KEY", TEST_SECRET)]);
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
