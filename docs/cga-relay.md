@@ -202,14 +202,22 @@ The relay allows plaintext HTTP only for loopback hosts such as `127.0.0.1` and 
 
 Sync requests are deterministic and bounded by both 500 items and `MAX_BATCH_BYTES`. The scanner retains snapshot metadata instead of all changed source bodies in memory. Immediately before submission, the relay reads each file again and verifies its size and SHA-256 digest. Every accepted batch updates the local scan-state checkpoint, so a later batch failure resumes from the remaining changes instead of restarting the full first sync.
 
-Sync retains the last acknowledged checkpoint for previously synced files that temporarily become oversized, binary, or invalid UTF-8. Skipping such a file does not delete its remote snapshot; if the file is subsequently removed, relay still sends its tombstone. A completed scan must not overwrite the per-batch acknowledged checkpoint.
+Sync retains the last acknowledged checkpoint for previously synced files that temporarily become oversized, binary, or invalid UTF-8. Skipping such a file does not send a tombstone; if the file is subsequently removed, relay still sends its tombstone. A completed scan must not overwrite the per-batch acknowledged checkpoint.
 
 The project-token backend bridge is exposed at `/api/project/cga-relay/mcp-tool` and `/api/project/cga-relay/sync`. These routes are protected by project tokens through the existing `/api/project` middleware and require the authenticated project identity to match the submitted `project_id`. The account-login bridge is exposed at `/api/auth/cga-relay/mcp-tool` and `/api/auth/cga-relay/sync` and is protected by the normal user JWT flow.
+
+### Current Server-Side Reliability Limitations
+
+The current sync endpoints audit counts but do not durably store snapshot contents or tombstone paths, and may acknowledge even when audit recording fails. Therefore an accepted sync batch and its local checkpoint are **not proof of durable delivery, indexing, or backup**. Keep the original checkout; use the explicit indexing tools for graph construction. Durable sync requires persisted, replayable batches and an acknowledgement protocol before it can provide that guarantee.
+
+The reliability review also identified an enqueue crash window between `XADD` and recording `stream_id` (a retry can create another message), and a waiter that treats recoverable `failed/terminal=0` as complete. These findings were reproduced with in-memory fault injection, not a real Redis/FalkorDB outage test.
 
 ## Branch Graphs
 
 Relay MCP indexing and query tools support isolated temporary ref graphs through `ref_id`, `branch`, or `git_branch`. Parent aliases are `parent_ref`, `base_ref`, and `base_branch`. The `promote_ref` tool reindexes source-ref file paths from the merged target working tree into the parent/default graph and can then delete the source graph.
 
 Local Git incremental indexing uses NUL-delimited porcelain output, preserving spaces, Unicode names, and both sides of a rename. It forwards explicit ref/parent aliases and graph selection to backend validation instead of silently dropping branch context. Unsupported non-UTF-8 Git paths fail explicitly.
+
+Until promotion deletion is bound to the exact target generation published by its job, do not request `--delete-ref-graph` when concurrent target indexing is possible. The current source-generation CAS does not protect against another job replacing the target between promotion completion and source deletion. Retain the source graph and verify the target before separately performing administrator-reviewed cleanup.
 
 See [BRANCH-GRAPHS.md](BRANCH-GRAPHS.md) for graph naming, fallback behavior, promotion semantics, examples, and current limitations.
