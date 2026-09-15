@@ -223,8 +223,10 @@ class IndexPipeline:
                     "version": INDEX_FORMAT_VERSION,
                 })
             stats["symbols"] = worker._count_symbols()
+        if not stage.published_generation:
+            raise RuntimeError("Graph publication did not return a generation receipt")
         log.info("pipeline.generation.published", repo_path=str(root), full=full, **stats)
-        return stats
+        return {**stats, "published_generation": stage.published_generation}
 
     def _write_snapshot_nodes(self, repo_path: str, snapshot: FileSnapshot) -> None:
         from backend.indexer.hasher import hash_symbols, hash_calls, hash_imports

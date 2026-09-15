@@ -11,7 +11,7 @@ import time
 
 from backend.auth.access import authorize_project_paths
 from backend.auth.context import authorized_graph_name
-from backend.queue.streams import JobProducer
+from backend.queue.streams import JobProducer, _terminal
 from backend.queue.models import IndexJob, JobType
 
 
@@ -65,6 +65,7 @@ class MCPProducer:
         timeout_sec: float = 120.0,
         poll_interval_sec: float = 1.0,
     ) -> dict:
+        """Wait for done or terminal failed; legacy failed records may recover."""
         deadline = time.monotonic() + max(0.0, timeout_sec)
         interval = max(0.1, poll_interval_sec)
 
@@ -81,8 +82,7 @@ class MCPProducer:
                 await asyncio.sleep(interval)
                 continue
 
-            state = str(status.get("status", ""))
-            if state in {"done", "failed"}:
+            if _terminal(status):
                 return {
                     **status,
                     "ready": True,

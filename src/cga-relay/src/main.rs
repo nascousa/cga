@@ -302,7 +302,7 @@ fn cmd_projects(args: &[String]) -> AgentResult<()> {
 fn cmd_scan(args: &[String]) -> AgentResult<()> {
     let config = load_config(required_arg(args, "--config")?)?;
     let dry_run = has_flag(args, "--dry-run");
-    let result = scan_project(&config, &config.project_root, &config.project_id, dry_run)?;
+    let result = scan_project(&config, &config.project_root, &config.project_id, dry_run, false)?;
     if !dry_run {
         persist_scan_result(&config, &result)?;
     }
@@ -353,7 +353,7 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
             project.locator,
             display_path(&project.root)
         );
-        let result = scan_project(&config, &project.root, &project.locator, true)?;
+        let result = scan_project(&config, &project.root, &project.locator, true, true)?;
         eprintln!(
             "sync {}: scan complete (scanned={}, changed={}, tombstones={}, bytes={})",
             project.locator,
@@ -2127,8 +2127,9 @@ fn scan_project(
     root: &Path,
     state_key: &str,
     dry_run: bool,
+    require_durable: bool,
 ) -> AgentResult<ScanResult> {
-    let previous = load_scan_state(config, state_key)?;
+    let previous = load_scan_state(config, state_key, require_durable)?;
     let mut current = BTreeMap::new();
     let mut result = ScanResult {
         root: root.to_path_buf(),
@@ -2368,6 +2369,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_reads_and_deduplicated_sync_can_replay_after_connect() {
+        assert!(can_replay_http_request("GET", "/api/health"));
+        assert!(can_replay_http_request("POST", "/api/project/cga-relay/sync"));
+        assert!(can_replay_http_request("POST", "/api/auth/cga-relay/sync"));
+        assert!(!can_replay_http_request("POST", "/api/project/cga-relay/mcp-tool"));
+        assert!(!can_replay_http_request("POST", "/api/auth/cga-relay/mcp-tool"));
+        assert!(!can_replay_http_request("POST", "/api/auth/login"));
+    }
+
+    #[test]
     fn http_response_framing_validates_lengths_and_decodes_chunks() {
         let plain = "HTTP/1.1 200 OK\r\nContent-Length: 2";
         assert_eq!(decode_http_body(plain, b"{}").unwrap(), "{}");
@@ -2579,6 +2590,7 @@ mod tests {
 fn load_scan_state(
     config: &AgentConfig,
     key: &str,
+    require_durable: bool,
 ) -> AgentResult<BTreeMap<String, (String, u64)>> {
     let path = scan_state_path(config, key);
     if !path.exists() {
@@ -2595,11 +2607,17 @@ fn load_scan_state(
         let bytes = parts[3].parse::<u64>().unwrap_or(0);
         state.insert(unescape_field(parts[1]), (unescape_field(parts[2]), bytes));
     }
+    if require_durable && !text.lines().any(|line| line == "durable\ttrue") && !state.is_empty() {
+        eprintln!("sync: migrating legacy checkpoint; resending snapshots and preserving deletion history");
+        for (hash, _) in state.values_mut() {
+            hash.clear();
+        }
+    }
     Ok(state)
 }
 
 fn persist_scan_result(config: &AgentConfig, result: &ScanResult) -> AgentResult<()> {
-    persist_scan_state(config, &result.root, &result.state_key, &result.state)
+    persist_scan_state(config, &result.root, &result.state_key, &result.state, false)
 }
 
 fn persist_scan_state(
@@ -2607,9 +2625,13 @@ fn persist_scan_state(
     root: &Path,
     state_key: &str,
     state: &BTreeMap<String, (String, u64)>,
+    durable: bool,
 ) -> AgentResult<()> {
     ensure_state_dirs(config)?;
     let mut text = format!("version\t1\nroot\t{}\n", escape_field(&display_path(root)));
+    if durable {
+        text.push_str("durable\ttrue\n");
+    }
     for (path, (hash, bytes)) in state {
         text.push_str(&format!(
             "file\t{}\t{}\t{}\n",
@@ -2882,7 +2904,7 @@ fn submit_sync(
     account_token: &mut Option<&str>,
 ) -> AgentResult<String> {
     let plans = plan_sync_batches(config, project, result)?;
-    let mut checkpoint = load_scan_state(config, &result.state_key)?;
+    let mut checkpoint = load_scan_state(config, &result.state_key, true)?;
     let mut responses = Vec::new();
 
     for (index, plan) in plans.iter().enumerate() {
@@ -2913,11 +2935,7 @@ fn submit_sync(
             )));
         }
         let response = post_sync_body(config, project, developer_token, account_token, &body)?;
-        responses.push(if response.trim().is_empty() {
-            "null".to_string()
-        } else {
-            response
-        });
+        responses.push(response);
 
         for snapshot in &result.snapshots[plan.snapshot_start..plan.snapshot_end] {
             checkpoint.insert(
@@ -2928,7 +2946,7 @@ fn submit_sync(
         for path in &result.tombstones[plan.tombstone_start..plan.tombstone_end] {
             checkpoint.remove(path);
         }
-        persist_scan_state(config, &result.root, &result.state_key, &checkpoint)?;
+        persist_scan_state(config, &result.root, &result.state_key, &checkpoint, true)?;
     }
 
     Ok(format!(
@@ -3074,7 +3092,7 @@ fn post_sync_body(
                 body,
             )?;
             if response.is_success() {
-                return Ok(response.body);
+                return response.into_sync_success_body();
             }
             if response.status_code != 401 {
                 return Err(response.into_error());
@@ -3102,7 +3120,7 @@ fn post_sync_body(
         }
     }
     if let Some(developer_token) = developer_token {
-        http_post_json(
+        http_post_json_response(
             config,
             &format!("{}/api/project/cga-relay/sync", config.control_api_base_url),
             &[
@@ -3110,14 +3128,14 @@ fn post_sync_body(
                 ("X-Project-ID", project.project_id.clone()),
             ],
             body,
-        )
+        )?.into_sync_success_body()
     } else if let Some(account_token) = *account_token {
-        http_post_json(
+        http_post_json_response(
             config,
             &format!("{}/api/auth/cga-relay/sync", config.control_api_base_url),
             &[("Authorization", format!("Bearer {account_token}"))],
             body,
-        )
+        )?.into_sync_success_body()
     } else {
         Err(AgentError(
             "sync requires a developer token or CGA account login".to_string(),
@@ -3531,9 +3549,7 @@ fn http_post_json_response(
     execute_http_request(config, "POST", url, headers, body)
 }
 
-/// Loopback-only requests can hit a stale WSL2/Docker Desktop IPv6 port-forward
-/// (TCP connect succeeds but the socket is dead); retry the same request against
-/// the other loopback address family before surfacing an error.
+/// Only reads and deduplicated sync batches may be replayed after connecting.
 fn execute_http_request(
     config: &AgentConfig,
     method: &str,
@@ -3547,15 +3563,21 @@ fn execute_http_request(
     let candidates = loopback_candidate_hosts(&parsed.host);
     let mut last_error: Option<AgentError> = None;
     for (index, candidate_host) in candidates.iter().enumerate() {
-        match execute_http_request_once(
-            config,
-            method,
-            candidate_host,
-            &parsed,
-            headers,
-            body,
-            &crystals,
-        ) {
+        let attempt = match connect_http_stream(candidate_host, parsed.port) {
+            Ok(stream) => {
+                let response = execute_http_request_once(
+                    config, method, candidate_host, &parsed, headers, body, &crystals, stream,
+                );
+                if !can_replay_http_request(method, &parsed.path) {
+                    return response.map_err(|err| AgentError(format!(
+                        "Request outcome uncertain; POST was not automatically replayed. Check server job status before retrying: {}", err.0
+                    )));
+                }
+                response
+            }
+            Err(err) => Err(err),
+        };
+        match attempt {
             Ok(response) => return Ok(response),
             Err(err) => {
                 if index + 1 < candidates.len() {
@@ -3577,6 +3599,12 @@ fn execute_http_request(
     Err(last_error.unwrap_or_else(|| AgentError("no loopback address available".to_string())))
 }
 
+fn can_replay_http_request(method: &str, path: &str) -> bool {
+    method == "GET" || (method == "POST" && matches!(
+        path, "/api/project/cga-relay/sync" | "/api/auth/cga-relay/sync"
+    ))
+}
+
 fn execute_http_request_once(
     config: &AgentConfig,
     method: &str,
@@ -3585,9 +3613,8 @@ fn execute_http_request_once(
     headers: &[(&str, String)],
     body: &str,
     crystals: &[(String, String)],
+    mut stream: TcpStream,
 ) -> AgentResult<HttpResponse> {
-    let mut stream = connect_http_stream(candidate_host, parsed.port)
-        .map_err(|err| AgentError(format!("{candidate_host}:{} {}", parsed.port, err.0)))?;
     let mut request = if method == "GET" {
         format!(
             "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
@@ -3727,6 +3754,7 @@ fn is_loopback_host(host: &str) -> bool {
 struct HttpResponse {
     status_code: u16,
     body: String,
+    sync_receipt: Option<String>,
 }
 
 impl HttpResponse {
@@ -3740,6 +3768,20 @@ impl HttpResponse {
         } else {
             Err(self.into_error())
         }
+    }
+
+    fn into_sync_success_body(self) -> AgentResult<String> {
+        if !self.is_success() {
+            return Err(self.into_error());
+        }
+        if !self.sync_receipt.as_deref().is_some_and(
+            |id| id.len() == 64 && id.bytes().all(|ch| ch.is_ascii_hexdigit())
+        ) {
+            return Err(AgentError(
+                "Sync server did not acknowledge durable storage; upgrade the server before retrying. Checkpoint retained".to_string(),
+            ));
+        }
+        Ok(self.body)
     }
 
     fn into_error(self) -> AgentError {
@@ -3807,9 +3849,21 @@ fn read_http_response(
         ),
     );
     let body = decode_http_body(head, body)?;
+    let mut sync_receipt = None;
+    for line in head.lines().skip(1) {
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("X-CGA-Sync-Receipt") {
+                if sync_receipt.is_some() {
+                    return Err(AgentError("Duplicate sync receipt header".to_string()));
+                }
+                sync_receipt = Some(value.trim().to_string());
+            }
+        }
+    }
     Ok(HttpResponse {
         status_code,
         body,
+        sync_receipt,
     })
 }
 

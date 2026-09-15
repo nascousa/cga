@@ -21,6 +21,7 @@ from backend.indexer.snapshot import FileSnapshot, INDEX_FORMAT_VERSION, parse_s
 def _graphs(rows=None):
     live = MagicMock(spec=GraphClient)
     stage = MagicMock(spec=GraphClient)
+    stage.published_generation = "published-by-this-stage"
     live.atomic_update.return_value = nullcontext(stage)
 
     def query(cypher, params=None):
@@ -76,6 +77,7 @@ def test_index_full_rebuilds_only_private_stage(tmp_path):
     stats = IndexPipeline(live).index_full(str(tmp_path))
 
     assert stats["files"] == 1
+    assert stats["published_generation"] == "published-by-this-stage"
     live.query.assert_not_called()
     stage.query.assert_any_call(S.DELETE_FILE, {"file_path": str(source)})
     assert any(call.args[0] == S.SET_FILE_SNAPSHOT for call in stage.query.call_args_list)

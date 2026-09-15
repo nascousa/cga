@@ -77,6 +77,9 @@ jobs:
         id: coverage
         continue-on-error: true
         env:
+          RELAY_SYNC_TEST_POSTGRES_DSN: postgresql://localhost:15432/appdb
+          PGUSER: app
+          PGPASSWORD: app
           FALKORDB_HOST: localhost
           FALKORDB_PORT: "16379"
           QUEUE_REDIS_URL: redis://localhost:6380/1

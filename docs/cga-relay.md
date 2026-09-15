@@ -86,6 +86,7 @@ Scanner and sync limits:
 - `MAX_BATCH_BYTES`: optional maximum serialized JSON request size. The default is `8388608` bytes (8 MiB). Each request is also limited to 500 snapshots or tombstones.
 - Relay HTTP responses are limited to `8388608` bytes (8 MiB), and connected sockets use 30-second read and write timeouts.
 - HTTP responses must have complete, unambiguous framing. Relay validates `Content-Length`, decodes chunked bodies, and rejects truncated responses without advancing sync checkpoints.
+- After connecting, only GET requests and deduplicated sync batches may fail over automatically. Other POST requests (including indexing and promotion) report an uncertain outcome instead of possibly creating duplicate work; inspect server job status before retrying.
 - MCP consumes and flushes responses one message at a time while stdin stays open. Newline-delimited JSON and legacy `Content-Length` input frames are supported; responses remain newline-delimited. Messages are limited to 8 MiB and legacy headers to 64 KiB. Invalid lengths or UTF-8 produce an explicit error instead of terminating through a panic.
 
 ## CLI
@@ -200,17 +201,28 @@ The relay allows plaintext HTTP only for loopback hosts such as `127.0.0.1` and 
 
 `--dry-run` never updates scan state. Normal scan mode writes local state under `STATE_DIR`. `sync` reads the central relay project registry, fails closed if login or token environment is missing or the only account JWT has expired, and submits changed text snapshots to the configured control API when not in dry-run mode. Scan progress is written to stderr after every 500 processed candidates and at completion; per-batch progress also uses stderr so stdout remains machine-readable JSON.
 
-Sync requests are deterministic and bounded by both 500 items and `MAX_BATCH_BYTES`. The scanner retains snapshot metadata instead of all changed source bodies in memory. Immediately before submission, the relay reads each file again and verifies its size and SHA-256 digest. Every accepted batch updates the local scan-state checkpoint, so a later batch failure resumes from the remaining changes instead of restarting the full first sync.
+Sync requests are deterministic and bounded by both 500 items and `MAX_BATCH_BYTES` (the server also enforces an 8 MiB limit). The scanner retains snapshot metadata instead of all changed source bodies in memory. Immediately before submission, the relay reads each file again and verifies its size and SHA-256 digest. Only a complete successful HTTP response with a valid `X-CGA-Sync-Receipt` header updates the local checkpoint, so a later batch failure resumes from the remaining changes.
 
 Sync retains the last acknowledged checkpoint for previously synced files that temporarily become oversized, binary, or invalid UTF-8. Skipping such a file does not send a tombstone; if the file is subsequently removed, relay still sends its tombstone. A completed scan must not overwrite the per-batch acknowledged checkpoint.
 
 The project-token backend bridge is exposed at `/api/project/cga-relay/mcp-tool` and `/api/project/cga-relay/sync`. These routes are protected by project tokens through the existing `/api/project` middleware and require the authenticated project identity to match the submitted `project_id`. The account-login bridge is exposed at `/api/auth/cga-relay/mcp-tool` and `/api/auth/cga-relay/sync` and is protected by the normal user JWT flow.
 
-### Current Server-Side Reliability Limitations
+### Durable Sync And Recovery
 
-The current sync endpoints audit counts but do not durably store snapshot contents or tombstone paths, and may acknowledge even when audit recording fails. Therefore an accepted sync batch and its local checkpoint are **not proof of durable delivery, indexing, or backup**. Keep the original checkout; use the explicit indexing tools for graph construction. Durable sync requires persisted, replayable batches and an acknowledgement protocol before it can provide that guarantee.
+Both sync endpoints persist complete validated snapshots and tombstone paths in the authentication PostgreSQL database before returning HTTP **202**, `accepted: true`, `durable: true`, `batch_id`, and `X-CGA-Sync-Receipt: <batch_id>`. The ID is a server-computed SHA-256 digest of the registered project's internal database ID, a newline, and the canonical batch JSON. Repeating a batch for the same registered project returns the same receipt without another stored batch. Storage failure never returns a receipt; audit logging failure is reported separately and cannot turn an unpersisted batch into success. The server limits both the raw request body before JSON parsing and the canonical stored payload to 8 MiB, and checks snapshot byte counts, hashes, relative paths, and snapshot/tombstone conflicts.
 
-The reliability review also identified an enqueue crash window between `XADD` and recording `stream_id` (a retry can create another message), and a waiter that treats recoverable `failed/terminal=0` as complete. These findings were reproduced with in-memory fault injection, not a real Redis/FalkorDB outage test.
+Upgrade the server before upgrading clients. An older server's bare `accepted: true` is rejected by the new client. Existing checkpoints without the durable marker are migrated by resending present snapshots while preserving deletion history, including skipped files. Partial migration records acknowledged hashes only for successful batches; the remaining files stay pending. A local `scan` is not a durable server acknowledgement.
+
+Authenticated recovery APIs are available under both `/api/project/cga-relay` (project token) and `/api/auth/cga-relay` (account access to the project):
+
+- `GET /sync-batches?after_id=0&limit=100` lists batch metadata in ID order.
+- `GET /sync-batches/{batch_id}` retrieves the complete stored payload for replay or recovery.
+- Account routes additionally require `project_id` as a query parameter. Both routes bind database access to the authorized project; another project's batch is not visible.
+- Responses use `Cache-Control: no-store`. Pagination is a view of currently committed records, not a live event subscription; start at zero for a full recovery inventory.
+
+Sync storage is **not graph indexing or an independent backup**. It never writes submitted paths into the server checkout or applies tombstones to FalkorDB automatically. Keep the original checkout, use explicit indexing tools for graph construction, and include the PostgreSQL database in tested backups. Stored batches contain source code: restrict database access and monitor storage growth. Retention is explicit; batches must not be silently expired before recovery.
+
+Queue publication associates the message and its stream ID atomically. Retrying the same job ID and payload does not append another message; reusing an ID for a different payload is rejected. Recoverable `failed` states remain pending in waiters until recovery succeeds or an explicit terminal failure is recorded.
 
 ## Branch Graphs
 
@@ -218,6 +230,6 @@ Relay MCP indexing and query tools support isolated temporary ref graphs through
 
 Local Git incremental indexing uses NUL-delimited porcelain output, preserving spaces, Unicode names, and both sides of a rename. It forwards explicit ref/parent aliases and graph selection to backend validation instead of silently dropping branch context. Unsupported non-UTF-8 Git paths fail explicitly.
 
-Until promotion deletion is bound to the exact target generation published by its job, do not request `--delete-ref-graph` when concurrent target indexing is possible. The current source-generation CAS does not protect against another job replacing the target between promotion completion and source deletion. Retain the source graph and verify the target before separately performing administrator-reviewed cleanup.
+Promotion results carry the exact `published_generation` receipt from their indexing job. Before deleting a source graph, Redis atomically verifies both the captured source generation and that target receipt. A concurrent source or target replacement retains the source. Missing legacy receipts, failed/recovering jobs, empty targets and verification failures never authorize deletion. Deploy matching API and worker versions; do not mix old and new queue/publication protocols.
 
 See [BRANCH-GRAPHS.md](BRANCH-GRAPHS.md) for graph naming, fallback behavior, promotion semantics, examples, and current limitations.

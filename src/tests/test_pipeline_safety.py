@@ -10,13 +10,75 @@ import threading
 import pytest
 from redis.exceptions import ConnectionError as RedisConnectionError, ResponseError
 
-from backend.graph.client import GraphClient
+from backend.graph.client import GraphClient, GraphGenerationChanged
 from backend.graph import schema as S
 from backend.indexer.parser import path_to_module
 from backend.indexer.pipeline import IndexPipeline
 
 
 pytestmark = [pytest.mark.live_graph, pytest.mark.live_graph_smoke]
+
+
+@pytest.mark.parametrize("replacement", ["none", "target_before_delete", "target_at_delete", "source"])
+def test_promotion_deletion_atomically_checks_both_generations(replacement, monkeypatch):
+    graphs = [
+        GraphClient(
+            host=os.getenv("FALKORDB_HOST", "127.0.0.1"),
+            port=int(os.getenv("FALKORDB_PORT", "16379")),
+            graph_name=f"cga_promotion_{uuid.uuid4().hex}",
+        ) for _ in range(2)
+    ]
+    source, target = graphs
+    try:
+        for graph in graphs:
+            graph.connect()
+            graph.ensure_indexes()
+            with graph.atomic_update() as stage:
+                stage.query("CREATE (:File {path: 'original'})")
+            assert stage.published_generation == graph.cache_generation()
+        source_generation = source.cache_generation()
+        target_generation = target.cache_generation()
+
+        def replace(graph):
+            with graph.atomic_update() as stage:
+                stage.query("MATCH (n) DETACH DELETE n")
+                stage.query("CREATE (:File {path: 'replacement'})")
+
+        if replacement == "source":
+            replace(source)
+        elif replacement == "target_before_delete":
+            replace(target)
+        elif replacement == "target_at_delete":
+            original_eval = source._db.connection.eval
+
+            def racing_eval(script, *args):
+                replace(target)
+                return original_eval(script, *args)
+
+            monkeypatch.setattr(source._db.connection, "eval", racing_eval)
+
+        def delete():
+            source.delete(
+                expected_generation=source_generation,
+                expected_target_graph=target._graph_name,
+                expected_target_generation=target_generation,
+            )
+
+        if replacement == "none":
+            delete()
+            assert not source._db.connection.exists(source._graph_name)
+        else:
+            with pytest.raises(GraphGenerationChanged):
+                delete()
+            assert source._db.connection.exists(source._graph_name)
+        assert _count(target, "File") == 1
+    finally:
+        for graph in graphs:
+            if graph._db is not None:
+                if graph._db.connection.exists(graph._graph_name):
+                    graph.delete()
+                graph._db.connection.unlink(graph._generation_key)
+                graph.close()
 
 
 @pytest.fixture

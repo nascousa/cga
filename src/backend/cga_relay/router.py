@@ -11,9 +11,11 @@ import time
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
+from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 from redis.exceptions import RedisError
+from starlette.types import Message
 
 from backend.auth import pgshim as aiosqlite
 from backend.auth.access import (
@@ -36,11 +38,44 @@ from backend.auth.database import get_db, insert_audit_log
 from backend.auth.dependencies import get_current_user
 from backend.auth.router import _effective_output_rules
 from backend.graph.client import GraphGenerationChanged
+from backend.cga_relay.storage import MAX_SYNC_BYTES, load_sync_batch, list_sync_batches, save_sync_batch
 from backend.tools import server as mcp_server
 
 log = structlog.get_logger()
-router = APIRouter(prefix="/project/cga-relay", tags=["cga-relay"])
-account_router = APIRouter(prefix="/auth/cga-relay", tags=["cga-relay"])
+
+
+class _SyncBodyLimitRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+        if not self.path.endswith("/sync"):
+            return handler
+
+        async def limited_handler(request: Request) -> Response:
+            lengths = request.headers.getlist("content-length")
+            if lengths:
+                if len(lengths) != 1 or not lengths[0].isascii() or not lengths[0].isdigit():
+                    raise HTTPException(400, "Invalid Content-Length")
+                length = lengths[0].lstrip("0") or "0"
+                if len(length) > len(str(MAX_SYNC_BYTES)) or int(length) > MAX_SYNC_BYTES:
+                    raise HTTPException(413, "Sync request exceeds 8 MiB")
+            received = 0
+
+            async def limited_receive() -> Message:
+                nonlocal received
+                message = await request.receive()
+                if message["type"] == "http.request":
+                    received += len(message.get("body", b""))
+                    if received > MAX_SYNC_BYTES:
+                        raise HTTPException(413, "Sync request exceeds 8 MiB")
+                return message
+
+            return await handler(Request(request.scope, receive=limited_receive))
+
+        return limited_handler
+
+
+router = APIRouter(prefix="/project/cga-relay", tags=["cga-relay"], route_class=_SyncBodyLimitRoute)
+account_router = APIRouter(prefix="/auth/cga-relay", tags=["cga-relay"], route_class=_SyncBodyLimitRoute)
 
 
 class CgaRelayToolCall(BaseModel):
@@ -216,6 +251,8 @@ async def _promote_ref(arguments: dict[str, Any], project_name: str) -> dict[str
             except TimeoutError:
                 index_result = {**submitted, "ready": False, "timeout": True}
     eligible = _successful_promotion(index_result, target_graph_name)
+    published_generation = index_result.get("published_generation")
+    receipt_valid = isinstance(published_generation, str) and bool(published_generation)
     completed = False
     verification_failed = False
     if eligible:
@@ -223,6 +260,8 @@ async def _promote_ref(arguments: dict[str, Any], project_name: str) -> dict[str
             try:
                 completed = (
                     bool(_graph_connection().exists(target_graph_name))
+                    and receipt_valid
+                    and _graph_generation(target_graph_name) == published_generation
                     and _graph_generation(target_graph_name) != initial_generation
                     and _graph_file_count(target_graph_name) > 0
                 )
@@ -245,10 +284,14 @@ async def _promote_ref(arguments: dict[str, Any], project_name: str) -> dict[str
     deleted_ref_graph = completed and delete_requested
     if deleted_ref_graph:
         try:
-            mcp_server._registry.delete(source_graph_name, expected_generation=source_generation)
+            mcp_server._registry.delete(
+                source_graph_name, expected_generation=source_generation,
+                expected_target_graph=target_graph_name,
+                expected_target_generation=published_generation,
+            )
         except GraphGenerationChanged:
             deleted_ref_graph = False
-            reason = "target_published_source_changed_and_retained"
+            reason = "promotion_graph_changed_source_retained"
             log.warning("relay.promotion_source_changed", graph=source_graph_name)
     return {
         "status": outcome,
@@ -533,8 +576,11 @@ async def call_cga_relay_tool(payload: CgaRelayToolCall, request: Request) -> di
     return result
 
 
-@router.post("/sync")
-async def receive_cga_relay_sync(payload: CgaRelaySync, request: Request) -> dict[str, Any]:
+@router.post("/sync", status_code=202)
+async def receive_cga_relay_sync(
+    payload: CgaRelaySync, request: Request, response: Response,
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict[str, Any]:
     started = time.perf_counter()
     context = _project_context(request)
     project_id = _require_project_match(context["project_id"], payload.project_id)
@@ -542,6 +588,7 @@ async def receive_cga_relay_sync(payload: CgaRelaySync, request: Request) -> dic
         raise HTTPException(status_code=413, detail="too many snapshots in one sync request")
 
     summary = sync_summary(payload)
+    receipt = await save_sync_batch(db, int(context["project_db_id"]), payload.model_dump())
     try:
         await insert_audit_log(
             scope="project",
@@ -566,10 +613,8 @@ async def receive_cga_relay_sync(payload: CgaRelaySync, request: Request) -> dic
     except Exception as exc:  # pragma: no cover - audit storage is environment-dependent
         log.warning("cga_relay.sync.audit_failed", error=str(exc), project_id=project_id)
 
-    return {
-        "accepted": True,
-        **summary,
-    }
+    response.headers["X-CGA-Sync-Receipt"] = receipt["batch_id"]
+    return {**summary, **receipt}
 
 
 @router.get("/output-rules")
@@ -581,6 +626,59 @@ async def get_project_output_rules_for_relay(
     context = _project_context(request)
     rules = await _effective_output_rules(db, int(context["project_db_id"]))
     return rules.model_dump()
+
+
+async def _saved_sync_batch(db, context: dict, batch_id: str, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    batch = await load_sync_batch(db, int(context["project_db_id"]), batch_id)
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Sync batch not found")
+    return batch
+
+
+async def _saved_sync_batches(db, context: dict, after_id: int, limit: int, response: Response) -> dict:
+    response.headers["Cache-Control"] = "no-store"
+    batches = await list_sync_batches(db, int(context["project_db_id"]), after_id=after_id, limit=limit)
+    return {"batches": batches, "next_after_id": batches[-1]["id"] if batches else after_id}
+
+
+@router.get("/sync-batches")
+async def get_project_sync_batches(
+    request: Request, response: Response,
+    after_id: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=100),
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict:
+    return await _saved_sync_batches(db, _project_context(request), after_id, limit, response)
+
+
+@router.get("/sync-batches/{batch_id}")
+async def get_project_sync_batch(
+    request: Request, response: Response,
+    batch_id: str = Path(pattern=r"^[a-f0-9]{64}$"),
+    db: aiosqlite.Connection = Depends(get_db),
+) -> dict:
+    return await _saved_sync_batch(db, _project_context(request), batch_id, response)
+
+
+@account_router.get("/sync-batches")
+async def get_account_sync_batches(
+    project_id: str, response: Response,
+    after_id: int = Query(default=0, ge=0), limit: int = Query(default=100, ge=1, le=100),
+    _: None = Depends(require_crystal_suite),
+    user: dict = Depends(get_current_user), db: aiosqlite.Connection = Depends(get_db),
+) -> dict:
+    context = await _account_project_context(db, project_id, user)
+    return await _saved_sync_batches(db, context, after_id, limit, response)
+
+
+@account_router.get("/sync-batches/{batch_id}")
+async def get_account_sync_batch(
+    project_id: str, response: Response, batch_id: str = Path(pattern=r"^[a-f0-9]{64}$"),
+    _: None = Depends(require_crystal_suite),
+    user: dict = Depends(get_current_user), db: aiosqlite.Connection = Depends(get_db),
+) -> dict:
+    context = await _account_project_context(db, project_id, user)
+    return await _saved_sync_batch(db, context, batch_id, response)
 
 
 @account_router.post("/mcp-tool")
@@ -609,9 +707,10 @@ async def get_account_output_rules_for_relay(
     return rules.model_dump()
 
 
-@account_router.post("/sync")
+@account_router.post("/sync", status_code=202)
 async def receive_account_cga_relay_sync(
     payload: CgaRelaySync,
+    response: Response,
     _: None = Depends(require_crystal_suite),
     user: dict = Depends(get_current_user),
     db: aiosqlite.Connection = Depends(get_db),
@@ -622,6 +721,7 @@ async def receive_account_cga_relay_sync(
         raise HTTPException(status_code=413, detail="too many snapshots in one sync request")
 
     summary = sync_summary(payload)
+    receipt = await save_sync_batch(db, int(context["project_db_id"]), payload.model_dump())
     try:
         await insert_audit_log(
             scope="account",
@@ -647,7 +747,5 @@ async def receive_account_cga_relay_sync(
     except Exception as exc:  # pragma: no cover - audit storage is environment-dependent
         log.warning("cga_relay.account_sync.audit_failed", error=str(exc), project_id=context["project_id"])
 
-    return {
-        "accepted": True,
-        **summary,
-    }
+    response.headers["X-CGA-Sync-Receipt"] = receipt["batch_id"]
+    return {**summary, **receipt}

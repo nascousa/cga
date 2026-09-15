@@ -8,6 +8,8 @@ active jobs and failed/dead-letter payloads remain available for inspection.
 WATCH fences lease changes (including expiry; Redis >= 6.0.9 is required).
 ACK is deliberately outside EXEC: Redis transactions do not roll back or stop
 executing commands after a runtime error in a preceding status write.
+Publication atomically links the stream ID and status with Lua. An incomplete
+publication is retained for recovery rather than silently submitted again.
 """
 
 from __future__ import annotations
@@ -35,6 +37,53 @@ STATUS_TTL_SEC = 7 * 24 * 60 * 60
 LEASE_SECONDS = 120
 RECOVERY_BATCH_SIZE = 100
 _WATCH_RETRIES = 5
+
+# Validate before mutating: Lua errors do not roll back earlier writes. The
+# publishing record also fences retries if an unexpected error occurs after XADD.
+_PUBLISH_JOB = """
+local status_type = redis.call('TYPE', KEYS[1]).ok
+local stream_type = redis.call('TYPE', KEYS[2]).ok
+if status_type ~= 'none' and status_type ~= 'hash' then
+    return redis.error_reply('Job status key must be a hash')
+end
+if stream_type ~= 'none' and stream_type ~= 'stream' then
+    return redis.error_reply('Job stream key must be a stream')
+end
+if status_type == 'hash' then
+    if redis.call('HGET', KEYS[1], 'payload') ~= ARGV[1] then
+        return {'conflict', 'Job ID already belongs to a different payload'}
+    end
+    local id = redis.call('HGET', KEYS[1], 'stream_id')
+    local state = redis.call('HGET', KEYS[1], 'status')
+    if redis.call('HGET', KEYS[1], 'job_id') ~= ARGV[2]
+        or not id or not string.match(id, '^%d+%-%d+$')
+        or not (state == 'pending' or state == 'processing' or state == 'retrying'
+                or state == 'done' or state == 'failed') then
+        return {'invalid', 'Incomplete job publication; recovery is required'}
+    end
+    local rows = redis.call('XRANGE', KEYS[2], id, id)
+    if #rows == 0 then
+        if not (state == 'done' or
+                (state == 'failed' and redis.call('HGET', KEYS[1], 'terminal') == '1')) then
+            return {'invalid', 'Active job stream payload is missing; recovery is required'}
+        end
+    else
+        local payload = nil
+        for i = 1, #rows[1][2], 2 do
+            if rows[1][2][i] == 'payload' then payload = rows[1][2][i + 1] end
+        end
+        if payload ~= ARGV[1] then
+            return {'invalid', 'Job stream payload does not match its status'}
+        end
+    end
+    return {'existing', id}
+end
+redis.call('HSET', KEYS[1], unpack(ARGV, 3))
+redis.call('PERSIST', KEYS[1])
+local id = redis.call('XADD', KEYS[2], '*', 'payload', ARGV[1])
+redis.call('HSET', KEYS[1], 'stream_id', id, 'status', 'pending')
+return {'published', id}
+"""
 
 
 class LeaseLostError(RuntimeError):
@@ -64,6 +113,7 @@ def _parse_iso_utc(value: str | None) -> datetime | None:
 
 
 def _terminal(status: dict) -> bool:
+    """Shared queue/waiter definition of a durable terminal result."""
     # Old workers used "failed" for an unacknowledged, recoverable exception.
     return status.get("status") == "done" or (
         status.get("status") == "failed" and status.get("terminal") == "1"
@@ -163,32 +213,18 @@ class JobProducer:
         job = await validate_job_paths(job)
         key = _status_key(job.job_id)
         payload = job.model_dump_json()
-        for _ in range(_WATCH_RETRIES):
-            try:
-                async with self._client.pipeline(transaction=True) as pipe:
-                    await pipe.watch(key)
-                    previous = await pipe.hgetall(key)
-                    if previous:
-                        if previous.get("payload") != payload:
-                            raise ValueError("Job ID already belongs to a different payload")
-                        if previous.get("stream_id"):
-                            return previous["stream_id"]
-                    initial = _base_status(job, "pending", "")
-                    initial.pop("stream_id")
-                    initial.update({"attempts": "0", "attempt_history": "[]", "terminal": "0"})
-                    pipe.multi()
-                    pipe.hset(key, mapping=initial)
-                    pipe.persist(key)
-                    pipe.xadd(STREAM_KEY, {"payload": payload})
-                    results = await pipe.execute()
-                stream_id = results[-1]
-                # A fast consumer may already have advanced the state.
-                await self._client.hsetnx(key, "stream_id", stream_id)
-                log.info("mq.published", job_id=job.job_id, stream_id=stream_id)
-                return stream_id
-            except WatchError:
-                continue
-        raise RuntimeError("Concurrent modification while publishing job")
+        initial = _base_status(job, "publishing", "")
+        initial.update({"attempts": "0", "attempt_history": "[]", "terminal": "0"})
+        outcome, value = await self._client.eval(
+            _PUBLISH_JOB, 2, key, STREAM_KEY, payload, job.job_id,
+            *(item for pair in initial.items() for item in pair),
+        )
+        if outcome == "conflict":
+            raise ValueError(value)
+        if outcome == "invalid":
+            raise RuntimeError(value)
+        log.info("mq.published", job_id=job.job_id, stream_id=value)
+        return value
 
     async def get_job_status(self, job_id: str) -> dict | None:
         if not self._client:

@@ -100,8 +100,10 @@ class Registry:
     def current(self):
         return self.get(_current_project_name.get())
 
-    def delete(self, name, *, expected_generation=None):
+    def delete(self, name, *, expected_generation=None, expected_target_graph=None, expected_target_generation=None):
         self.delete_attempts.append((name, expected_generation))
+        if expected_target_graph and self.generations.get(expected_target_graph) != expected_target_generation:
+            raise GraphGenerationChanged("Target changed during promotion")
         if expected_generation is not None and self.generations.get(name, "generation-1") != expected_generation:
             raise GraphGenerationChanged("Graph changed during promotion")
         self.deleted.append(name)
@@ -907,6 +909,32 @@ async def test_promotion_preserves_source_without_proven_success(projects, isola
 
 
 @pytest.mark.asyncio
+async def test_promotion_keeps_source_when_another_job_replaced_target(
+    projects, isolated_services, monkeypatch,
+):
+    source = context.branch_graph_name(projects.scope_a.project_id, "feature/promote")
+    isolated_services.keys.add(source)
+    monkeypatch.setattr(server, "index_full", AsyncMock(return_value={"status": "queued", "job_id": "A"}))
+
+    async def wait(**kwargs):
+        isolated_services.keys.add("alpha")
+        isolated_services.counts["alpha"] = 1
+        isolated_services.generations["alpha"] = "published-by-B"
+        return {
+            "status": "done", "errors": 0, "files": 1,
+            "project_name": "alpha", "published_generation": "published-by-A",
+        }
+
+    monkeypatch.setattr(server, "wait_for_index_ready", wait)
+    with context.bind_project_scope(projects.scope_a):
+        result = await relay._promote_ref({
+            "repo_path": str(projects.alpha), "ref_id": "feature/promote", "delete_ref_graph": True,
+        }, "alpha")
+    assert result["deleted_ref_graph"] is False
+    assert not isolated_services.deleted
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("errors", [[], "[]", 0, "0"])
 @pytest.mark.parametrize("source_changes", [False, True])
 async def test_promotion_uses_full_rebuild_and_deletes_only_after_success(projects, isolated_services, monkeypatch, errors, source_changes):
@@ -927,7 +955,8 @@ async def test_promotion_uses_full_rebuild_and_deletes_only_after_success(projec
         isolated_services.generations["alpha"] = "published-target-generation"
         if source_changes:
             isolated_services.generations[source] = "newer-source-generation"
-        return {"status": "done", "errors": errors, "project_name": "alpha", "repo_path": str(projects.alpha), "files": 1}
+        return {"status": "done", "errors": errors, "project_name": "alpha", "repo_path": str(projects.alpha), "files": 1,
+                "published_generation": "published-target-generation"}
 
     monkeypatch.setattr(server, "index_full", full)
     monkeypatch.setattr(server, "wait_for_index_ready", wait)
@@ -942,7 +971,7 @@ async def test_promotion_uses_full_rebuild_and_deletes_only_after_success(projec
     assert isolated_services.delete_attempts == [(source, "generation-1")]
     assert result["deleted_ref_graph"] is not source_changes
     if source_changes:
-        assert result["reason"] == "target_published_source_changed_and_retained"
+        assert result["reason"] == "promotion_graph_changed_source_retained"
     assert all(name == "alpha" and "count(f)" in query for name, query, _ in isolated_services.queries)
     assert all("RETURN f.path" not in query for _, query, _ in isolated_services.queries)
 
@@ -968,15 +997,16 @@ async def test_promotion_uses_pre_submission_source_generation_for_atomic_delete
         isolated_services.generations["alpha"] = "target-published"
         return {
             "status": "done", "errors": 0, "files": 1,
+            "published_generation": "target-published",
             "project_name": "alpha", "repo_path": str(projects.alpha),
         }
 
     original_delete = isolated_services.delete
 
-    def delete_after_concurrent_commit(name, *, expected_generation=None):
+    def delete_after_concurrent_commit(name, *, expected_generation=None, **kwargs):
         if change_phase == "conditional_delete":
             isolated_services.generations[name] = "source-committed-before-delete-lock"
-        original_delete(name, expected_generation=expected_generation)
+        original_delete(name, expected_generation=expected_generation, **kwargs)
 
     monkeypatch.setattr(server, "index_full", full)
     monkeypatch.setattr(server, "wait_for_index_ready", wait)
@@ -986,7 +1016,7 @@ async def test_promotion_uses_pre_submission_source_generation_for_atomic_delete
             "repo_path": str(projects.alpha), "ref_id": "feature/promote", "delete_ref_graph": True,
         }, "alpha")
     assert result["status"] == "done"
-    assert result["reason"] == "target_published_source_changed_and_retained"
+    assert result["reason"] == "promotion_graph_changed_source_retained"
     assert result["deleted_ref_graph"] is False
     assert isolated_services.deleted == []
     assert isolated_services.delete_attempts == [(source, initial_source_generation)]

@@ -31,6 +31,20 @@ redis.call('RENAME', KEYS[1], KEYS[2])
 redis.call('SET', KEYS[4], ARGV[2])
 return 1
 """
+_DELETE_PROMOTED_GRAPH = """
+if redis.call('GET', KEYS[5]) ~= ARGV[1] then
+    return redis.error_reply('graph write lease lost')
+end
+if (redis.call('GET', KEYS[2]) or '0') ~= ARGV[2]
+    or (redis.call('GET', KEYS[4]) or '0') ~= ARGV[3]
+    or redis.call('EXISTS', KEYS[1]) == 0
+    or redis.call('EXISTS', KEYS[3]) == 0 then
+    return 0
+end
+redis.call('UNLINK', KEYS[1])
+redis.call('SET', KEYS[2], ARGV[4])
+return 1
+"""
 
 class GraphGenerationChanged(RuntimeError):
     """A newer committed source must not be deleted by an older promotion."""
@@ -52,6 +66,7 @@ class GraphClient:
         self._generation: str | None = None
         self._staging = False
         self._discarded = False
+        self._published_generation: str | None = None
 
     def connect(self) -> None:
         self._db = falkordb.FalkorDB(host=self._host, port=self._port)
@@ -65,18 +80,39 @@ class GraphClient:
             except (redis.RedisError, OSError) as exc:
                 log.warning("graph.close_failed", graph=self._graph_name, error=str(exc))
 
-    def delete(self, *, expected_generation: str | None = None) -> None:
+    def delete(
+        self, *, expected_generation: str | None = None,
+        expected_target_graph: str | None = None,
+        expected_target_generation: str | None = None,
+    ) -> None:
         """Delete the connected FalkorDB graph."""
+        guarded_target = expected_target_graph is not None or expected_target_generation is not None
+        if guarded_target and (
+            not expected_generation or not expected_target_graph or not expected_target_generation
+            or expected_target_graph == self._graph_name
+        ):
+            raise ValueError("Promotion deletion requires distinct graphs and both generations")
         if not self._graph:
             raise RuntimeError("GraphClient not connected - call connect() first")
         if self._db is None:
-            if expected_generation is not None:
+            if expected_generation is not None or guarded_target:
                 raise RuntimeError("Cannot verify the graph generation without a connection")
             self._graph.delete()
             return
         with self._db.connection.lock(
             self._lease_key, timeout=_WRITE_LEASE_SECONDS, blocking_timeout=30
-        ):
+        ) as lock:
+            if guarded_target:
+                deleted = self._db.connection.eval(
+                    _DELETE_PROMOTED_GRAPH, 5,
+                    self._graph_name, self._generation_key,
+                    expected_target_graph, f"cga:graph:generation:{expected_target_graph}",
+                    self._lease_key, lock.local.token,
+                    expected_generation, expected_target_generation, uuid.uuid4().hex,
+                )
+                if deleted != 1:
+                    raise GraphGenerationChanged("Source or target changed during promotion; source retained")
+                return
             if expected_generation is not None and self.cache_generation() != expected_generation:
                 raise GraphGenerationChanged("Graph changed during promotion; source graph was retained")
             self._graph.delete()
@@ -95,6 +131,10 @@ class GraphClient:
             raise RuntimeError("GraphClient not connected - call connect() first")
         value = self._db.connection.get(self._generation_key)
         return value.decode("ascii") if isinstance(value, bytes) else str(value or "0")
+
+    @property
+    def published_generation(self) -> str | None:
+        return self._published_generation
 
     def discard_update(self) -> None:
         if not self._staging:
@@ -161,6 +201,7 @@ class GraphClient:
                 return
             if lease_errors:
                 raise RuntimeError("Graph write lease was lost; generation not published") from lease_errors[0]
+            generation = uuid.uuid4().hex
             connection.eval(
                 _PUBLISH_GRAPH,
                 4,
@@ -169,8 +210,9 @@ class GraphClient:
                 self._lease_key,
                 self._generation_key,
                 lock.local.token,
-                uuid.uuid4().hex,
+                generation,
             )
+            stage._published_generation = generation
         finally:
             stop.set()
             heartbeat.join(timeout=_WRITE_LEASE_SECONDS)

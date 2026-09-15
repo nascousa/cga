@@ -228,8 +228,10 @@ async def test_promote_ref_full_rebuilds_target_then_clears_source(monkeypatch, 
                 cache_generation=lambda: generations[graph_name],
             )
 
-        def delete(self, graph_name, *, expected_generation=None):
+        def delete(self, graph_name, *, expected_generation=None, expected_target_graph=None, expected_target_generation=None):
             assert expected_generation == "source-1"
+            assert expected_target_graph == "demo"
+            assert expected_target_generation == "published"
             assert generations["demo"] == "published"
             deleted_graphs.append(graph_name)
 
@@ -238,7 +240,7 @@ async def test_promote_ref_full_rebuilds_target_then_clears_source(monkeypatch, 
     async def wait(**kwargs):
         assert not deleted_graphs
         generations["demo"] = "published"
-        return {"status": "done", "project_name": "demo", "files": 2, "errors": 0}
+        return {"status": "done", "project_name": "demo", "files": 2, "errors": 0, "published_generation": "published"}
 
     monkeypatch.setattr(cga_relay_router.mcp_server, "_registry", _FakeRegistry())
     monkeypatch.setattr(cga_relay_router.mcp_server, "index_full", index_full)

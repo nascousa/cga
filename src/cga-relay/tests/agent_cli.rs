@@ -187,14 +187,14 @@ fn snapshot_count(request: &str) -> usize {
 
 fn write_http_response(stream: &mut TcpStream, status: u16) {
     let (reason, body) = match status {
-        202 => ("Accepted", "{\"accepted\":true}"),
+        202 => ("Accepted", "{\"accepted\":true,\"durable\":true,\"batch_id\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"}"),
         401 => ("Unauthorized", "{\"detail\":\"invalid account session\"}"),
         403 => ("Forbidden", "{\"detail\":\"project mismatch\"}"),
         413 => ("Payload Too Large", "{\"detail\":\"batch limit exceeded\"}"),
         _ => ("Internal Server Error", "{\"detail\":\"test failure\"}"),
     };
     let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nX-Test-Marker: {RESPONSE_HEADER_MARKER}\r\nContent-Length: {}\r\n\r\n{body}",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nX-CGA-Sync-Receipt: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nX-Test-Marker: {RESPONSE_HEADER_MARKER}\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
     );
     stream
@@ -1891,13 +1891,62 @@ fn sync_preserves_skipped_file_checkpoints_for_later_deletion() {
 }
 
 #[test]
+fn sync_migrates_legacy_acknowledgements_and_preserves_tombstones() {
+    let tmp = TestDir::new("sync-legacy-receipt");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    fs::write(repo.join("keep.txt"), "unchanged").unwrap();
+    fs::write(repo.join("remove.txt"), "old").unwrap();
+    let (port, server) = spawn_accepting_sync_server(8 * 1024 * 1024, 3);
+    let config = write_safe_config(tmp.path(), &repo, &[
+        ("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}")),
+    ]);
+    assert!(run_agent(&["login", "--config", config.to_str().unwrap(),
+        "--email", "dev@example.test", "--token-env", "CGA_TEST_DEVELOPER_TOKEN"]).status.success());
+    assert!(run_agent(&["projects", "add", "--config", config.to_str().unwrap(),
+        "--project-tag", "repo", "--root", repo.to_str().unwrap()]).status.success());
+    let sync = || Command::new(agent_bin())
+        .args(["sync", "--config", config.to_str().unwrap(), "--all"])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET).output().unwrap();
+    let first = sync();
+    assert!(first.status.success(), "{}", stderr(&first));
+    let state = tmp.path().join("state").join("scan-state").join("default_repo.state");
+    let legacy = fs::read_to_string(&state).unwrap().replace("durable\ttrue\n", "");
+    fs::write(&state, legacy).unwrap();
+    fs::remove_file(repo.join("remove.txt")).unwrap();
+    let migrated = sync();
+    assert!(migrated.status.success(), "{}", stderr(&migrated));
+    assert!(stderr(&migrated).contains("migrating legacy checkpoint"));
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(snapshot_count(&requests[1]), 1);
+    assert!(request_body(&requests[1]).contains("\"tombstones\":[\"remove.txt\"]"));
+    assert!(fs::read_to_string(&state).unwrap().contains("durable\ttrue"));
+}
+
+#[test]
 fn sync_rejects_truncated_success_without_advancing_checkpoint() {
+    assert_sync_rejected_without_checkpoint(
+        "HTTP/1.1 202 Accepted\r\nContent-Length: 100\r\n\r\n{}");
+}
+
+#[test]
+fn sync_rejects_missing_invalid_or_duplicate_durable_receipt() {
+    for response in [
+        "HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\n{\"accepted\":true}",
+        "HTTP/1.1 202 Accepted\r\nX-CGA-Sync-Receipt: invalid\r\nContent-Length: 2\r\n\r\n{}",
+        "HTTP/1.1 202 Accepted\r\nX-CGA-Sync-Receipt: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nX-CGA-Sync-Receipt: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\r\nContent-Length: 2\r\n\r\n{}",
+    ] {
+        assert_sync_rejected_without_checkpoint(response);
+    }
+}
+
+fn assert_sync_rejected_without_checkpoint(response: &'static str) {
     let tmp = TestDir::new("sync-truncated");
     let repo = tmp.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
     fs::write(repo.join("pending.txt"), "new").unwrap();
-    let (port, server) = spawn_malformed_sync_server(
-        "HTTP/1.1 202 Accepted\r\nContent-Length: 100\r\n\r\n{}");
+    let (port, server) = spawn_malformed_sync_server(response);
     let config = write_safe_config(tmp.path(), &repo, &[
         ("CONTROL_API_BASE_URL", format!("http://127.0.0.1:{port}")),
     ]);
@@ -1911,7 +1960,7 @@ fn sync_rejects_truncated_success_without_advancing_checkpoint() {
         .args(["sync", "--config", config.to_str().unwrap(), "--all"])
         .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET).output().unwrap();
     server.join().unwrap();
-    assert!(!output.status.success(), "truncated success must not be acknowledged");
+    assert!(!output.status.success(), "unverified success must not be acknowledged");
     assert!(!tmp.path().join("state").join("scan-state").join("default_repo.state").exists());
 }
 

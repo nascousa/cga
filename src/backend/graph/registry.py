@@ -55,12 +55,22 @@ class GraphRegistry:
         """Return the GraphClient for the project active in the current context."""
         return self.get(_current_project_name.get())
 
-    def delete(self, project_name: str, *, expected_generation: str | None = None) -> None:
+    def delete(
+        self, project_name: str, *, expected_generation: str | None = None,
+        expected_target_graph: str | None = None,
+        expected_target_generation: str | None = None,
+    ) -> None:
         """Delete a graph and evict its cached client."""
         project_name = project_name.strip().lower()
         with self._lock:
             graph = self.get(project_name)
-            if expected_generation is None:
+            if expected_target_graph is not None or expected_target_generation is not None:
+                graph.delete(
+                    expected_generation=expected_generation,
+                    expected_target_graph=expected_target_graph,
+                    expected_target_generation=expected_target_generation,
+                )
+            elif expected_generation is None:
                 graph.delete()
             else:
                 graph.delete(expected_generation=expected_generation)

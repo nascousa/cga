@@ -14,7 +14,7 @@ import uuid
 
 from fastapi import HTTPException
 import pytest
-from redis.exceptions import WatchError
+from redis.exceptions import ConnectionError as RedisConnectionError, ResponseError, WatchError
 
 from backend.auth import access
 from backend.auth.context import (
@@ -71,6 +71,37 @@ class FakeRedis:
     def pipeline(self, transaction=True):
         assert transaction
         return FakePipeline(self)
+
+    async def eval(self, script, numkeys, key, stream, payload, job_id, *fields):
+        assert script == streams._PUBLISH_JOB and numkeys == 2
+        self.record("eval", key, stream)
+        if key in self.values or key in self.sets:
+            raise ResponseError("Job status key must be a hash")
+        if stream in self.values or stream in self.hashes or stream in self.sets:
+            raise ResponseError("Job stream key must be a stream")
+        previous = self.hashes.get(key)
+        if previous:
+            if previous.get("payload") != payload:
+                return ["conflict", "Job ID already belongs to a different payload"]
+            message_id = previous.get("stream_id", "")
+            parts = message_id.split("-")
+            if (
+                previous.get("job_id") != job_id
+                or len(parts) != 2 or not all(part.isdigit() for part in parts)
+                or previous.get("status") not in {"pending", "processing", "retrying", "done", "failed"}
+            ):
+                return ["invalid", "Incomplete job publication; recovery is required"]
+            row = self.messages.get(message_id)
+            if row is None and not streams._terminal(previous):
+                return ["invalid", "Active job stream payload is missing; recovery is required"]
+            if row is not None and row.get("payload") != payload:
+                return ["invalid", "Job stream payload does not match its status"]
+            return ["existing", message_id]
+        await self.hset(key, dict(zip(fields[::2], fields[1::2])))
+        await self.persist(key)
+        message_id = await self.xadd(stream, {"payload": payload})
+        await self.hset(key, {"stream_id": message_id, "status": "pending"})
+        return ["published", message_id]
 
     async def hgetall(self, key):
         return dict(self.hashes.get(key, {}))
@@ -437,6 +468,24 @@ async def test_success_status_persists_owner_and_json_errors(errors):
 
 
 @pytest.mark.asyncio
+async def test_published_generation_round_trips_from_done_through_waiter():
+    redis = FakeRedis()
+    consumer, message_id, job, token = await processing(redis)
+    generation = uuid.uuid4().hex
+    await consumer.set_job_done(
+        job, {"files": 2, "errors": 0, "published_generation": generation}, message_id, token,
+    )
+    waiter = MCPProducer("redis://unused.invalid")
+    waiter._producer._client = redis
+    result = await waiter.wait_for_job_status(job.job_id, timeout_sec=0)
+    assert result["ready"] is True and result["timeout"] is False
+    assert result["status"] == "done"
+    assert result["published_generation"] == generation
+    assert json.loads(result["stats"])["published_generation"] == generation
+    assert result["project_name"] == job.project_name
+
+
+@pytest.mark.asyncio
 async def test_success_without_error_field_does_not_keep_stale_error_metadata():
     redis = FakeRedis()
     consumer, message_id, job, token = await processing(redis)
@@ -751,16 +800,18 @@ async def test_cancellation_and_stop_keep_lease_until_thread_actually_exits(monk
 @pytest.mark.asyncio
 async def test_publish_never_overwrites_status_from_fast_consumer(monkeypatch):
     redis = FakeRedis()
-    hsetnx = redis.hsetnx
+    evaluate = redis.eval
 
-    async def finish_before_publish_returns(key, field, message_id):
+    async def finish_before_publish_returns(*args):
+        result = await evaluate(*args)
+        message_id = result[1]
         consumer = make_consumer(redis)
         [(received_id, job)] = await consumer.consume(block_ms=1)
         token = await consumer.set_job_processing(job, received_id)
         await consumer.set_job_done(job, {"errors": 0}, message_id, token)
-        return await hsetnx(key, field, message_id)
+        return result
 
-    monkeypatch.setattr(redis, "hsetnx", finish_before_publish_returns)
+    monkeypatch.setattr(redis, "eval", finish_before_publish_returns)
     message_id, job = await enqueue(redis)
     assert status(redis, job)["status"] == "done"
     assert status(redis, job)["attempts"] == "1"
@@ -777,6 +828,137 @@ async def test_republishing_same_job_id_is_idempotent():
     assert len(redis.messages) == 1
     with pytest.raises(ValueError, match="different payload"):
         await producer.publish(job.model_copy(update={"max_attempts": 2}))
+
+
+@pytest.mark.asyncio
+async def test_publish_response_loss_retries_existing_atomic_publication(monkeypatch):
+    redis = FakeRedis()
+    producer = JobProducer("redis://unused.invalid")
+    producer._client = redis
+    job = IndexJob(job_type=JobType.INDEX_FULL, repo_path=str(_AUTHORIZED_ROOT), project_name="authorized")
+    evaluate = redis.eval
+
+    async def lose_response(*args):
+        await evaluate(*args)
+        raise RedisConnectionError("Response lost after script completed")
+
+    monkeypatch.setattr(redis, "eval", lose_response)
+    with pytest.raises(RedisConnectionError):
+        await producer.publish(job)
+    first = status(redis, job)["stream_id"]
+    monkeypatch.setattr(redis, "eval", evaluate)
+    assert await producer.publish(job) == first
+    assert len(redis.messages) == 1
+    assert status(redis, job)["status"] == "pending"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key_kind", ["status", "stream"])
+async def test_publish_wrong_key_type_does_not_write_anything(key_kind):
+    redis = FakeRedis()
+    producer = JobProducer("redis://unused.invalid")
+    producer._client = redis
+    job = IndexJob(job_type=JobType.INDEX_FULL, repo_path=str(_AUTHORIZED_ROOT), project_name="authorized")
+    key = streams._status_key(job.job_id) if key_kind == "status" else streams.STREAM_KEY
+    redis.values[key] = "unrelated-value"
+    with pytest.raises(ResponseError):
+        await producer.publish(job)
+    assert not redis.messages
+    assert not redis.hashes
+    assert redis.values[key] == "unrelated-value"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["xadd", "final_status"])
+async def test_publish_runtime_failure_fences_ambiguous_republication(monkeypatch, phase):
+    redis = FakeRedis()
+    producer = JobProducer("redis://unused.invalid")
+    producer._client = redis
+    job = IndexJob(job_type=JobType.INDEX_FULL, repo_path=str(_AUTHORIZED_ROOT), project_name="authorized")
+    hset = redis.hset
+
+    async def fail_final_status(key, mapping):
+        if mapping.get("status") == "pending":
+            raise ResponseError("Injected final HSET failure")
+        return await hset(key, mapping)
+
+    if phase == "xadd":
+        redis.fail_next["xadd"] = ResponseError("Injected XADD failure")
+    else:
+        monkeypatch.setattr(redis, "hset", fail_final_status)
+    with pytest.raises(ResponseError):
+        await producer.publish(job)
+    message_count = len(redis.messages)
+    assert status(redis, job)["status"] == "publishing"
+    monkeypatch.setattr(redis, "hset", hset)
+    with pytest.raises(RuntimeError, match="recovery is required"):
+        await producer.publish(job)
+    assert len(redis.messages) == message_count
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mutation", ["missing_id", "missing_payload", "unknown_state", "missing_stream", "different_stream_payload"])
+async def test_publish_legacy_or_corrupt_state_is_not_silently_reenqueued(mutation):
+    redis = FakeRedis()
+    message_id, job = await enqueue(redis)
+    producer = JobProducer("redis://unused.invalid")
+    producer._client = redis
+    if mutation == "missing_id":
+        status(redis, job).pop("stream_id")
+    elif mutation == "missing_payload":
+        status(redis, job).pop("payload")
+    elif mutation == "unknown_state":
+        status(redis, job)["status"] = "unknown"
+    elif mutation == "missing_stream":
+        redis.messages.pop(message_id)
+    else:
+        redis.messages[message_id]["payload"] = "different"
+    before = dict(status(redis, job))
+    count = len(redis.messages)
+    with pytest.raises((ValueError, RuntimeError)):
+        await producer.publish(job)
+    assert status(redis, job) == before
+    assert len(redis.messages) == count
+
+
+@pytest.mark.asyncio
+async def test_publish_completed_cleaned_job_is_not_reenqueued():
+    redis = FakeRedis()
+    consumer, message_id, job, token = await processing(redis)
+    await consumer.set_job_done(job, {"errors": 0}, message_id, token)
+    producer = JobProducer("redis://unused.invalid")
+    producer._client = redis
+    before = dict(status(redis, job))
+    assert await producer.publish(job) == message_id
+    assert not redis.messages
+    assert status(redis, job) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", [
+    {"status": "failed"}, {"status": "failed", "terminal": "0"},
+    {"status": "retrying", "terminal": "0"},
+])
+async def test_waiter_does_not_finish_on_recoverable_status(state):
+    producer = MCPProducer("redis://unused.invalid")
+    producer.get_job_status = AsyncMock(return_value=state)
+    result = await producer.wait_for_job_status("job", timeout_sec=0)
+    assert result["ready"] is False
+    assert result["timeout"] is True
+    assert result["status"] == state["status"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("terminal", [{"status": "done"}, {"status": "failed", "terminal": "1"}])
+async def test_waiter_observes_recovery_until_durable_terminal(terminal):
+    producer = MCPProducer("redis://unused.invalid")
+    producer.get_job_status = AsyncMock(side_effect=[
+        {"status": "failed", "terminal": "0"}, {"status": "retrying"}, terminal,
+    ])
+    result = await producer.wait_for_job_status("job", timeout_sec=2, poll_interval_sec=0.1)
+    assert result["ready"] is True and result["timeout"] is False
+    assert result["status"] == terminal["status"]
+    assert producer.get_job_status.await_count == 3
 
 
 @pytest.mark.asyncio

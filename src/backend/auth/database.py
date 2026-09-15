@@ -76,6 +76,19 @@ CREATE TABLE IF NOT EXISTS output_rule_profiles (
     updated_at   TEXT NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS')
 );
 
+CREATE TABLE IF NOT EXISTS relay_sync_batches (
+    id            BIGSERIAL NOT NULL,
+    project_db_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    batch_id      TEXT NOT NULL CHECK (length(batch_id) = 64),
+    payload_json  TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS'),
+    PRIMARY KEY (project_db_id, batch_id)
+);
+
+ALTER TABLE relay_sync_batches ADD COLUMN IF NOT EXISTS id BIGSERIAL NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_relay_sync_batches_id ON relay_sync_batches(id);
+CREATE INDEX IF NOT EXISTS idx_relay_sync_batches_project_id ON relay_sync_batches(project_db_id, id);
+
 CREATE TABLE IF NOT EXISTS project_output_rules (
     project_id   BIGINT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
     base_profile  TEXT NOT NULL DEFAULT 'concise',

@@ -79,10 +79,12 @@ def test_atomic_update_publishes_only_after_build_finishes() -> None:
         assert staged is not client
         assert staged._graph_name != "demo"
         connection.eval.assert_not_called()
+        assert staged.published_generation is None
 
     connection.eval.assert_called_once()
     assert "RENAME" in connection.eval.call_args.args[0]
     assert "PERSIST" in connection.eval.call_args.args[0]
+    assert staged.published_generation == connection.eval.call_args.args[-1]
     lock.release.assert_called_once()
 
 

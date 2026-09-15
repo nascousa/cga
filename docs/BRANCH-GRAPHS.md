@@ -100,7 +100,7 @@ all ref arguments preserves the default graph routing. The bridge's
 tool-call endpoints for complete branch rebuilds; it does not require a raw
 physical graph override.
 
-The `sync` CLI command remains the machine scan and change-aggregation channel. It submits snapshot metadata for audit and aggregation but does not directly index FalkorDB graphs. Use the MCP indexing tools or their Relay CLI wrappers for branch graph indexing:
+The `sync` CLI command remains the machine scan and change-aggregation channel. It durably stores validated snapshot contents and tombstone paths as project-scoped replayable batches, but does not directly index FalkorDB graphs. Use the MCP indexing tools or their Relay CLI wrappers for branch graph indexing:
 
 ```powershell
 cga-relay index git --config $HOME\.cga\relay.env --repo-path D:\Repos\ContextGraphAdmin --branch feature/client-menu-order --parent-ref main
@@ -219,7 +219,8 @@ The call waits up to 120 seconds for the target job. `delete_ref_graph=true`
 deletes the source **only after** the target reports `done`, matches the
 expected target graph, and reports empty indexing `errors` and a positive
 indexed-file count. The server additionally verifies that the target exists,
-its publication generation changed, and it contains files. Queued,
+its publication generation changed and equals the job's `published_generation`
+receipt, and it contains files. Queued,
 processing, failed, missing, timed-out, cancelled or unverifiable results
 preserve the source. A timed-out queued job may still complete later; inspect
 its status and retry deliberately rather than treating a timeout as success.
@@ -227,13 +228,14 @@ An empty-scan protection failure returns `failed`; an empty rebuild or
 unpublished/empty target returns `noop`. Neither permits source deletion.
 
 The source generation is captured before submitting the target job. Source
-deletion compares this captured generation under the same distributed graph
-write lock as the deletion itself; a separate check followed by ordinary
-deletion would not be safe. If a newer source generation was committed during
-promotion, the target can still report `done`, but `deleted_ref_graph` is
-`false` and `reason` is `target_published_source_changed_and_retained`. The newer
-source is retained. Review and merge those newer changes before trying another
-promotion; do not automatically retry source cleanup.
+deletion holds the source write lease and atomically compares both the captured
+source generation and the target's job receipt in Redis before unlinking the
+source. Another target publication cannot interleave with that comparison and
+deletion. A source or target replacement retains the source; if it occurs after
+initial verification, `deleted_ref_graph` is `false` and `reason` is
+`promotion_graph_changed_source_retained`. A replacement observed during initial
+verification returns `noop`. Review newer changes before another promotion.
+Legacy job results without a generation receipt never authorize deletion.
 
 The response includes `status` (`done`, `pending`, `noop` or `failed`), `reason`, `rebuild_mode=full`,
 `source_graph_name`, `target_graph_name`, `deleted_ref_graph`, `submitted_job`

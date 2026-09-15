@@ -646,6 +646,8 @@ service._run_locked(hold)
             await service.run_backup()
         process.kill()
         process.wait(timeout=10)
+        # Windows may release a terminated process's byte-range locks asynchronously.
+        monkeypatch.setenv("BACKUP_LOCK_TIMEOUT_SECONDS", "5")
         result = await service.run_backup()
         assert result["size_bytes"] > 0
     finally:
