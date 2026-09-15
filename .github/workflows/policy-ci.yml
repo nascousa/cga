@@ -10,6 +10,29 @@ permissions:
   contents: read
 
 jobs:
+  relay-reliability:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: src/cga-relay
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Test Relay
+        run: cargo test --locked
+      - name: Verify hardened Windows candidate
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build --locked --release --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\scripts\verify-release-binary.ps1 -BinaryPath .\target\x86_64-pc-windows-msvc\release\cga-relay.exe
+          .\scripts\tests\release-process.Tests.ps1
+
   quality-security:
     runs-on: ubuntu-latest
     services:

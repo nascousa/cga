@@ -844,6 +844,27 @@ def test_legacy_migration_acknowledgement_is_bound_to_exact_project_and_ref(proj
     assert not isolated_services.deleted
 
 
+@pytest.mark.parametrize("errors, successful", [
+    (0, True),
+    ("0", True),
+    ([], True),
+    ("[]", True),
+    (1, False),
+    ("1", False),
+    (["parse failed"], False),
+    ('["parse failed"]', False),
+    (None, False),
+    ("", False),
+    ("not-json", False),
+    (False, False),
+])
+def test_promotion_result_requires_explicit_zero_errors(errors, successful):
+    result = {"status": "done", "project_name": "alpha", "files": "1", "errors": errors}
+    assert relay._successful_promotion(result, "alpha") is successful
+    result["status"] = "failed"
+    assert relay._successful_promotion(result, "alpha") is False
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("terminal", [
     {"status": "queued", "errors": []},

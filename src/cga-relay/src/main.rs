@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
@@ -36,6 +36,7 @@ const CRYSTALS_TRANSPORT_SCOPE: &str = "local-ipc";
 const MAX_SYNC_ITEMS_PER_BATCH: usize = 500;
 const DEFAULT_MAX_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_HTTP_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_MCP_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SETTINGS_REQUEST_HEADER_BYTES: usize = 64 * 1024;
 const MAX_SETTINGS_REQUEST_BODY_BYTES: usize = 64 * 1024;
 const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(30);
@@ -55,6 +56,7 @@ const CONFIG_KEYS: &[&str] = &[
     "EXCLUDE_GLOBS",
     "MAX_FILE_BYTES",
     "MAX_BATCH_BYTES",
+    "BROWSER_ALLOWED_ORIGINS",
 ];
 
 #[derive(Debug)]
@@ -369,7 +371,6 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
                 developer_token.as_deref(),
                 &mut account_token,
             )?;
-            persist_scan_result(&config, &result)?;
             submitted += 1;
         }
         project_payloads.push(format!(
@@ -538,14 +539,17 @@ fn cmd_settings(args: &[String]) -> AgentResult<()> {
 
 fn cmd_mcp(args: &[String]) -> AgentResult<()> {
     let config = load_config(required_arg(args, "--config")?)?;
-    let mut input = String::new();
-    std::io::stdin()
-        .read_to_string(&mut input)
-        .map_err(|err| AgentError(format!("failed to read stdin: {err}")))?;
-    log_communication(&config, "mcp.stdin", &payload_log_metadata(&input));
-    let responses = handle_mcp_session(&config, &input)?;
-    log_communication(&config, "mcp.stdout", &payload_log_metadata(&responses));
-    print!("{responses}");
+    let mut input = std::io::stdin().lock();
+    let mut output = std::io::stdout().lock();
+    while let Some(message) = read_mcp_message(&mut input)? {
+        log_communication(&config, "mcp.stdin", &payload_log_metadata(&message));
+        if let Some(response) = handle_mcp_message(&config, &message) {
+            log_communication(&config, "mcp.stdout", &payload_log_metadata(&response));
+            writeln!(output, "{response}")
+                .and_then(|_| output.flush())
+                .map_err(|err| AgentError(format!("failed to write MCP response: {err}")))?;
+        }
+    }
     Ok(())
 }
 
@@ -2364,6 +2368,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn http_response_framing_validates_lengths_and_decodes_chunks() {
+        let plain = "HTTP/1.1 200 OK\r\nContent-Length: 2";
+        assert_eq!(decode_http_body(plain, b"{}").unwrap(), "{}");
+        assert!(decode_http_body(plain, b"{").is_err());
+        assert!(decode_http_body(plain, b"{}extra").is_err());
+        assert!(decode_http_body(&format!("{plain}\r\nContent-Length: 2"), b"{}").is_err());
+        let chunked = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked";
+        assert_eq!(decode_http_body(chunked, b"2\r\n{}\r\n0\r\n\r\n").unwrap(), "{}");
+        assert_eq!(
+            decode_http_body(chunked, b"1\r\n\xc3\r\n1\r\n\xa9\r\n0\r\n\r\n").unwrap(),
+            "\u{e9}"
+        );
+        assert_eq!(
+            decode_http_body(chunked, b"2;ext=yes\r\n{}\r\n0\r\nX-End: yes\r\n\r\n").unwrap(),
+            "{}"
+        );
+        for body in [
+            b"2\r\n{}\r\n".as_slice(),
+            b"2\r\n{",
+            b"0\r\n",
+            b"ffffffffffffffff\r\n",
+            b"0\r\ninvalid\r\n\r\n",
+        ] {
+            assert!(decode_http_body(chunked, body).is_err());
+        }
+        assert!(decode_http_body(&format!("{plain}\r\nTransfer-Encoding: chunked"), b"{}").is_err());
+    }
+
+    #[test]
+    fn git_status_preserves_unusual_paths_and_rename_order() {
+        let root = Path::new("repo");
+        let changes = parse_git_status(root,
+            b"R  new -> name.py\0old name.py\0?? leading name.py\0 D gone.py\0C  copy.py\0source.py\0"
+        ).unwrap();
+        assert_eq!(changes.destructive_count, 2);
+        let expected = ["old name.py", "new -> name.py", "leading name.py", "gone.py", "copy.py"]
+            .map(|path| display_path(&root.join(path)));
+        assert_eq!(changes.paths, expected);
+        assert!(parse_git_status(root, b"R  missing-source.py\0").is_err());
+        assert!(parse_git_status(root, b"?? truncated").is_err());
+        assert!(parse_git_status(root, b"?? \xff\0").is_err());
+    }
+
+    #[test]
     fn default_excludes_secret_like_files() {
         assert!(always_excluded(".env"));
         assert!(always_excluded(".env.local"));
@@ -3111,70 +3159,62 @@ fn snapshot_json_values(path: &str, sha256: &str, bytes: u64, content: &str) -> 
     )
 }
 
-fn handle_mcp_session(config: &AgentConfig, input: &str) -> AgentResult<String> {
-    let messages = parse_mcp_messages(input)?;
-    let mut responses = Vec::new();
-    for message in messages {
-        if let Some(response) = handle_mcp_message(config, &message) {
-            responses.push(response);
-        }
+fn read_mcp_line(input: &mut impl BufRead, limit: usize) -> AgentResult<String> {
+    let mut bytes = Vec::new();
+    input.take((limit + 1) as u64).read_until(b'\n', &mut bytes)
+        .map_err(|err| AgentError(format!("failed to read MCP input: {err}")))?;
+    if bytes.len() > limit {
+        return Err(AgentError("MCP input exceeds size limit".to_string()));
     }
-    Ok(if responses.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", responses.join("\n"))
-    })
+    String::from_utf8(bytes)
+        .map_err(|_| AgentError("MCP input is not valid UTF-8".to_string()))
 }
 
-fn parse_mcp_messages(input: &str) -> AgentResult<Vec<String>> {
-    let mut messages = Vec::new();
-    let mut index = 0;
-    while index < input.len() {
-        while index < input.len() && input.as_bytes()[index].is_ascii_whitespace() {
-            index += 1;
+fn read_mcp_message(input: &mut impl BufRead) -> AgentResult<Option<String>> {
+    let first = loop {
+        let line = read_mcp_line(input, MAX_MCP_MESSAGE_BYTES)?;
+        if line.is_empty() {
+            return Ok(None);
         }
-        if index >= input.len() {
+        if !line.trim().is_empty() {
+            break line;
+        }
+    };
+    if !first.trim_start().to_ascii_lowercase().starts_with("content-length:") {
+        return Ok(Some(first.trim().to_string()));
+    }
+    let mut header_bytes = first.len();
+    let mut line = first;
+    let mut length = None;
+    loop {
+        if header_bytes > MAX_SETTINGS_REQUEST_HEADER_BYTES || !line.ends_with('\n') {
+            return Err(AgentError("invalid or oversized MCP frame header".to_string()));
+        }
+        if line.trim().is_empty() {
             break;
         }
-        if input[index..]
-            .to_ascii_lowercase()
-            .starts_with("content-length:")
-        {
-            let Some(header_end) = input[index..].find("\r\n\r\n").map(|pos| index + pos) else {
-                return Err(AgentError("invalid Content-Length frame".to_string()));
-            };
-            let header = &input[index..header_end];
-            let mut length = None;
-            for line in header.lines() {
-                if let Some((name, value)) = line.split_once(':') {
-                    if name.eq_ignore_ascii_case("content-length") {
-                        length =
-                            Some(value.trim().parse::<usize>().map_err(|_| {
-                                AgentError("invalid Content-Length value".to_string())
-                            })?);
-                    }
-                }
+        let (name, value) = line.split_once(':')
+            .ok_or_else(|| AgentError("invalid MCP frame header".to_string()))?;
+        if name.trim().eq_ignore_ascii_case("content-length") {
+            if length.is_some() {
+                return Err(AgentError("duplicate MCP Content-Length".to_string()));
             }
-            let length = length.ok_or_else(|| AgentError("missing Content-Length".to_string()))?;
-            let body_start = header_end + 4;
-            let body_end = body_start + length;
-            if body_end > input.len() {
-                return Err(AgentError("short Content-Length frame".to_string()));
+            let parsed = value.trim().parse::<usize>()
+                .map_err(|_| AgentError("invalid MCP Content-Length".to_string()))?;
+            if parsed == 0 || parsed > MAX_MCP_MESSAGE_BYTES {
+                return Err(AgentError("MCP message exceeds size limit or is empty".to_string()));
             }
-            messages.push(input[body_start..body_end].to_string());
-            index = body_end;
-        } else {
-            let line_end = input[index..]
-                .find('\n')
-                .map_or(input.len(), |pos| index + pos);
-            let line = input[index..line_end].trim();
-            if !line.is_empty() {
-                messages.push(line.to_string());
-            }
-            index = line_end.saturating_add(1);
+            length = Some(parsed);
         }
+        line = read_mcp_line(input, MAX_SETTINGS_REQUEST_HEADER_BYTES - header_bytes)?;
+        header_bytes += line.len();
     }
-    Ok(messages)
+    let length = length.ok_or_else(|| AgentError("missing MCP Content-Length".to_string()))?;
+    let mut body = vec![0; length];
+    input.read_exact(&mut body)
+        .map_err(|err| AgentError(format!("short MCP frame: {err}")))?;
+    String::from_utf8(body).map(Some)
+        .map_err(|_| AgentError("MCP frame is not valid UTF-8".to_string()))
 }
 
 fn handle_mcp_message(config: &AgentConfig, message: &str) -> Option<String> {
@@ -3246,6 +3286,7 @@ fn collect_git_incremental_paths(
         .arg(root)
         .arg("status")
         .arg("--porcelain=v1")
+        .arg("-z")
         .arg(untracked_flag)
         .output()
         .map_err(|err| AgentError(format!("git status failed: {err}")))?;
@@ -3260,56 +3301,38 @@ fn collect_git_incremental_paths(
         return Err(AgentError(format!("git status failed: {detail}")));
     }
 
-    let mut paths = Vec::new();
-    let mut seen = BTreeSet::new();
-    let mut destructive_count = 0_usize;
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        collect_git_status_line(root, line, &mut paths, &mut seen, &mut destructive_count);
-    }
-    Ok(GitIncrementalPaths {
-        paths,
-        destructive_count,
-    })
+    parse_git_status(root, &output.stdout)
 }
 
-fn collect_git_status_line(
-    root: &Path,
-    line: &str,
-    paths: &mut Vec<String>,
-    seen: &mut BTreeSet<String>,
-    destructive_count: &mut usize,
-) {
-    let bytes = line.as_bytes();
-    if bytes.len() < 3 {
-        return;
+fn parse_git_status(root: &Path, output: &[u8]) -> AgentResult<GitIncrementalPaths> {
+    if !output.is_empty() && output.last() != Some(&0) {
+        return Err(AgentError("truncated NUL-delimited git status".to_string()));
     }
-    let x = bytes[0] as char;
-    let y = bytes[1] as char;
-    let path_part = line[3..].trim();
-    if path_part.is_empty() {
-        return;
-    }
-
-    if x == 'R' || y == 'R' {
-        if let Some((old_path, new_path)) = path_part.split_once(" -> ") {
-            push_git_path(root, old_path, paths, seen);
-            *destructive_count += 1;
-            push_git_path(root, new_path, paths, seen);
-        } else {
-            push_git_path(root, path_part, paths, seen);
+    let text = std::str::from_utf8(output)
+        .map_err(|_| AgentError("git paths must be valid UTF-8".to_string()))?;
+    let mut entries = text.split_terminator('\0');
+    let mut result = GitIncrementalPaths::default();
+    let mut seen = BTreeSet::new();
+    while let Some(entry) = entries.next() {
+        let bytes = entry.as_bytes();
+        if bytes.len() < 4 || bytes[2] != b' ' || !bytes[..2].is_ascii() {
+            return Err(AgentError("invalid git status entry".to_string()));
         }
-        return;
+        let status = &bytes[..2];
+        let destination = &entry[3..];
+        if status.contains(&b'R') || status.contains(&b'C') {
+            let source = entries.next().filter(|path| !path.is_empty())
+                .ok_or_else(|| AgentError("missing git rename/copy source".to_string()))?;
+            if status.contains(&b'R') {
+                push_git_path(root, source, &mut result.paths, &mut seen);
+                result.destructive_count += 1;
+            }
+        } else if status.contains(&b'D') {
+            result.destructive_count += 1;
+        }
+        push_git_path(root, destination, &mut result.paths, &mut seen);
     }
-
-    if x == 'D' || y == 'D' {
-        push_git_path(root, path_part, paths, seen);
-        *destructive_count += 1;
-        return;
-    }
-
-    if x != ' ' || y != ' ' {
-        push_git_path(root, path_part, paths, seen);
-    }
+    Ok(result)
 }
 
 fn push_git_path(
@@ -3341,13 +3364,20 @@ fn run_index_git_incremental(config: &AgentConfig, arguments: &str) -> AgentResu
             json_escape(&display_path(&config.project_root))
         ));
     }
-    let incremental_arguments = format!(
+    let mut incremental_arguments = format!(
         "{{\"repo_path\":\"{}\",\"changed_paths\":{},\"project_id\":\"{}\",\"destructive_count\":{}}}",
         json_escape(&display_path(&config.project_root)),
         string_array_json(&local_changes.paths),
         json_escape(&project_id),
         local_changes.destructive_count
     );
+    for field in ["ref_id", "branch", "git_branch", "parent_ref", "base_ref", "base_branch", "graph_name"] {
+        if json_field(arguments, field).is_some() {
+            let value = json_string_field(arguments, field)
+                .ok_or_else(|| AgentError(format!("{field} must be a string")))?;
+            incremental_arguments = insert_json_field(&incremental_arguments, field, &value);
+        }
+    }
     post_cga_relay_tool(
         config,
         "index_incremental",
@@ -3744,8 +3774,7 @@ fn read_http_response(
             "HTTP response exceeds {MAX_HTTP_RESPONSE_BYTES}-byte limit"
         )));
     }
-    let text = String::from_utf8_lossy(&response);
-    let Some((head, body)) = text.split_once("\r\n\r\n") else {
+    let Some(header_end) = response.windows(4).position(|part| part == b"\r\n\r\n") else {
         log_communication(
             config,
             "http.response",
@@ -3756,7 +3785,13 @@ fn read_http_response(
         );
         return Err(AgentError("invalid HTTP response".to_string()));
     };
+    let head = std::str::from_utf8(&response[..header_end])
+        .map_err(|_| AgentError("HTTP headers are not valid UTF-8".to_string()))?;
+    let body = &response[header_end + 4..];
     let status = head.lines().next().unwrap_or("HTTP response");
+    if !status.starts_with("HTTP/1.1 ") && !status.starts_with("HTTP/1.0 ") {
+        return Err(AgentError("invalid HTTP response protocol".to_string()));
+    }
     let status_code = status
         .split_whitespace()
         .nth(1)
@@ -3771,10 +3806,78 @@ fn read_http_response(
             body.len()
         ),
     );
+    let body = decode_http_body(head, body)?;
     Ok(HttpResponse {
         status_code,
-        body: body.to_string(),
+        body,
     })
+}
+
+fn decode_http_body(head: &str, body: &[u8]) -> AgentResult<String> {
+    let mut content_length = None;
+    let mut transfer_encoding = None;
+    for line in head.lines().skip(1) {
+        let (name, value) = line.split_once(':')
+            .ok_or_else(|| AgentError("invalid HTTP response header".to_string()))?;
+        if name.eq_ignore_ascii_case("content-length") {
+            if content_length.is_some() {
+                return Err(AgentError("duplicate HTTP Content-Length".to_string()));
+            }
+            content_length = Some(value.trim().parse::<usize>()
+                .map_err(|_| AgentError("invalid HTTP Content-Length".to_string()))?);
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
+            if transfer_encoding.is_some() || !value.trim().eq_ignore_ascii_case("chunked") {
+                return Err(AgentError("unsupported HTTP Transfer-Encoding".to_string()));
+            }
+            transfer_encoding = Some(());
+        }
+    }
+    if transfer_encoding.is_some() {
+        if content_length.is_some() {
+            return Err(AgentError("ambiguous HTTP response framing".to_string()));
+        }
+        let mut remaining = body;
+        let mut decoded = Vec::new();
+        loop {
+            let line_end = remaining.windows(2).position(|pair| pair == b"\r\n")
+                .ok_or_else(|| AgentError("truncated HTTP chunk header".to_string()))?;
+            let line = std::str::from_utf8(&remaining[..line_end])
+                .map_err(|_| AgentError("invalid HTTP chunk header".to_string()))?;
+            let size = usize::from_str_radix(line.split(';').next().unwrap_or(""), 16)
+                .map_err(|_| AgentError("invalid HTTP chunk size".to_string()))?;
+            remaining = &remaining[line_end + 2..];
+            if size == 0 {
+                if remaining == b"\r\n" {
+                    break;
+                }
+                if !remaining.ends_with(b"\r\n\r\n") {
+                    return Err(AgentError("truncated HTTP chunk trailers".to_string()));
+                }
+                let trailers = std::str::from_utf8(&remaining[..remaining.len() - 4])
+                    .map_err(|_| AgentError("invalid HTTP chunk trailers".to_string()))?;
+                if trailers.lines().any(|line| !line.contains(':')) {
+                    return Err(AgentError("invalid HTTP chunk trailers".to_string()));
+                }
+                break;
+            }
+            if size > remaining.len().saturating_sub(2)
+                || remaining.get(size..size + 2) != Some(b"\r\n")
+            {
+                return Err(AgentError("truncated HTTP chunk body".to_string()));
+            }
+            decoded.extend_from_slice(&remaining[..size]);
+            remaining = &remaining[size + 2..];
+        }
+        return String::from_utf8(decoded)
+            .map_err(|_| AgentError("HTTP body is not valid UTF-8".to_string()));
+    }
+    if let Some(length) = content_length {
+        if length != body.len() {
+            return Err(AgentError("HTTP response Content-Length mismatch".to_string()));
+        }
+    }
+    String::from_utf8(body.to_vec())
+        .map_err(|_| AgentError("HTTP body is not valid UTF-8".to_string()))
 }
 
 fn json_string_field(text: &str, field: &str) -> Option<String> {

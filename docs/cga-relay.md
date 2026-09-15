@@ -31,6 +31,8 @@ cargo build --release
 Pop-Location
 ```
 
+Policy CI runs the Relay tests on Windows and Linux, plus Windows PE hardening and isolated replacement/rollback checks. Run Cargo from the crate directory so its `.cargo/config.toml` mitigation flags are loaded; `--manifest-path` from the repository root alone does not load that configuration. CI candidates are unsigned and are never installed or published by these checks; formal release signing remains mandatory.
+
 The crate has no third-party Rust dependencies. The release build produces a standalone `cga-relay.exe` at `src/cga-relay/target/release/cga-relay.exe`; install or copy that executable onto the developer machine and launch it directly. Project MCP config must call that installed executable, not `cargo`, Python, PowerShell scripts, or a per-project MCP server.
 
 On Windows MSVC targets, the crate config enables static CRT linking, fat LTO, symbol stripping, panic abort, Control Flow Guard, ASLR, high-entropy ASLR, DEP/NX, CET compatibility, and reproducible linker metadata. Build formal artifacts through the secure release script:
@@ -83,6 +85,8 @@ Scanner and sync limits:
 - `MAX_FILE_BYTES`: maximum source file size accepted by the scanner.
 - `MAX_BATCH_BYTES`: optional maximum serialized JSON request size. The default is `8388608` bytes (8 MiB). Each request is also limited to 500 snapshots or tombstones.
 - Relay HTTP responses are limited to `8388608` bytes (8 MiB), and connected sockets use 30-second read and write timeouts.
+- HTTP responses must have complete, unambiguous framing. Relay validates `Content-Length`, decodes chunked bodies, and rejects truncated responses without advancing sync checkpoints.
+- MCP consumes and flushes responses one message at a time while stdin stays open. Newline-delimited JSON and legacy `Content-Length` input frames are supported; responses remain newline-delimited. Messages are limited to 8 MiB and legacy headers to 64 KiB. Invalid lengths or UTF-8 produce an explicit error instead of terminating through a panic.
 
 ## CLI
 
@@ -198,10 +202,14 @@ The relay allows plaintext HTTP only for loopback hosts such as `127.0.0.1` and 
 
 Sync requests are deterministic and bounded by both 500 items and `MAX_BATCH_BYTES`. The scanner retains snapshot metadata instead of all changed source bodies in memory. Immediately before submission, the relay reads each file again and verifies its size and SHA-256 digest. Every accepted batch updates the local scan-state checkpoint, so a later batch failure resumes from the remaining changes instead of restarting the full first sync.
 
+Sync retains the last acknowledged checkpoint for previously synced files that temporarily become oversized, binary, or invalid UTF-8. Skipping such a file does not delete its remote snapshot; if the file is subsequently removed, relay still sends its tombstone. A completed scan must not overwrite the per-batch acknowledged checkpoint.
+
 The project-token backend bridge is exposed at `/api/project/cga-relay/mcp-tool` and `/api/project/cga-relay/sync`. These routes are protected by project tokens through the existing `/api/project` middleware and require the authenticated project identity to match the submitted `project_id`. The account-login bridge is exposed at `/api/auth/cga-relay/mcp-tool` and `/api/auth/cga-relay/sync` and is protected by the normal user JWT flow.
 
 ## Branch Graphs
 
 Relay MCP indexing and query tools support isolated temporary ref graphs through `ref_id`, `branch`, or `git_branch`. Parent aliases are `parent_ref`, `base_ref`, and `base_branch`. The `promote_ref` tool reindexes source-ref file paths from the merged target working tree into the parent/default graph and can then delete the source graph.
+
+Local Git incremental indexing uses NUL-delimited porcelain output, preserving spaces, Unicode names, and both sides of a rename. It forwards explicit ref/parent aliases and graph selection to backend validation instead of silently dropping branch context. Unsupported non-UTF-8 Git paths fail explicitly.
 
 See [BRANCH-GRAPHS.md](BRANCH-GRAPHS.md) for graph naming, fallback behavior, promotion semantics, examples, and current limitations.
