@@ -27,6 +27,11 @@ $runtimeStateFile = Join-Path $bundleRoot 'tmp\cga-desktop-runtime.json'
 $prebuiltImageTar = Join-Path $bundleRoot 'cga-desktop-api-image.tar'
 $prebuiltImageStateFile = Join-Path $bundleRoot 'tmp\cga-desktop-image.json'
 $prebuiltImageName = if ($env:CGA_DESKTOP_IMAGE) { $env:CGA_DESKTOP_IMAGE } else { 'cga-desktop-portable-cga:local' }
+$graphSafetyScript = Join-Path $bundleRoot 'src\scripts\desktop-graph-safety.ps1'
+if (-not (Test-Path -LiteralPath $graphSafetyScript)) {
+    $graphSafetyScript = Join-Path $PSScriptRoot '..\..\src\scripts\desktop-graph-safety.ps1'
+}
+. $graphSafetyScript
 $script:PublishedDockerPorts = $null
 $script:OriginalDesktopEnv = @{
     CGA_DESKTOP_API_PORT = $env:CGA_DESKTOP_API_PORT
@@ -354,6 +359,7 @@ $existingServices = @(docker compose -f $composeFile ps -q 2>$null | Where-Objec
 $stackExists = $existingServices.Count -gt 0
 
 if ($Command -in @('start', 'restart')) {
+    Assert-CgaGraphPersistence -ComposeFile $composeFile
     $apiPreferred = Resolve-StartPort -EnvValue $env:CGA_DESKTOP_API_PORT -SavedValue $savedApiPort -DefaultPort 18001 -FallbackStart 18011 -StackExists $stackExists
     $graphPreferred = Resolve-StartPort -EnvValue $env:CGA_DESKTOP_FALKORDB_PORT -SavedValue $savedGraphPort -DefaultPort 16381 -FallbackStart 16391 -StackExists $stackExists
     $browserPreferred = Resolve-StartPort -EnvValue $env:CGA_DESKTOP_BROWSER_PORT -SavedValue $savedBrowserPort -DefaultPort 13001 -FallbackStart 13011 -StackExists $stackExists
@@ -392,11 +398,10 @@ switch ($Command) {
         }
     }
     'stop' {
-        Invoke-Compose @('down')
+        Invoke-Compose @('stop')
     }
     'restart' {
         $hasPrebuiltImage = Import-PrebuiltImage
-        Invoke-Compose @('down')
         Invoke-ComposeUp -UseBuild:(-not $hasPrebuiltImage) -DetachedMode:$true
         Save-DesktopRuntimeState -ApiPort $apiPreferred -GraphPort $graphPreferred -BrowserPort $browserPreferred
         Write-Host "Admin UI: http://localhost:$apiPreferred/admin"

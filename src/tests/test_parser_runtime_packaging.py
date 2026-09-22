@@ -17,7 +17,10 @@ def test_dev_image_installs_pinned_parser_runtime() -> None:
 
     for requirement in PARSER_REQUIREMENTS:
         assert requirement in requirements
-        assert requirement in dockerfile
+    assert "COPY requirements.txt" in dockerfile
+    assert "pip install --no-cache-dir -r /tmp/cga-runtime-requirements.txt" in dockerfile
+    assert "PyJWT[crypto]==" in requirements
+    assert "python-jose" not in dockerfile
 
 
 def test_compose_variants_persist_runtime_configuration() -> None:
@@ -32,3 +35,12 @@ def test_compose_variants_persist_runtime_configuration() -> None:
         compose = (ROOT / relative_path).read_text(encoding="utf-8")
         assert "runtime_data:/app/data" in compose, relative_path
         assert "\n  runtime_data:" in compose, relative_path
+
+
+def test_api_images_use_postgres_clients_matching_the_supported_server() -> None:
+    for name in ("Dockerfile.dev", "Dockerfile.prod"):
+        dockerfile = (ROOT / name).read_text(encoding="utf-8")
+        assert "FROM postgres:16-bookworm AS postgres-client" in dockerfile
+        assert "/usr/lib/postgresql/16/bin/pg_dump" in dockerfile
+        assert "/usr/lib/postgresql/16/bin/psql" in dockerfile
+        assert "FROM python:3.12-slim-bookworm" in dockerfile

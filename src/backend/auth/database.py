@@ -68,6 +68,35 @@ CREATE TABLE IF NOT EXISTS projects (
     is_active    INTEGER NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS output_rule_profiles (
+    id           BIGSERIAL PRIMARY KEY,
+    profile_name TEXT UNIQUE NOT NULL,
+    rules_json   TEXT NOT NULL,
+    version      INTEGER NOT NULL DEFAULT 1,
+    updated_at   TEXT NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS')
+);
+
+CREATE TABLE IF NOT EXISTS relay_sync_batches (
+    id            BIGSERIAL NOT NULL,
+    project_db_id BIGINT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    batch_id      TEXT NOT NULL CHECK (length(batch_id) = 64),
+    payload_json  TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS'),
+    PRIMARY KEY (project_db_id, batch_id)
+);
+
+ALTER TABLE relay_sync_batches ADD COLUMN IF NOT EXISTS id BIGSERIAL NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_relay_sync_batches_id ON relay_sync_batches(id);
+CREATE INDEX IF NOT EXISTS idx_relay_sync_batches_project_id ON relay_sync_batches(project_db_id, id);
+
+CREATE TABLE IF NOT EXISTS project_output_rules (
+    project_id   BIGINT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+    base_profile  TEXT NOT NULL DEFAULT 'concise',
+    overrides_json TEXT NOT NULL DEFAULT '{}',
+    version       INTEGER NOT NULL DEFAULT 1,
+    updated_at    TEXT NOT NULL DEFAULT to_char((now() at time zone 'utc'), 'YYYY-MM-DD"T"HH24:MI:SS')
+);
+
 CREATE TABLE IF NOT EXISTS user_groups (
     id           BIGSERIAL PRIMARY KEY,
     group_name   TEXT    UNIQUE NOT NULL,
@@ -334,6 +363,17 @@ async def init_db(dsn: str | None = None) -> None:
     pool = await init_pool(dsn)
     async with pool.acquire() as db:
         await db.executescript(_CREATE_TABLES)
+        await db.execute(
+            """
+            INSERT INTO output_rule_profiles(profile_name, rules_json)
+            VALUES(?, ?)
+            ON CONFLICT(profile_name) DO NOTHING
+            """,
+            (
+                "concise",
+                '{"preamble":"none","explanations":"on_request","summary":"short","tool_updates":"errors_only","show_diff_only":true,"echo_unchanged_code":false,"require_evidence":false,"max_response_tokens":800,"directives":[]}',
+            ),
+        )
         try:
             await db.execute("ALTER TABLE extension_configs ALTER COLUMN project_id DROP NOT NULL")
         except Exception:

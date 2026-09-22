@@ -12,6 +12,7 @@ for the authenticated project without thread-locals or explicit passing.
 from __future__ import annotations
 
 from contextvars import ContextVar
+import threading
 
 import structlog
 
@@ -32,37 +33,54 @@ class GraphRegistry:
         self._host = host
         self._port = port
         self._graphs: dict[str, GraphClient] = {}
+        self._lock = threading.RLock()
 
     def get(self, project_name: str) -> GraphClient:
         """Return (and lazily connect) the GraphClient for *project_name*."""
         project_name = project_name.strip().lower()
-        if project_name not in self._graphs:
-            g = GraphClient(
-                host=self._host,
-                port=self._port,
-                graph_name=project_name,
-            )
-            g.connect()
-            g.ensure_indexes()
-            log.info("graph.registry.connected", project_name=project_name)
-            self._graphs[project_name] = g
-        return self._graphs[project_name]
+        with self._lock:
+            if project_name not in self._graphs:
+                g = GraphClient(
+                    host=self._host,
+                    port=self._port,
+                    graph_name=project_name,
+                )
+                g.connect()
+                g.ensure_indexes()
+                log.info("graph.registry.connected", project_name=project_name)
+                self._graphs[project_name] = g
+            return self._graphs[project_name]
 
     def current(self) -> GraphClient:
         """Return the GraphClient for the project active in the current context."""
         return self.get(_current_project_name.get())
 
-    def delete(self, project_name: str) -> None:
+    def delete(
+        self, project_name: str, *, expected_generation: str | None = None,
+        expected_target_graph: str | None = None,
+        expected_target_generation: str | None = None,
+    ) -> None:
         """Delete a graph and evict its cached client."""
         project_name = project_name.strip().lower()
-        graph = self.get(project_name)
-        graph.delete()
-        graph.close()
-        self._graphs.pop(project_name, None)
+        with self._lock:
+            graph = self.get(project_name)
+            if expected_target_graph is not None or expected_target_generation is not None:
+                graph.delete(
+                    expected_generation=expected_generation,
+                    expected_target_graph=expected_target_graph,
+                    expected_target_generation=expected_target_generation,
+                )
+            elif expected_generation is None:
+                graph.delete()
+            else:
+                graph.delete(expected_generation=expected_generation)
+            graph.close()
+            self._graphs.pop(project_name, None)
         log.info("graph.registry.deleted", project_name=project_name)
 
     def close_all(self) -> None:
-        for g in self._graphs.values():
-            g.close()
-        self._graphs.clear()
+        with self._lock:
+            for g in self._graphs.values():
+                g.close()
+            self._graphs.clear()
         log.info("graph.registry.closed_all")

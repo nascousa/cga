@@ -1,4 +1,6 @@
-FROM python:3.12-slim
+FROM postgres:16-bookworm AS postgres-client
+
+FROM python:3.12-slim-bookworm AS runtime-base
 
 WORKDIR /app
 
@@ -6,30 +8,23 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     git \
-    postgresql-client \
+    libpq5 libreadline8 liblz4-1 libzstd1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install dependencies — exclude heavy ML packages not needed for dev API
+COPY --from=postgres-client /usr/lib/postgresql/16/bin/pg_dump /usr/lib/postgresql/16/bin/psql /usr/local/bin/
+COPY --from=postgres-client /usr/lib/*/libpq.so.5* /usr/local/lib/
+COPY --from=postgres-client /usr/share/doc/postgresql-client-16/copyright /usr/share/doc/cga-postgresql-client-16/copyright
+COPY --from=postgres-client /usr/share/doc/libpq5/copyright /usr/share/doc/cga-libpq/copyright
+RUN ldconfig && pg_dump --version && psql --version
+
+FROM runtime-base AS runtime
+
+# Use canonical runtime constraints without optional ML or test dependencies.
 COPY requirements.txt .
-RUN pip install --no-cache-dir \
-    fastapi \
-    "uvicorn[standard]" \
-    pydantic \
-    asyncpg \
-    "bcrypt>=4.0,<5.0" \
-    "python-jose[cryptography]" \
-    "redis[hiredis]" \
-    falkordb \
-    structlog \
-    "prometheus-client" \
-    tree-sitter==0.25.2 \
-    tree-sitter-language-pack==0.13.0 \
-    tree-sitter-c-sharp==0.23.1 \
-    tree-sitter-embedded-template==0.25.0 \
-    tree-sitter-yaml==0.7.2 \
-    httpx \
-    mcp \
-    sse-starlette
+RUN grep -vE '^(sentence-transformers|numpy|pytest|black|ruff|mypy|pip-audit)' \
+        requirements.txt > /tmp/cga-runtime-requirements.txt \
+    && pip install --no-cache-dir -r /tmp/cga-runtime-requirements.txt \
+    && rm /tmp/cga-runtime-requirements.txt
 
 # Copy source
 COPY src/ ./src/

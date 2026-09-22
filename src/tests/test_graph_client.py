@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+from redis.exceptions import ResponseError
+
 from backend.graph.client import GraphClient
 from backend.graph.registry import GraphRegistry
 
@@ -33,6 +36,89 @@ def test_ensure_indexes_ignores_existing_index_errors() -> None:
     client.ensure_indexes()
 
     assert client.query.call_count >= 1
+
+
+def test_ensure_indexes_propagates_database_failures() -> None:
+    client = GraphClient()
+    client.query = MagicMock(side_effect=RuntimeError("database unavailable"))
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        client.ensure_indexes()
+
+
+def test_atomic_update_does_not_publish_failed_build() -> None:
+    client = GraphClient(graph_name="demo")
+    client._db = MagicMock()
+    client._graph = MagicMock()
+    connection = client._db.connection
+    connection.exists.return_value = True
+    lock = connection.lock.return_value
+    lock.acquire.return_value = True
+    lock.local.token = b"lease"
+
+    with pytest.raises(ValueError, match="invalid source"):
+        with client.atomic_update():
+            raise ValueError("invalid source")
+
+    client._graph.copy.assert_called_once()
+    connection.eval.assert_not_called()
+    lock.release.assert_called_once()
+
+
+def test_atomic_update_publishes_only_after_build_finishes() -> None:
+    client = GraphClient(graph_name="demo")
+    client._db = MagicMock()
+    client._graph = MagicMock()
+    connection = client._db.connection
+    connection.exists.return_value = True
+    lock = connection.lock.return_value
+    lock.acquire.return_value = True
+    lock.local.token = b"lease"
+
+    with client.atomic_update() as staged:
+        assert staged is not client
+        assert staged._graph_name != "demo"
+        connection.eval.assert_not_called()
+        assert staged.published_generation is None
+
+    connection.eval.assert_called_once()
+    assert "RENAME" in connection.eval.call_args.args[0]
+    assert "PERSIST" in connection.eval.call_args.args[0]
+    assert staged.published_generation == connection.eval.call_args.args[-1]
+    lock.release.assert_called_once()
+
+
+def test_atomic_update_fails_when_write_lease_is_busy() -> None:
+    client = GraphClient(graph_name="demo")
+    client._db = MagicMock()
+    client._graph = MagicMock()
+    client._db.connection.lock.return_value.acquire.return_value = False
+
+    with pytest.raises(TimeoutError, match="graph write lease"):
+        with client.atomic_update():
+            raise AssertionError("build must not start")
+
+    client._graph.copy.assert_not_called()
+
+
+def test_atomic_update_retries_copy_when_background_save_owns_fork() -> None:
+    client = GraphClient(graph_name="demo")
+    client._db = MagicMock()
+    client._graph = MagicMock()
+    connection = client._db.connection
+    connection.exists.side_effect = lambda name: name == "demo"
+    connection.lock.return_value.acquire.return_value = True
+    connection.lock.return_value.local.token = b"lease"
+    client._graph.copy.side_effect = [
+        ResponseError("GRAPH.COPY failed, could not fork"),
+        MagicMock(),
+    ]
+
+    with client.atomic_update():
+        pass
+
+    assert client._graph.copy.call_count == 2
+    connection.eval.assert_called_once()
 
 
 def test_delete_uses_connected_falkordb_graph() -> None:

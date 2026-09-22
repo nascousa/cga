@@ -7775,12 +7775,17 @@ function formatStatusLabel(job) {
   return job.error ? `${base}` : base;
 }
 
+function isIndexJobActive(job) {
+  return Boolean(job && !job.is_stale && ['pending', 'processing', 'retrying'].includes(job.status));
+}
+
 function getIndexTrackerState(job) {
   if (!job) return 'idle';
   if (job.status === 'failed') return 'failed';
   if (job.status === 'stale') return 'failed';
   if (job.status === 'done') return 'done';
   if (job.status === 'processing') return 'processing';
+  if (job.status === 'retrying') return 'pending';
   if (job.status === 'pending') {
     // Consumer picks up jobs nearly instantly; only show QUEUED when genuinely waiting behind others
     return (job.queue_position && job.queue_position > 1) ? 'pending' : 'processing';
@@ -7825,7 +7830,7 @@ function renderIndexTracker(job) {
 
 function renderIndexStatusMeta(job, statusText, queueText, etaText, recentJobs, graphStats) {
   const repoText = job?.repo_path || 'No active job yet';
-  const isPending = job && !job.is_stale && (job.status === 'pending' || job.status === 'processing');
+  const isPending = isIndexJobActive(job);
   const jobs = recentJobs || [];
   const latestFull = jobs.find(j => j.job_type === 'index_full' && j.files !== null);
   const latestIncr = jobs.find(j => j.job_type === 'index_incremental' && j.files !== null);
@@ -7887,8 +7892,8 @@ function renderTrackingHistory(projectId) {
                 <span><span class="label">Updated</span>${esc(relativeTimeLabel(job.updated_at))} · ${esc(job.updated_at || '-')}</span>
               </div>
               <div class="tracking-event-meta">
-                ${job.status === 'pending' || job.status === 'processing' ? `<span><span class="label">Queue</span>${esc(Number.isInteger(job.queue_position) ? `q#${job.queue_position}` : '—')}</span>` : ''}
-                ${job.status === 'pending' || job.status === 'processing' ? `<span><span class="label">ETA</span>${esc(Number.isInteger(job.eta_seconds) && job.eta_seconds > 0 ? `~${job.eta_seconds}s` : '—')}</span>` : ''}
+                ${isIndexJobActive(job) ? `<span><span class="label">Queue</span>${esc(Number.isInteger(job.queue_position) ? `q#${job.queue_position}` : '—')}</span>` : ''}
+                ${isIndexJobActive(job) ? `<span><span class="label">ETA</span>${esc(Number.isInteger(job.eta_seconds) && job.eta_seconds > 0 ? `~${job.eta_seconds}s` : '—')}</span>` : ''}
                 <span><span class="label">Scope</span>${esc(job.files !== null ? `${job.files} Files / ${job.symbols || 0} Symbols` : 'Metrics pending')}</span>
                 <span title="${esc(job.repo_path || '')}"><span class="label">Source</span>${esc(job.repo_path || '-')}</span>
               </div>
@@ -7961,7 +7966,7 @@ function filterProjects(q) {
     const status = _indexStatusCache[p.id];
     const job = status?.latest_job;
     const isStale = job && (job.is_stale || job.status === 'stale');
-    const isProcessing = job && !isStale && (job.status === 'processing' || job.status === 'pending');
+    const isProcessing = isIndexJobActive(job);
     const queueText = job
       ? (Number.isInteger(job.queue_position) ? `q#${job.queue_position}` : '—')
       : '—';

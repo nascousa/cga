@@ -120,7 +120,15 @@ def test_benchmark_context_quality_requires_gold_items() -> None:
         benchmark_context_quality(payload=payload, repo_root=Path("."))
 
 
-def test_mcp_benchmark_context_quality_tool() -> None:
+@pytest.fixture
+def mcp_project_scope(tmp_path):
+    from backend.auth.context import ProjectScope, bind_project_scope
+
+    with bind_project_scope(ProjectScope("QUALITY-TEST", 1, "quality-test", str(tmp_path))):
+        yield
+
+
+def test_mcp_benchmark_context_quality_tool(mcp_project_scope) -> None:
     from backend.tools import server as mcp_srv
 
     result = mcp_srv.benchmark_context_quality(

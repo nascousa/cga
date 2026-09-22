@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import textwrap
+import uuid
 from pathlib import Path
 
 import pytest
@@ -21,12 +22,12 @@ def _connect_live_graph() -> GraphClient:
     client = GraphClient(
         host=os.getenv("FALKORDB_HOST", "localhost"),
         port=int(os.getenv("FALKORDB_PORT", "16379")),
-        graph_name="contextgraph_integration",
+        graph_name=f"graph_integration_{uuid.uuid4().hex}",
     )
     try:
         client.connect()
         client.ensure_indexes()
-        client.query("MATCH (n) DETACH DELETE n")
+        client.delete()
     except Exception as exc:
         client.close()
         pytest.skip(f"live FalkorDB unavailable: {exc}")

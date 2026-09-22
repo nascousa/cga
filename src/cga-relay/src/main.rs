@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{BufRead, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
@@ -36,6 +36,7 @@ const CRYSTALS_TRANSPORT_SCOPE: &str = "local-ipc";
 const MAX_SYNC_ITEMS_PER_BATCH: usize = 500;
 const DEFAULT_MAX_BATCH_BYTES: usize = 8 * 1024 * 1024;
 const MAX_HTTP_RESPONSE_BYTES: usize = 8 * 1024 * 1024;
+const MAX_MCP_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
 const MAX_SETTINGS_REQUEST_HEADER_BYTES: usize = 64 * 1024;
 const MAX_SETTINGS_REQUEST_BODY_BYTES: usize = 64 * 1024;
 const HTTP_IO_TIMEOUT: Duration = Duration::from_secs(30);
@@ -55,6 +56,7 @@ const CONFIG_KEYS: &[&str] = &[
     "EXCLUDE_GLOBS",
     "MAX_FILE_BYTES",
     "MAX_BATCH_BYTES",
+    "BROWSER_ALLOWED_ORIGINS",
 ];
 
 #[derive(Debug)]
@@ -161,15 +163,36 @@ struct ScanResult {
 }
 
 fn main() {
-    let code =
-        match single_instance::acquire().and_then(|_guard| run(env::args().skip(1).collect())) {
-            Ok(()) => 0,
-            Err(error) => {
-                eprintln!("error: {}", error.0);
-                2
-            }
-        };
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let relaunch = args.iter().any(|arg| arg == "--relaunch");
+    let code = match acquire_single_instance(relaunch).and_then(|_guard| run(args)) {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("error: {}", error.0);
+            2
+        }
+    };
     process::exit(code);
+}
+
+fn acquire_single_instance(relaunch: bool) -> AgentResult<single_instance::SingleInstanceGuard> {
+    if !relaunch {
+        return single_instance::acquire();
+    }
+
+    for _ in 0..100 {
+        match single_instance::acquire() {
+            Ok(guard) => return Ok(guard),
+            Err(error) if error.0.starts_with("CGA-Relay is already running;") => {
+                thread::sleep(Duration::from_millis(100));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(AgentError(
+        "timed out waiting for the previous CGA-Relay process to exit".to_string(),
+    ))
 }
 
 fn run(args: Vec<String>) -> AgentResult<()> {
@@ -184,6 +207,7 @@ fn run(args: Vec<String>) -> AgentResult<()> {
         "projects" => cmd_projects(&args[1..]),
         "scan" => cmd_scan(&args[1..]),
         "sync" => cmd_sync(&args[1..]),
+        "output-rules" => cmd_output_rules(&args[1..]),
         "index" => cmd_index(&args[1..]),
         "refs" => cmd_refs(&args[1..]),
         "settings" => cmd_settings(&args[1..]),
@@ -208,6 +232,7 @@ fn print_help() {
     println!("  projects  Add/list central local project registry entries");
     println!("  scan      Scan the configured project root");
     println!("  sync      Scan registered projects and submit changed snapshots");
+    println!("  output-rules  Synchronize effective server-managed output rules");
     println!("  index     Index Git or explicit file changes into a default/ref graph");
     println!("  refs      Promote temporary ref graphs after merge");
     println!("  settings  Render or inspect the local account settings page");
@@ -277,7 +302,7 @@ fn cmd_projects(args: &[String]) -> AgentResult<()> {
 fn cmd_scan(args: &[String]) -> AgentResult<()> {
     let config = load_config(required_arg(args, "--config")?)?;
     let dry_run = has_flag(args, "--dry-run");
-    let result = scan_project(&config, &config.project_root, &config.project_id, dry_run)?;
+    let result = scan_project(&config, &config.project_root, &config.project_id, dry_run, false)?;
     if !dry_run {
         persist_scan_result(&config, &result)?;
     }
@@ -309,6 +334,7 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
             "CGA account login expired; sign in again before syncing account projects".to_string(),
         ));
     }
+
     if developer_token.is_none() && account_token.is_none() {
         if account_session_token_expired(&account_session) {
             return Err(AgentError(
@@ -327,7 +353,7 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
             project.locator,
             display_path(&project.root)
         );
-        let result = scan_project(&config, &project.root, &project.locator, true)?;
+        let result = scan_project(&config, &project.root, &project.locator, true, true)?;
         eprintln!(
             "sync {}: scan complete (scanned={}, changed={}, tombstones={}, bytes={})",
             project.locator,
@@ -345,7 +371,6 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
                 developer_token.as_deref(),
                 &mut account_token,
             )?;
-            persist_scan_result(&config, &result)?;
             submitted += 1;
         }
         project_payloads.push(format!(
@@ -365,6 +390,46 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
         project_payloads.join(",")
     );
     Ok(())
+}
+
+fn cmd_output_rules(args: &[String]) -> AgentResult<()> {
+    let config = load_config(required_arg(args, "--config")?)?;
+    sync_output_rules(&config)?;
+    println!(
+        "{{\"ok\":true,\"path\":\"{}\"}}",
+        json_escape(&display_path(&output_rules_path(&config)))
+    );
+    Ok(())
+}
+
+fn output_rules_path(config: &AgentConfig) -> PathBuf {
+    config
+        .project_root
+        .join(".adc")
+        .join("standards")
+        .join("output")
+        .join("effective.md")
+}
+
+fn sync_output_rules(config: &AgentConfig) -> AgentResult<()> {
+    let session = read_account_session(config).unwrap_or_default();
+    let access_token = current_account_access_token(&session).ok_or_else(|| {
+        AgentError("CGA account login is required to synchronize output rules".to_string())
+    })?;
+    let url = format!(
+        "{}/api/auth/cga-relay/output-rules?project_id={}",
+        config.api_base_url, config.project_id
+    );
+    let headers = [("Authorization", format!("Bearer {access_token}"))];
+    let response = http_get_json_with_headers(config, &url, &headers)?;
+    let markdown = json_string_field(&response, "markdown")
+        .ok_or_else(|| AgentError("output-rules response did not include markdown".to_string()))?;
+    if !markdown.starts_with("<!-- CGA-MANAGED") {
+        return Err(AgentError(
+            "output-rules response is missing the CGA-MANAGED marker".to_string(),
+        ));
+    }
+    write_atomic_file(&output_rules_path(config), &markdown)
 }
 
 fn cmd_index(args: &[String]) -> AgentResult<()> {
@@ -474,14 +539,17 @@ fn cmd_settings(args: &[String]) -> AgentResult<()> {
 
 fn cmd_mcp(args: &[String]) -> AgentResult<()> {
     let config = load_config(required_arg(args, "--config")?)?;
-    let mut input = String::new();
-    std::io::stdin()
-        .read_to_string(&mut input)
-        .map_err(|err| AgentError(format!("failed to read stdin: {err}")))?;
-    log_communication(&config, "mcp.stdin", &payload_log_metadata(&input));
-    let responses = handle_mcp_session(&config, &input)?;
-    log_communication(&config, "mcp.stdout", &payload_log_metadata(&responses));
-    print!("{responses}");
+    let mut input = std::io::stdin().lock();
+    let mut output = std::io::stdout().lock();
+    while let Some(message) = read_mcp_message(&mut input)? {
+        log_communication(&config, "mcp.stdin", &payload_log_metadata(&message));
+        if let Some(response) = handle_mcp_message(&config, &message) {
+            log_communication(&config, "mcp.stdout", &payload_log_metadata(&response));
+            writeln!(output, "{response}")
+                .and_then(|_| output.flush())
+                .map_err(|err| AgentError(format!("failed to write MCP response: {err}")))?;
+        }
+    }
     Ok(())
 }
 
@@ -579,7 +647,11 @@ fn tray_user_group_summary(config: &AgentConfig, login: &TrayLoginStatus) -> Str
 }
 
 fn tray_backend_available(config: &AgentConfig) -> bool {
-    http_get_json(config, &format!("{}/health", config.api_base_url)).is_ok()
+    tray_backend_check(config).is_ok()
+}
+
+fn tray_backend_check(config: &AgentConfig) -> AgentResult<()> {
+    http_get_json(config, &format!("{}/health", config.api_base_url)).map(|_| ())
 }
 
 fn tray_icon_resource_id(login: &TrayLoginStatus, backend_available: bool) -> u16 {
@@ -604,7 +676,7 @@ fn tray_icon_variant(login: &TrayLoginStatus, backend_available: bool) -> &'stat
 
 fn tray_menu_json(login: &TrayLoginStatus) -> String {
     format!(
-        "[\"{}\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Exit\"]",
+        "[\"{}\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]",
         json_escape(&tray_login_menu_label(login))
     )
 }
@@ -1114,8 +1186,36 @@ fn write_file(path: &Path, text: &str) -> AgentResult<()> {
         fs::create_dir_all(parent)
             .map_err(|err| AgentError(format!("cannot create parent dir: {err}")))?;
     }
+
     fs::write(path, text)
         .map_err(|err| AgentError(format!("cannot write {}: {err}", path.display())))
+}
+
+fn write_atomic_file(path: &Path, text: &str) -> AgentResult<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|err| AgentError(format!("cannot create parent dir: {err}")))?;
+    }
+    let temporary = path.with_extension("md.tmp");
+    fs::write(&temporary, text)
+        .map_err(|err| AgentError(format!("cannot write {}: {err}", temporary.display())))?;
+    let backup = path.with_extension("md.bak");
+    if path.exists() {
+        fs::rename(path, &backup)
+            .map_err(|err| AgentError(format!("cannot stage {}: {err}", path.display())))?;
+    }
+    if let Err(err) = fs::rename(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        if backup.exists() {
+            let _ = fs::rename(&backup, path);
+        }
+        return Err(AgentError(format!(
+            "cannot replace {}: {err}",
+            path.display()
+        )));
+    }
+    let _ = fs::remove_file(backup);
+    Ok(())
 }
 
 fn write_private_file(path: &Path, text: &str) -> AgentResult<()> {
@@ -1258,18 +1358,18 @@ fn handle_settings_connection(config: &AgentConfig, mut stream: TcpStream) -> Ag
             ("OPTIONS", _) => empty_response(200),
             ("GET", "/") | ("GET", "/settings") => html_response(&settings_page_html(config, None)),
             ("POST", "/login") => match handle_settings_login(config, &request.body) {
-                Ok(message) => html_response(&settings_page_html(config, Some(&message))),
-                Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
+                Ok(message) => html_response(&settings_page_html(config, Some((&message, false)))),
+                Err(error) => html_response(&settings_page_html(config, Some((&error.0, true)))),
             },
             ("POST", "/refresh") => match handle_settings_refresh(config) {
-                Ok(message) => html_response(&settings_page_html(config, Some(&message))),
-                Err(error) => html_response(&settings_page_html(config, Some(&error.0))),
+                Ok(message) => html_response(&settings_page_html(config, Some((&message, false)))),
+                Err(error) => html_response(&settings_page_html(config, Some((&error.0, true)))),
             },
             ("POST", "/logout") => {
                 let _ = fs::remove_file(account_session_path(config));
                 let _ = fs::remove_file(account_projects_path(config));
                 let _ = fs::remove_file(account_groups_path(config));
-                html_response(&settings_page_html(config, Some("Signed out.")))
+                html_response(&settings_page_html(config, Some(("Signed out.", false))))
             }
             ("GET", "/status.json") => json_response(&settings_status_json(config)),
             ("POST", "/api/index-git-incremental") => {
@@ -1470,7 +1570,7 @@ fn handle_settings_login(config: &AgentConfig, body: &str) -> AgentResult<String
         &[],
         &login_body,
     )
-    .map_err(|_| AgentError("CGA login failed.".to_string()))?;
+    .map_err(|err| AgentError(format!("CGA login failed: {}", err.0)))?;
     let access_token = json_string_field(&token_json, "access_token").ok_or_else(|| {
         AgentError("CGA login response did not include an access token.".to_string())
     })?;
@@ -1480,13 +1580,13 @@ fn handle_settings_login(config: &AgentConfig, body: &str) -> AgentResult<String
         &format!("{}/api/auth/me", config.api_base_url),
         &auth,
     )
-    .map_err(|_| AgentError("Could not load CGA account profile.".to_string()))?;
+    .map_err(|err| AgentError(format!("Could not load CGA account profile: {}", err.0)))?;
     let groups_json = http_get_json_with_headers(
         config,
         &format!("{}/api/auth/me/groups", config.api_base_url),
         &auth,
     )
-    .map_err(|_| AgentError("Could not load CGA account user groups.".to_string()))?;
+    .map_err(|err| AgentError(format!("Could not load CGA account user groups: {}", err.0)))?;
     let account_username =
         json_string_field(&me_json, "username").unwrap_or_else(|| username.to_string());
     let role = json_string_field(&me_json, "role").unwrap_or_default();
@@ -1518,7 +1618,7 @@ fn handle_settings_refresh(config: &AgentConfig) -> AgentResult<String> {
     ))
 }
 
-fn settings_page_html(config: &AgentConfig, message: Option<&str>) -> String {
+fn settings_page_html(config: &AgentConfig, message: Option<(&str, bool)>) -> String {
     let session = read_account_session(config).unwrap_or_default();
     let groups = refresh_account_groups(config, &session)
         .or_else(|_| load_account_groups(config))
@@ -1526,7 +1626,10 @@ fn settings_page_html(config: &AgentConfig, message: Option<&str>) -> String {
     let signed_in = current_account_access_token(&session).is_some();
     let username = session.get("username").map(String::as_str).unwrap_or("");
     let message_html = message
-        .map(|text| format!("<div class=\"notice\">{}</div>", html_escape(text)))
+        .map(|(text, is_error)| {
+            let class = if is_error { "notice notice-error" } else { "notice" };
+            format!("<div class=\"{class}\">{}</div>", html_escape(text))
+        })
         .unwrap_or_default();
     let group_html = render_account_groups(&groups, signed_in);
     let account_html = if signed_in {
@@ -1539,7 +1642,7 @@ fn settings_page_html(config: &AgentConfig, message: Option<&str>) -> String {
     };
     let stylesheet = r#"
 :root{color-scheme:dark;--bg:#070b0e;--panel:#11181d;--panel-2:#0d1317;--line:#27343b;--text:#e8f4f1;--muted:#8ea19d;--accent:#2ee6a6;--accent-2:#ffcc66;--danger:#ff7a90;--shadow:0 24px 70px rgba(0,0,0,.42)}
-*{box-sizing:border-box}html{min-height:100%}body{min-height:100%;margin:0;font-family:Segoe UI,Arial,sans-serif;background:#070b0e;color:var(--text);letter-spacing:0}body::before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,#000,transparent 82%)}main{width:min(1120px,calc(100vw - 40px));margin:0 auto;padding:36px 0 44px}.topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:18px}.eyebrow{margin:0 0 8px;color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}h1,h2{margin:0;letter-spacing:0}h1{font-size:34px;line-height:1.08}h2{font-size:20px}h3{margin:0;font-size:16px}.muted{color:var(--muted);line-height:1.55}.version-pill{border:1px solid var(--line);background:#0b1115;border-radius:999px;color:var(--accent-2);padding:8px 12px;white-space:nowrap}.notice{border:1px solid rgba(46,230,166,.38);background:rgba(46,230,166,.1);color:#d8fff2;border-radius:8px;padding:12px 14px;margin:18px 0}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:20px 0}.metric{background:rgba(17,24,29,.82);border:1px solid var(--line);border-radius:8px;padding:12px}.metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.metric strong{font-size:14px;word-break:break-word}.panel{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:22px;margin:16px 0}.account-panel{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);gap:22px;align-items:start}.account-actions{display:flex;justify-content:flex-end;align-items:flex-start;gap:10px;flex-wrap:wrap}.account-actions form{margin:0}.group-list{display:grid;gap:16px;margin-top:14px}.group-card{border:1px solid rgba(39,52,59,.78);border-radius:8px;background:rgba(8,13,16,.42);padding:14px}.group-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.login-form{display:grid;gap:14px}label span{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}input{width:100%;height:40px;border:1px solid #31434a;border-radius:8px;background:#080d10;color:var(--text);padding:0 12px;outline:none}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(46,230,166,.14)}button{height:40px;border:0;border-radius:8px;background:var(--accent);color:#03110c;font-weight:800;padding:0 16px;cursor:pointer}button.secondary{border:1px solid #34444a;background:#0a1014;color:var(--text)}table{width:100%;border-collapse:collapse;margin-top:16px;overflow:hidden}th,td{border-bottom:1px solid var(--line);text-align:left;padding:12px 10px;vertical-align:top}th{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}code{color:#b5fff0;background:#07100e;border:1px solid #1a3b34;border-radius:6px;padding:3px 6px;font-size:12px}.project-name{font-weight:700}.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800;white-space:nowrap}.ready{background:rgba(46,230,166,.14);color:#7dffd3;border:1px solid rgba(46,230,166,.35)}.pending{background:rgba(255,204,102,.13);color:#ffe0a3;border:1px solid rgba(255,204,102,.36)}.empty-state{color:var(--muted);padding:28px 10px}@media(max-width:760px){main{width:min(100vw - 24px,1120px);padding-top:24px}.topbar,.account-panel{display:block}.account-actions{justify-content:flex-start;margin-top:16px}.version-pill{display:inline-block;margin-top:14px}.status-grid{grid-template-columns:1fr}h1{font-size:28px}td,th{padding:10px 8px}}
+*{box-sizing:border-box}html{min-height:100%}body{min-height:100%;margin:0;font-family:Segoe UI,Arial,sans-serif;background:#070b0e;color:var(--text);letter-spacing:0}body::before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,#000,transparent 82%)}main{width:min(1120px,calc(100vw - 40px));margin:0 auto;padding:36px 0 44px}.topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:18px}.eyebrow{margin:0 0 8px;color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}h1,h2{margin:0;letter-spacing:0}h1{font-size:34px;line-height:1.08}h2{font-size:20px}h3{margin:0;font-size:16px}.muted{color:var(--muted);line-height:1.55}.version-pill{border:1px solid var(--line);background:#0b1115;border-radius:999px;color:var(--accent-2);padding:8px 12px;white-space:nowrap}.notice{border:1px solid rgba(46,230,166,.38);background:rgba(46,230,166,.1);color:#d8fff2;border-radius:8px;padding:12px 14px;margin:18px 0}.notice-error{border-color:rgba(255,122,144,.55);background:rgba(255,122,144,.12);color:var(--danger)}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:20px 0}.metric{background:rgba(17,24,29,.82);border:1px solid var(--line);border-radius:8px;padding:12px}.metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.metric strong{font-size:14px;word-break:break-word}.panel{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:22px;margin:16px 0}.account-panel{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);gap:22px;align-items:start}.account-actions{display:flex;justify-content:flex-end;align-items:flex-start;gap:10px;flex-wrap:wrap}.account-actions form{margin:0}.group-list{display:grid;gap:16px;margin-top:14px}.group-card{border:1px solid rgba(39,52,59,.78);border-radius:8px;background:rgba(8,13,16,.42);padding:14px}.group-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.login-form{display:grid;gap:14px}label span{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}input{width:100%;height:40px;border:1px solid #31434a;border-radius:8px;background:#080d10;color:var(--text);padding:0 12px;outline:none}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(46,230,166,.14)}button{height:40px;border:0;border-radius:8px;background:var(--accent);color:#03110c;font-weight:800;padding:0 16px;cursor:pointer}button.secondary{border:1px solid #34444a;background:#0a1014;color:var(--text)}table{width:100%;border-collapse:collapse;margin-top:16px;overflow:hidden}th,td{border-bottom:1px solid var(--line);text-align:left;padding:12px 10px;vertical-align:top}th{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}code{color:#b5fff0;background:#07100e;border:1px solid #1a3b34;border-radius:6px;padding:3px 6px;font-size:12px}.project-name{font-weight:700}.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800;white-space:nowrap}.ready{background:rgba(46,230,166,.14);color:#7dffd3;border:1px solid rgba(46,230,166,.35)}.pending{background:rgba(255,204,102,.13);color:#ffe0a3;border:1px solid rgba(255,204,102,.36)}.empty-state{color:var(--muted);padding:28px 10px}@media(max-width:760px){main{width:min(100vw - 24px,1120px);padding-top:24px}.topbar,.account-panel{display:block}.account-actions{justify-content:flex-start;margin-top:16px}.version-pill{display:inline-block;margin-top:14px}.status-grid{grid-template-columns:1fr}h1{font-size:28px}td,th{padding:10px 8px}}
 "#;
     format!(
         "<!doctype html><html data-theme=\"dark\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>CGA-Relay Settings</title><style>{stylesheet}</style></head><body><main><header class=\"topbar\"><div><p class=\"eyebrow\">CGA-Relay</p><h1>CGA-Relay Settings</h1><p class=\"muted\">Secure relay access for your CGA account.</p></div><div class=\"version-pill\">v{VERSION}</div></header><div class=\"status-grid\"><div class=\"metric\"><span>Relay</span><strong>{}</strong></div><div class=\"metric\"><span>API</span><strong>{}</strong></div></div>{message_html}{account_html}{group_html}</main></body></html>",
@@ -2024,8 +2127,9 @@ fn scan_project(
     root: &Path,
     state_key: &str,
     dry_run: bool,
+    require_durable: bool,
 ) -> AgentResult<ScanResult> {
-    let previous = load_scan_state(config, state_key)?;
+    let previous = load_scan_state(config, state_key, require_durable)?;
     let mut current = BTreeMap::new();
     let mut result = ScanResult {
         root: root.to_path_buf(),
@@ -2265,6 +2369,60 @@ mod tests {
     use super::*;
 
     #[test]
+    fn only_reads_and_deduplicated_sync_can_replay_after_connect() {
+        assert!(can_replay_http_request("GET", "/api/health"));
+        assert!(can_replay_http_request("POST", "/api/project/cga-relay/sync"));
+        assert!(can_replay_http_request("POST", "/api/auth/cga-relay/sync"));
+        assert!(!can_replay_http_request("POST", "/api/project/cga-relay/mcp-tool"));
+        assert!(!can_replay_http_request("POST", "/api/auth/cga-relay/mcp-tool"));
+        assert!(!can_replay_http_request("POST", "/api/auth/login"));
+    }
+
+    #[test]
+    fn http_response_framing_validates_lengths_and_decodes_chunks() {
+        let plain = "HTTP/1.1 200 OK\r\nContent-Length: 2";
+        assert_eq!(decode_http_body(plain, b"{}").unwrap(), "{}");
+        assert!(decode_http_body(plain, b"{").is_err());
+        assert!(decode_http_body(plain, b"{}extra").is_err());
+        assert!(decode_http_body(&format!("{plain}\r\nContent-Length: 2"), b"{}").is_err());
+        let chunked = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked";
+        assert_eq!(decode_http_body(chunked, b"2\r\n{}\r\n0\r\n\r\n").unwrap(), "{}");
+        assert_eq!(
+            decode_http_body(chunked, b"1\r\n\xc3\r\n1\r\n\xa9\r\n0\r\n\r\n").unwrap(),
+            "\u{e9}"
+        );
+        assert_eq!(
+            decode_http_body(chunked, b"2;ext=yes\r\n{}\r\n0\r\nX-End: yes\r\n\r\n").unwrap(),
+            "{}"
+        );
+        for body in [
+            b"2\r\n{}\r\n".as_slice(),
+            b"2\r\n{",
+            b"0\r\n",
+            b"ffffffffffffffff\r\n",
+            b"0\r\ninvalid\r\n\r\n",
+        ] {
+            assert!(decode_http_body(chunked, body).is_err());
+        }
+        assert!(decode_http_body(&format!("{plain}\r\nTransfer-Encoding: chunked"), b"{}").is_err());
+    }
+
+    #[test]
+    fn git_status_preserves_unusual_paths_and_rename_order() {
+        let root = Path::new("repo");
+        let changes = parse_git_status(root,
+            b"R  new -> name.py\0old name.py\0?? leading name.py\0 D gone.py\0C  copy.py\0source.py\0"
+        ).unwrap();
+        assert_eq!(changes.destructive_count, 2);
+        let expected = ["old name.py", "new -> name.py", "leading name.py", "gone.py", "copy.py"]
+            .map(|path| display_path(&root.join(path)));
+        assert_eq!(changes.paths, expected);
+        assert!(parse_git_status(root, b"R  missing-source.py\0").is_err());
+        assert!(parse_git_status(root, b"?? truncated").is_err());
+        assert!(parse_git_status(root, b"?? \xff\0").is_err());
+    }
+
+    #[test]
     fn default_excludes_secret_like_files() {
         assert!(always_excluded(".env"));
         assert!(always_excluded(".env.local"));
@@ -2432,6 +2590,7 @@ mod tests {
 fn load_scan_state(
     config: &AgentConfig,
     key: &str,
+    require_durable: bool,
 ) -> AgentResult<BTreeMap<String, (String, u64)>> {
     let path = scan_state_path(config, key);
     if !path.exists() {
@@ -2448,11 +2607,17 @@ fn load_scan_state(
         let bytes = parts[3].parse::<u64>().unwrap_or(0);
         state.insert(unescape_field(parts[1]), (unescape_field(parts[2]), bytes));
     }
+    if require_durable && !text.lines().any(|line| line == "durable\ttrue") && !state.is_empty() {
+        eprintln!("sync: migrating legacy checkpoint; resending snapshots and preserving deletion history");
+        for (hash, _) in state.values_mut() {
+            hash.clear();
+        }
+    }
     Ok(state)
 }
 
 fn persist_scan_result(config: &AgentConfig, result: &ScanResult) -> AgentResult<()> {
-    persist_scan_state(config, &result.root, &result.state_key, &result.state)
+    persist_scan_state(config, &result.root, &result.state_key, &result.state, false)
 }
 
 fn persist_scan_state(
@@ -2460,9 +2625,13 @@ fn persist_scan_state(
     root: &Path,
     state_key: &str,
     state: &BTreeMap<String, (String, u64)>,
+    durable: bool,
 ) -> AgentResult<()> {
     ensure_state_dirs(config)?;
     let mut text = format!("version\t1\nroot\t{}\n", escape_field(&display_path(root)));
+    if durable {
+        text.push_str("durable\ttrue\n");
+    }
     for (path, (hash, bytes)) in state {
         text.push_str(&format!(
             "file\t{}\t{}\t{}\n",
@@ -2735,7 +2904,7 @@ fn submit_sync(
     account_token: &mut Option<&str>,
 ) -> AgentResult<String> {
     let plans = plan_sync_batches(config, project, result)?;
-    let mut checkpoint = load_scan_state(config, &result.state_key)?;
+    let mut checkpoint = load_scan_state(config, &result.state_key, true)?;
     let mut responses = Vec::new();
 
     for (index, plan) in plans.iter().enumerate() {
@@ -2766,11 +2935,7 @@ fn submit_sync(
             )));
         }
         let response = post_sync_body(config, project, developer_token, account_token, &body)?;
-        responses.push(if response.trim().is_empty() {
-            "null".to_string()
-        } else {
-            response
-        });
+        responses.push(response);
 
         for snapshot in &result.snapshots[plan.snapshot_start..plan.snapshot_end] {
             checkpoint.insert(
@@ -2781,7 +2946,7 @@ fn submit_sync(
         for path in &result.tombstones[plan.tombstone_start..plan.tombstone_end] {
             checkpoint.remove(path);
         }
-        persist_scan_state(config, &result.root, &result.state_key, &checkpoint)?;
+        persist_scan_state(config, &result.root, &result.state_key, &checkpoint, true)?;
     }
 
     Ok(format!(
@@ -2927,7 +3092,7 @@ fn post_sync_body(
                 body,
             )?;
             if response.is_success() {
-                return Ok(response.body);
+                return response.into_sync_success_body();
             }
             if response.status_code != 401 {
                 return Err(response.into_error());
@@ -2955,7 +3120,7 @@ fn post_sync_body(
         }
     }
     if let Some(developer_token) = developer_token {
-        http_post_json(
+        http_post_json_response(
             config,
             &format!("{}/api/project/cga-relay/sync", config.control_api_base_url),
             &[
@@ -2963,14 +3128,14 @@ fn post_sync_body(
                 ("X-Project-ID", project.project_id.clone()),
             ],
             body,
-        )
+        )?.into_sync_success_body()
     } else if let Some(account_token) = *account_token {
-        http_post_json(
+        http_post_json_response(
             config,
             &format!("{}/api/auth/cga-relay/sync", config.control_api_base_url),
             &[("Authorization", format!("Bearer {account_token}"))],
             body,
-        )
+        )?.into_sync_success_body()
     } else {
         Err(AgentError(
             "sync requires a developer token or CGA account login".to_string(),
@@ -3012,70 +3177,62 @@ fn snapshot_json_values(path: &str, sha256: &str, bytes: u64, content: &str) -> 
     )
 }
 
-fn handle_mcp_session(config: &AgentConfig, input: &str) -> AgentResult<String> {
-    let messages = parse_mcp_messages(input)?;
-    let mut responses = Vec::new();
-    for message in messages {
-        if let Some(response) = handle_mcp_message(config, &message) {
-            responses.push(response);
-        }
+fn read_mcp_line(input: &mut impl BufRead, limit: usize) -> AgentResult<String> {
+    let mut bytes = Vec::new();
+    input.take((limit + 1) as u64).read_until(b'\n', &mut bytes)
+        .map_err(|err| AgentError(format!("failed to read MCP input: {err}")))?;
+    if bytes.len() > limit {
+        return Err(AgentError("MCP input exceeds size limit".to_string()));
     }
-    Ok(if responses.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", responses.join("\n"))
-    })
+    String::from_utf8(bytes)
+        .map_err(|_| AgentError("MCP input is not valid UTF-8".to_string()))
 }
 
-fn parse_mcp_messages(input: &str) -> AgentResult<Vec<String>> {
-    let mut messages = Vec::new();
-    let mut index = 0;
-    while index < input.len() {
-        while index < input.len() && input.as_bytes()[index].is_ascii_whitespace() {
-            index += 1;
+fn read_mcp_message(input: &mut impl BufRead) -> AgentResult<Option<String>> {
+    let first = loop {
+        let line = read_mcp_line(input, MAX_MCP_MESSAGE_BYTES)?;
+        if line.is_empty() {
+            return Ok(None);
         }
-        if index >= input.len() {
+        if !line.trim().is_empty() {
+            break line;
+        }
+    };
+    if !first.trim_start().to_ascii_lowercase().starts_with("content-length:") {
+        return Ok(Some(first.trim().to_string()));
+    }
+    let mut header_bytes = first.len();
+    let mut line = first;
+    let mut length = None;
+    loop {
+        if header_bytes > MAX_SETTINGS_REQUEST_HEADER_BYTES || !line.ends_with('\n') {
+            return Err(AgentError("invalid or oversized MCP frame header".to_string()));
+        }
+        if line.trim().is_empty() {
             break;
         }
-        if input[index..]
-            .to_ascii_lowercase()
-            .starts_with("content-length:")
-        {
-            let Some(header_end) = input[index..].find("\r\n\r\n").map(|pos| index + pos) else {
-                return Err(AgentError("invalid Content-Length frame".to_string()));
-            };
-            let header = &input[index..header_end];
-            let mut length = None;
-            for line in header.lines() {
-                if let Some((name, value)) = line.split_once(':') {
-                    if name.eq_ignore_ascii_case("content-length") {
-                        length =
-                            Some(value.trim().parse::<usize>().map_err(|_| {
-                                AgentError("invalid Content-Length value".to_string())
-                            })?);
-                    }
-                }
+        let (name, value) = line.split_once(':')
+            .ok_or_else(|| AgentError("invalid MCP frame header".to_string()))?;
+        if name.trim().eq_ignore_ascii_case("content-length") {
+            if length.is_some() {
+                return Err(AgentError("duplicate MCP Content-Length".to_string()));
             }
-            let length = length.ok_or_else(|| AgentError("missing Content-Length".to_string()))?;
-            let body_start = header_end + 4;
-            let body_end = body_start + length;
-            if body_end > input.len() {
-                return Err(AgentError("short Content-Length frame".to_string()));
+            let parsed = value.trim().parse::<usize>()
+                .map_err(|_| AgentError("invalid MCP Content-Length".to_string()))?;
+            if parsed == 0 || parsed > MAX_MCP_MESSAGE_BYTES {
+                return Err(AgentError("MCP message exceeds size limit or is empty".to_string()));
             }
-            messages.push(input[body_start..body_end].to_string());
-            index = body_end;
-        } else {
-            let line_end = input[index..]
-                .find('\n')
-                .map_or(input.len(), |pos| index + pos);
-            let line = input[index..line_end].trim();
-            if !line.is_empty() {
-                messages.push(line.to_string());
-            }
-            index = line_end.saturating_add(1);
+            length = Some(parsed);
         }
+        line = read_mcp_line(input, MAX_SETTINGS_REQUEST_HEADER_BYTES - header_bytes)?;
+        header_bytes += line.len();
     }
-    Ok(messages)
+    let length = length.ok_or_else(|| AgentError("missing MCP Content-Length".to_string()))?;
+    let mut body = vec![0; length];
+    input.read_exact(&mut body)
+        .map_err(|err| AgentError(format!("short MCP frame: {err}")))?;
+    String::from_utf8(body).map(Some)
+        .map_err(|_| AgentError("MCP frame is not valid UTF-8".to_string()))
 }
 
 fn handle_mcp_message(config: &AgentConfig, message: &str) -> Option<String> {
@@ -3147,6 +3304,7 @@ fn collect_git_incremental_paths(
         .arg(root)
         .arg("status")
         .arg("--porcelain=v1")
+        .arg("-z")
         .arg(untracked_flag)
         .output()
         .map_err(|err| AgentError(format!("git status failed: {err}")))?;
@@ -3161,56 +3319,38 @@ fn collect_git_incremental_paths(
         return Err(AgentError(format!("git status failed: {detail}")));
     }
 
-    let mut paths = Vec::new();
-    let mut seen = BTreeSet::new();
-    let mut destructive_count = 0_usize;
-    for line in String::from_utf8_lossy(&output.stdout).lines() {
-        collect_git_status_line(root, line, &mut paths, &mut seen, &mut destructive_count);
-    }
-    Ok(GitIncrementalPaths {
-        paths,
-        destructive_count,
-    })
+    parse_git_status(root, &output.stdout)
 }
 
-fn collect_git_status_line(
-    root: &Path,
-    line: &str,
-    paths: &mut Vec<String>,
-    seen: &mut BTreeSet<String>,
-    destructive_count: &mut usize,
-) {
-    let bytes = line.as_bytes();
-    if bytes.len() < 3 {
-        return;
+fn parse_git_status(root: &Path, output: &[u8]) -> AgentResult<GitIncrementalPaths> {
+    if !output.is_empty() && output.last() != Some(&0) {
+        return Err(AgentError("truncated NUL-delimited git status".to_string()));
     }
-    let x = bytes[0] as char;
-    let y = bytes[1] as char;
-    let path_part = line[3..].trim();
-    if path_part.is_empty() {
-        return;
-    }
-
-    if x == 'R' || y == 'R' {
-        if let Some((old_path, new_path)) = path_part.split_once(" -> ") {
-            push_git_path(root, old_path, paths, seen);
-            *destructive_count += 1;
-            push_git_path(root, new_path, paths, seen);
-        } else {
-            push_git_path(root, path_part, paths, seen);
+    let text = std::str::from_utf8(output)
+        .map_err(|_| AgentError("git paths must be valid UTF-8".to_string()))?;
+    let mut entries = text.split_terminator('\0');
+    let mut result = GitIncrementalPaths::default();
+    let mut seen = BTreeSet::new();
+    while let Some(entry) = entries.next() {
+        let bytes = entry.as_bytes();
+        if bytes.len() < 4 || bytes[2] != b' ' || !bytes[..2].is_ascii() {
+            return Err(AgentError("invalid git status entry".to_string()));
         }
-        return;
+        let status = &bytes[..2];
+        let destination = &entry[3..];
+        if status.contains(&b'R') || status.contains(&b'C') {
+            let source = entries.next().filter(|path| !path.is_empty())
+                .ok_or_else(|| AgentError("missing git rename/copy source".to_string()))?;
+            if status.contains(&b'R') {
+                push_git_path(root, source, &mut result.paths, &mut seen);
+                result.destructive_count += 1;
+            }
+        } else if status.contains(&b'D') {
+            result.destructive_count += 1;
+        }
+        push_git_path(root, destination, &mut result.paths, &mut seen);
     }
-
-    if x == 'D' || y == 'D' {
-        push_git_path(root, path_part, paths, seen);
-        *destructive_count += 1;
-        return;
-    }
-
-    if x != ' ' || y != ' ' {
-        push_git_path(root, path_part, paths, seen);
-    }
+    Ok(result)
 }
 
 fn push_git_path(
@@ -3242,13 +3382,20 @@ fn run_index_git_incremental(config: &AgentConfig, arguments: &str) -> AgentResu
             json_escape(&display_path(&config.project_root))
         ));
     }
-    let incremental_arguments = format!(
+    let mut incremental_arguments = format!(
         "{{\"repo_path\":\"{}\",\"changed_paths\":{},\"project_id\":\"{}\",\"destructive_count\":{}}}",
         json_escape(&display_path(&config.project_root)),
         string_array_json(&local_changes.paths),
         json_escape(&project_id),
         local_changes.destructive_count
     );
+    for field in ["ref_id", "branch", "git_branch", "parent_ref", "base_ref", "base_branch", "graph_name"] {
+        if json_field(arguments, field).is_some() {
+            let value = json_string_field(arguments, field)
+                .ok_or_else(|| AgentError(format!("{field} must be a string")))?;
+            incremental_arguments = insert_json_field(&incremental_arguments, field, &value);
+        }
+    }
     post_cga_relay_tool(
         config,
         "index_incremental",
@@ -3381,21 +3528,7 @@ fn http_get_json_with_headers(
     url: &str,
     headers: &[(&str, String)],
 ) -> AgentResult<String> {
-    let parsed = parse_http_url(url)?;
-    let mut stream = connect_http_stream(&parsed)?;
-    let crystals = crystals_headers();
-    log_http_request(config, "GET", url, headers, &crystals, "");
-    let mut request = format!(
-        "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
-        parsed.path, parsed.host
-    );
-    append_request_headers(&mut request, headers);
-    append_request_headers(&mut request, &crystals);
-    request.push_str("\r\n");
-    stream
-        .write_all(request.as_bytes())
-        .map_err(|err| AgentError(format!("request failed: {err}")))?;
-    read_http_response(config, "GET", url, stream)?.into_success_body()
+    execute_http_request(config, "GET", url, headers, "")?.into_success_body()
 }
 
 fn http_post_json(
@@ -3413,26 +3546,110 @@ fn http_post_json_response(
     headers: &[(&str, String)],
     body: &str,
 ) -> AgentResult<HttpResponse> {
+    execute_http_request(config, "POST", url, headers, body)
+}
+
+/// Only reads and deduplicated sync batches may be replayed after connecting.
+fn execute_http_request(
+    config: &AgentConfig,
+    method: &str,
+    url: &str,
+    headers: &[(&str, String)],
+    body: &str,
+) -> AgentResult<HttpResponse> {
     let parsed = parse_http_url(url)?;
-    let mut stream = connect_http_stream(&parsed)?;
     let crystals = crystals_headers();
-    log_http_request(config, "POST", url, headers, &crystals, body);
-    let mut request = format!(
-        "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
-        parsed.path,
-        parsed.host,
-        body.len()
-    );
-    for (name, value) in headers {
-        request.push_str(&format!("{}: {}\r\n", name, value));
+    log_http_request(config, method, url, headers, &crystals, body);
+    let candidates = loopback_candidate_hosts(&parsed.host);
+    let mut last_error: Option<AgentError> = None;
+    for (index, candidate_host) in candidates.iter().enumerate() {
+        let attempt = match connect_http_stream(candidate_host, parsed.port) {
+            Ok(stream) => {
+                let response = execute_http_request_once(
+                    config, method, candidate_host, &parsed, headers, body, &crystals, stream,
+                );
+                if !can_replay_http_request(method, &parsed.path) {
+                    return response.map_err(|err| AgentError(format!(
+                        "Request outcome uncertain; POST was not automatically replayed. Check server job status before retrying: {}", err.0
+                    )));
+                }
+                response
+            }
+            Err(err) => Err(err),
+        };
+        match attempt {
+            Ok(response) => return Ok(response),
+            Err(err) => {
+                if index + 1 < candidates.len() {
+                    log_communication(
+                        config,
+                        "http.failover",
+                        &format!(
+                            "method={method}\nurl={}\nfailed_candidate={candidate_host}\nerror={}\nretrying_candidate={}",
+                            redact_sensitive_text(url),
+                            err.0,
+                            candidates[index + 1]
+                        ),
+                    );
+                }
+                last_error = Some(err);
+            }
+        }
     }
-    append_request_headers(&mut request, &crystals);
+    Err(last_error.unwrap_or_else(|| AgentError("no loopback address available".to_string())))
+}
+
+fn can_replay_http_request(method: &str, path: &str) -> bool {
+    method == "GET" || (method == "POST" && matches!(
+        path, "/api/project/cga-relay/sync" | "/api/auth/cga-relay/sync"
+    ))
+}
+
+fn execute_http_request_once(
+    config: &AgentConfig,
+    method: &str,
+    candidate_host: &str,
+    parsed: &ParsedUrl,
+    headers: &[(&str, String)],
+    body: &str,
+    crystals: &[(String, String)],
+    mut stream: TcpStream,
+) -> AgentResult<HttpResponse> {
+    let mut request = if method == "GET" {
+        format!(
+            "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
+            parsed.path, parsed.host
+        )
+    } else {
+        format!(
+            "POST {} HTTP/1.1\r\nHost: {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n",
+            parsed.path,
+            parsed.host,
+            body.len()
+        )
+    };
+    append_request_headers(&mut request, headers);
+    append_request_headers(&mut request, crystals);
     request.push_str("\r\n");
-    request.push_str(body);
+    if method != "GET" {
+        request.push_str(body);
+    }
     stream
         .write_all(request.as_bytes())
-        .map_err(|err| AgentError(format!("request failed: {err}")))?;
-    read_http_response(config, "POST", url, stream)
+        .map_err(|err| AgentError(format!("{candidate_host}:{} write failed: {err}", parsed.port)))?;
+    let candidate_url = format!("http://{candidate_host}:{}{}", parsed.port, parsed.path);
+    read_http_response(config, method, &candidate_url, stream)
+        .map_err(|err| AgentError(format!("{candidate_host}:{} {}", parsed.port, err.0)))
+}
+
+/// Order candidate loopback addresses so a broken forwarder on one address
+/// family (commonly stale IPv6 `::1` under WSL2) fails over to the other.
+fn loopback_candidate_hosts(host: &str) -> Vec<String> {
+    match host {
+        "localhost" => vec!["127.0.0.1".to_string(), "::1".to_string()],
+        "::1" | "[::1]" => vec!["::1".to_string(), "127.0.0.1".to_string()],
+        other => vec![other.to_string()],
+    }
 }
 
 fn log_http_request(
@@ -3492,8 +3709,8 @@ struct ParsedUrl {
     path: String,
 }
 
-fn connect_http_stream(parsed: &ParsedUrl) -> AgentResult<TcpStream> {
-    let stream = TcpStream::connect((parsed.host.as_str(), parsed.port))
+fn connect_http_stream(host: &str, port: u16) -> AgentResult<TcpStream> {
+    let stream = TcpStream::connect((host, port))
         .map_err(|err| AgentError(format!("connect failed: {err}")))?;
     stream
         .set_read_timeout(Some(HTTP_IO_TIMEOUT))
@@ -3537,6 +3754,7 @@ fn is_loopback_host(host: &str) -> bool {
 struct HttpResponse {
     status_code: u16,
     body: String,
+    sync_receipt: Option<String>,
 }
 
 impl HttpResponse {
@@ -3550,6 +3768,20 @@ impl HttpResponse {
         } else {
             Err(self.into_error())
         }
+    }
+
+    fn into_sync_success_body(self) -> AgentResult<String> {
+        if !self.is_success() {
+            return Err(self.into_error());
+        }
+        if !self.sync_receipt.as_deref().is_some_and(
+            |id| id.len() == 64 && id.bytes().all(|ch| ch.is_ascii_hexdigit())
+        ) {
+            return Err(AgentError(
+                "Sync server did not acknowledge durable storage; upgrade the server before retrying. Checkpoint retained".to_string(),
+            ));
+        }
+        Ok(self.body)
     }
 
     fn into_error(self) -> AgentError {
@@ -3584,8 +3816,7 @@ fn read_http_response(
             "HTTP response exceeds {MAX_HTTP_RESPONSE_BYTES}-byte limit"
         )));
     }
-    let text = String::from_utf8_lossy(&response);
-    let Some((head, body)) = text.split_once("\r\n\r\n") else {
+    let Some(header_end) = response.windows(4).position(|part| part == b"\r\n\r\n") else {
         log_communication(
             config,
             "http.response",
@@ -3596,7 +3827,13 @@ fn read_http_response(
         );
         return Err(AgentError("invalid HTTP response".to_string()));
     };
+    let head = std::str::from_utf8(&response[..header_end])
+        .map_err(|_| AgentError("HTTP headers are not valid UTF-8".to_string()))?;
+    let body = &response[header_end + 4..];
     let status = head.lines().next().unwrap_or("HTTP response");
+    if !status.starts_with("HTTP/1.1 ") && !status.starts_with("HTTP/1.0 ") {
+        return Err(AgentError("invalid HTTP response protocol".to_string()));
+    }
     let status_code = status
         .split_whitespace()
         .nth(1)
@@ -3611,10 +3848,90 @@ fn read_http_response(
             body.len()
         ),
     );
+    let body = decode_http_body(head, body)?;
+    let mut sync_receipt = None;
+    for line in head.lines().skip(1) {
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("X-CGA-Sync-Receipt") {
+                if sync_receipt.is_some() {
+                    return Err(AgentError("Duplicate sync receipt header".to_string()));
+                }
+                sync_receipt = Some(value.trim().to_string());
+            }
+        }
+    }
     Ok(HttpResponse {
         status_code,
-        body: body.to_string(),
+        body,
+        sync_receipt,
     })
+}
+
+fn decode_http_body(head: &str, body: &[u8]) -> AgentResult<String> {
+    let mut content_length = None;
+    let mut transfer_encoding = None;
+    for line in head.lines().skip(1) {
+        let (name, value) = line.split_once(':')
+            .ok_or_else(|| AgentError("invalid HTTP response header".to_string()))?;
+        if name.eq_ignore_ascii_case("content-length") {
+            if content_length.is_some() {
+                return Err(AgentError("duplicate HTTP Content-Length".to_string()));
+            }
+            content_length = Some(value.trim().parse::<usize>()
+                .map_err(|_| AgentError("invalid HTTP Content-Length".to_string()))?);
+        } else if name.eq_ignore_ascii_case("transfer-encoding") {
+            if transfer_encoding.is_some() || !value.trim().eq_ignore_ascii_case("chunked") {
+                return Err(AgentError("unsupported HTTP Transfer-Encoding".to_string()));
+            }
+            transfer_encoding = Some(());
+        }
+    }
+    if transfer_encoding.is_some() {
+        if content_length.is_some() {
+            return Err(AgentError("ambiguous HTTP response framing".to_string()));
+        }
+        let mut remaining = body;
+        let mut decoded = Vec::new();
+        loop {
+            let line_end = remaining.windows(2).position(|pair| pair == b"\r\n")
+                .ok_or_else(|| AgentError("truncated HTTP chunk header".to_string()))?;
+            let line = std::str::from_utf8(&remaining[..line_end])
+                .map_err(|_| AgentError("invalid HTTP chunk header".to_string()))?;
+            let size = usize::from_str_radix(line.split(';').next().unwrap_or(""), 16)
+                .map_err(|_| AgentError("invalid HTTP chunk size".to_string()))?;
+            remaining = &remaining[line_end + 2..];
+            if size == 0 {
+                if remaining == b"\r\n" {
+                    break;
+                }
+                if !remaining.ends_with(b"\r\n\r\n") {
+                    return Err(AgentError("truncated HTTP chunk trailers".to_string()));
+                }
+                let trailers = std::str::from_utf8(&remaining[..remaining.len() - 4])
+                    .map_err(|_| AgentError("invalid HTTP chunk trailers".to_string()))?;
+                if trailers.lines().any(|line| !line.contains(':')) {
+                    return Err(AgentError("invalid HTTP chunk trailers".to_string()));
+                }
+                break;
+            }
+            if size > remaining.len().saturating_sub(2)
+                || remaining.get(size..size + 2) != Some(b"\r\n")
+            {
+                return Err(AgentError("truncated HTTP chunk body".to_string()));
+            }
+            decoded.extend_from_slice(&remaining[..size]);
+            remaining = &remaining[size + 2..];
+        }
+        return String::from_utf8(decoded)
+            .map_err(|_| AgentError("HTTP body is not valid UTF-8".to_string()));
+    }
+    if let Some(length) = content_length {
+        if length != body.len() {
+            return Err(AgentError("HTTP response Content-Length mismatch".to_string()));
+        }
+    }
+    String::from_utf8(body.to_vec())
+        .map_err(|_| AgentError("HTTP body is not valid UTF-8".to_string()))
 }
 
 fn json_string_field(text: &str, field: &str) -> Option<String> {
@@ -3833,7 +4150,7 @@ fn unescape_field(value: &str) -> String {
 #[cfg(windows)]
 mod windows_tray {
     use super::{
-        cga_admin_web_url, tray_backend_available, tray_icon_resource_id, tray_login_menu_label,
+        cga_admin_web_url, tray_backend_check, tray_icon_resource_id, tray_login_menu_label,
         tray_login_status, tray_tooltip, tray_user_group_summary, AgentConfig, AgentError,
         AgentResult, TrayLoginStatus, BACKEND_NOTIFICATION_MESSAGE, BACKEND_NOTIFICATION_TITLE,
         PROJECT_AUTHOR, PROJECT_DISPLAY_NAME, PROJECT_LICENSE, PROJECT_REPOSITORY, PROJECT_SUPPORT,
@@ -3841,6 +4158,8 @@ mod windows_tray {
     };
     use std::ffi::c_void;
     use std::mem::{size_of, zeroed};
+    use std::os::windows::process::CommandExt;
+    use std::sync::{Arc, Mutex};
     use std::ptr::{null, null_mut};
     use std::thread;
 
@@ -3869,6 +4188,7 @@ mod windows_tray {
     const ID_MENU_LOGS: usize = 1003;
     const ID_MENU_EXIT: usize = 1004;
     const ID_MENU_OPEN_CGA_WEB: usize = 1005;
+    const ID_MENU_RELAUNCH: usize = 1006;
     const MF_DISABLED: Uint = 0x00000002;
     const MF_GRAYED: Uint = 0x00000001;
     const MF_SEPARATOR: Uint = 0x00000800;
@@ -3962,6 +4282,7 @@ mod windows_tray {
         login: TrayLoginStatus,
         backend_available: Option<bool>,
         backend_check_in_flight: bool,
+        backend_error: Arc<Mutex<String>>,
         warning_icon_visible: bool,
         account_label: Vec<u16>,
         cga_admin_web_url: Vec<u16>,
@@ -4143,6 +4464,7 @@ mod windows_tray {
             login,
             backend_available: None,
             backend_check_in_flight: false,
+            backend_error: Arc::new(Mutex::new(String::new())),
             warning_icon_visible: false,
             account_label: wide_null(&account_label),
             cga_admin_web_url: wide_null(&cga_admin_web_url(config)),
@@ -4236,6 +4558,7 @@ mod windows_tray {
         append_menu_item(menu, ID_MENU_SETTINGS, "Settings");
         append_menu_item(menu, ID_MENU_LOGS, "Logs");
         append_menu_item(menu, ID_MENU_ABOUT, "About");
+        append_menu_item(menu, ID_MENU_RELAUNCH, "Relaunch");
         append_menu_item(menu, ID_MENU_EXIT, "Exit");
 
         let mut point = Point { x: 0, y: 0 };
@@ -4294,8 +4617,15 @@ mod windows_tray {
         }
         state.backend_check_in_flight = true;
         let config = state.config.clone();
+        let backend_error = Arc::clone(&state.backend_error);
         let _ = thread::spawn(move || {
-            let backend_available = tray_backend_available(&config);
+            let result = tray_backend_check(&config);
+            let backend_available = result.is_ok();
+            if let Err(error) = &result {
+                if let Ok(mut slot) = backend_error.lock() {
+                    *slot = error.0.clone();
+                }
+            }
             unsafe {
                 PostMessageW(
                     hwnd,
@@ -4323,7 +4653,12 @@ mod windows_tray {
         let icon_resource_id = active_tray_icon_resource_id(state);
         modify_icon(hwnd, h_instance, &tooltip, icon_resource_id);
         if !backend_available {
-            show_backend_unavailable_notification(hwnd);
+            let detail = state
+                .backend_error
+                .lock()
+                .map(|slot| slot.clone())
+                .unwrap_or_default();
+            show_backend_unavailable_notification(hwnd, &detail);
         }
     }
 
@@ -4350,11 +4685,16 @@ mod windows_tray {
         }
     }
 
-    unsafe fn show_backend_unavailable_notification(hwnd: Hwnd) {
+    unsafe fn show_backend_unavailable_notification(hwnd: Hwnd, error_detail: &str) {
         let mut data = notify_icon_data(hwnd);
         data.u_flags = NIF_INFO;
         fill_wide_buffer(&mut data.sz_info_title, BACKEND_NOTIFICATION_TITLE);
-        fill_wide_buffer(&mut data.sz_info, BACKEND_NOTIFICATION_MESSAGE);
+        let message = if error_detail.is_empty() {
+            BACKEND_NOTIFICATION_MESSAGE.to_string()
+        } else {
+            format!("{BACKEND_NOTIFICATION_MESSAGE}\nDetail: {error_detail}")
+        };
+        fill_wide_buffer(&mut data.sz_info, &message);
         data.dw_info_flags = NIIF_WARNING;
         data.u_version_or_timeout = 10_000;
         Shell_NotifyIconW(NIM_MODIFY, &mut data);
@@ -4397,12 +4737,54 @@ mod windows_tray {
                     open_shell_target(hwnd, state.log_dir.as_ptr());
                 }
             }
+            ID_MENU_RELAUNCH => {
+                if relaunch_process(hwnd) {
+                    delete_icon(hwnd);
+                    DestroyWindow(hwnd);
+                }
+            }
             ID_MENU_EXIT => {
                 delete_icon(hwnd);
                 DestroyWindow(hwnd);
             }
             _ => {}
         }
+    }
+
+    unsafe fn relaunch_process(hwnd: Hwnd) -> bool {
+        let executable = match std::env::current_exe() {
+            Ok(path) => path,
+            Err(error) => {
+                show_relaunch_error(
+                    hwnd,
+                    &format!("Windows could not locate CGA-Relay: {error}"),
+                );
+                return false;
+            }
+        };
+        let arguments = std::env::args_os().skip(1).collect::<Vec<_>>();
+        let mut command = std::process::Command::new(executable);
+        command.args(arguments).arg("--relaunch");
+        command.creation_flags(super::CREATE_NO_WINDOW);
+        if let Err(error) = command.spawn() {
+            show_relaunch_error(
+                hwnd,
+                &format!("Windows could not relaunch CGA-Relay: {error}"),
+            );
+            return false;
+        }
+        true
+    }
+
+    unsafe fn show_relaunch_error(hwnd: Hwnd, message: &str) {
+        let text = wide_null(message);
+        let caption = wide_null("CGA-Relay");
+        MessageBoxW(
+            hwnd,
+            text.as_ptr(),
+            caption.as_ptr(),
+            MB_OK | MB_ICONINFORMATION,
+        );
     }
 
     unsafe fn open_shell_target(hwnd: Hwnd, target: *const u16) {

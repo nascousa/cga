@@ -37,7 +37,7 @@ def test_upgrade_status_payload_contains_local_readiness_contract() -> None:
     assert payload["schema"] == {
         "auth": 1,
         "work_briefing": 1,
-        "graph": 1,
+        "graph": 2,
         "runtime_config": 1,
     }
     assert payload["compatibility"]["rollback_mode"] == "restore-pre-upgrade-backup"
