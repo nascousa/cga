@@ -99,7 +99,15 @@ fn make_icon_image(size: u8, variant: IconVariant) -> Vec<u8> {
         }
     }
     let mask_stride = width.div_ceil(32) * 4;
-    image.resize(image.len() + mask_stride * height, 0);
+    let mask_offset = image.len();
+    image.resize(mask_offset + mask_stride * height, 0);
+    for row in 0..height {
+        for x in 0..width {
+            if image[40 + (row * width + x) * 4 + 3] == 0 {
+                image[mask_offset + row * mask_stride + x / 8] |= 0x80 >> (x % 8);
+            }
+        }
+    }
     image
 }
 
@@ -110,96 +118,63 @@ fn icon_pixel(
     height: usize,
     variant: IconVariant,
 ) -> (u8, u8, u8, u8) {
-    let margin = width / 12;
-    let radius = width / 5;
-    if !inside_rounded_rect(x, y, width, height, margin, radius) {
-        return apply_icon_variant((0, 0, 0, 0), variant);
-    }
-
-    let mut color = match variant {
-        IconVariant::Warning => (242, 183, 5, 255),
-        IconVariant::Color | IconVariant::Gray => (15, 132, 62, 255),
-    };
-    if x + y > width + width / 5 {
-        color = match variant {
-            IconVariant::Warning => (255, 210, 51, 255),
-            IconVariant::Color | IconVariant::Gray => (34, 172, 82, 255),
-        };
-    }
-
-    if letter_r_pixel(x, y, width, height) {
-        let letter = match variant {
-            IconVariant::Warning => (58, 45, 0, 255),
-            IconVariant::Color | IconVariant::Gray => (245, 255, 250, 255),
-        };
-        return apply_icon_variant(letter, variant);
-    }
-
-    apply_icon_variant(color, variant)
-}
-
-fn letter_r_pixel(x: usize, y: usize, width: usize, height: usize) -> bool {
-    let stroke = (width / 6).max(2);
-    let left = width / 4;
-    let right = width * 3 / 4;
-    let top = height / 5;
-    let mid = height / 2;
-    let bottom = height * 4 / 5;
-    let vertical = x >= left && x < left + stroke && y >= top && y <= bottom;
-    let top_bar = x >= left && x <= right && y >= top && y < top + stroke;
-    let middle_bar =
-        x >= left && x <= right && y >= mid.saturating_sub(stroke / 2) && y < mid + stroke;
-    let bowl_right = x + stroke > right && x <= right && y >= top && y <= mid;
-    let leg_offset = y.saturating_sub(mid);
-    let diagonal_start = left + stroke + leg_offset / 2;
-    let diagonal_leg = y > mid && y <= bottom && x >= diagonal_start && x < diagonal_start + stroke;
-
-    vertical || top_bar || middle_bar || bowl_right || diagonal_leg
-}
-
-fn apply_icon_variant(color: (u8, u8, u8, u8), variant: IconVariant) -> (u8, u8, u8, u8) {
-    let (red, green, blue, alpha) = color;
-    match variant {
-        IconVariant::Color => color,
-        IconVariant::Gray => {
-            if alpha == 0 {
-                color
-            } else {
-                let gray = ((red as u16 * 30 + green as u16 * 59 + blue as u16 * 11) / 100) as u8;
-                (gray, gray, gray, alpha)
+    // Sample fixed 16-unit lettering so both resource sizes share a smooth outline.
+    const SAMPLES: usize = 4;
+    let mut coverage = 0;
+    for sy in 0..SAMPLES {
+        for sx in 0..SAMPLES {
+            let gx = (x as f64 + (sx as f64 + 0.5) / SAMPLES as f64) * 16.0 / width as f64;
+            let gy = (y as f64 + (sy as f64 + 0.5) / SAMPLES as f64) * 16.0 / height as f64;
+            if cga_pixel(gx, gy) {
+                coverage += 1;
             }
         }
-        IconVariant::Warning => color,
     }
+    if coverage == 0 {
+        return (0, 0, 0, 0);
+    }
+    let (red, green, blue) = match variant {
+        IconVariant::Color => (34, 172, 82),
+        IconVariant::Gray => (148, 148, 148),
+        IconVariant::Warning => (242, 183, 5),
+    };
+    (
+        red,
+        green,
+        blue,
+        (coverage * 255 / (SAMPLES * SAMPLES)) as u8,
+    )
 }
 
-fn inside_rounded_rect(
-    x: usize,
-    y: usize,
-    width: usize,
-    height: usize,
-    margin: usize,
-    radius: usize,
-) -> bool {
-    if x < margin || y < margin || x >= width - margin || y >= height - margin {
+fn cga_pixel(x: f64, y: f64) -> bool {
+    if !(4.0..12.0).contains(&y) {
         return false;
     }
-    let left = margin + radius;
-    let right = width - margin - radius - 1;
-    let top = margin + radius;
-    let bottom = height - margin - radius - 1;
-    if (x >= left && x <= right) || (y >= top && y <= bottom) {
-        return true;
+    if (1.0..5.0).contains(&x) {
+        return open_bowl_pixel(x - 1.0, y) && !(x >= 3.0 && (6.0..10.0).contains(&y));
     }
-    let center_x = if x < left { left } else { right };
-    let center_y = if y < top { top } else { bottom };
-    inside_circle(x, y, center_x, center_y, radius)
+    if (6.0..10.0).contains(&x) {
+        let bowl = open_bowl_pixel(x - 6.0, y) && !(x >= 8.0 && (6.0..8.0).contains(&y));
+        let bar = x >= 8.0 && (8.0..9.0).contains(&y);
+        return bowl || bar;
+    }
+    if (11.0..15.0).contains(&x) {
+        let local_x = x - 11.0;
+        let inset = (12.0 - y) * 0.1875;
+        let left = (inset..inset + 1.0).contains(&local_x);
+        let right = (3.0 - inset..4.0 - inset).contains(&local_x);
+        let bar = (9.0..10.0).contains(&y) && (inset..4.0 - inset).contains(&local_x);
+        return left || right || bar;
+    }
+    false
 }
 
-fn inside_circle(x: usize, y: usize, center_x: usize, center_y: usize, radius: usize) -> bool {
-    let dx = x as isize - center_x as isize;
-    let dy = y as isize - center_y as isize;
-    dx * dx + dy * dy <= (radius * radius) as isize
+fn open_bowl_pixel(x: f64, y: f64) -> bool {
+    let dx = x - x.clamp(1.0, 3.0);
+    let dy = y - y.clamp(5.0, 11.0);
+    let outer = dx * dx + dy * dy <= 1.0;
+    let inner = (1.0..3.0).contains(&x) && (5.0..11.0).contains(&y);
+    outer && !inner
 }
 
 fn make_ico(images: &[(u8, &[u8])]) -> Vec<u8> {

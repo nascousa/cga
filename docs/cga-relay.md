@@ -52,7 +52,7 @@ These controls remove routine symbol and path disclosure and raise the cost of s
 GitHub Release assets are uploaded with flat file names. Download `SHA256SUMS.txt` and every file named by it into one directory, then run `sha256sum --check SHA256SUMS.txt`. To verify only the Windows Relay assets from PowerShell, compare each asset to its sidecar and require a valid Authenticode signature before execution:
 
 ```powershell
-$version = '1.30.125'
+$version = '1.30.126'
 $assets = @('cga-relay.exe', "cga-relay-$version-windows-x64.zip")
 foreach ($asset in $assets) {
 	$expected = ((Get-Content ".\$asset.sha256" -Raw) -split '\s+')[0]
@@ -123,9 +123,9 @@ After account login, MCP tool calls and `sync` can use the user JWT relay bridge
 
 ## Windows Tray Icon
 
-`tray` runs the same standalone Rust executable as a Windows notification-area relay with a native Shell_NotifyIcon tray icon. The executable icon uses the embedded color `R` resource, while the tray icon uses the embedded gray `R` resource when no CGA account is signed in and switches to the embedded color `R` resource after account login. It does not launch Python, Node, Cargo, PowerShell, or a project-local MCP server.
+`tray` runs the same standalone Rust executable as a Windows notification-area relay with a native Shell_NotifyIcon tray icon. The icon is antialiased `CGA` lettering in one horizontal row on a transparent background, without a tile or decorative accents, in both 16- and 32-pixel resources. The executable icon uses the embedded green `CGA` resource, while the tray icon uses the embedded gray `CGA` resource when no CGA account is signed in and switches to the embedded green `CGA` resource after account login. It does not launch Python, Node, Cargo, PowerShell, or a project-local MCP server.
 
-At startup, and every five seconds afterward, the tray process checks `API_BASE_URL/health` on a background thread so a slow backend cannot block the Windows message loop. While the CGA backend is unavailable, the tray alternates its normal account icon with an embedded yellow `R` warning icon every 500 milliseconds. The first failed check in each continuous outage also raises a Windows system notification titled `CGA Server Container is unavailable` with the message `Start the CGA Server Container to reconnect CGA-Relay.` The warning stops as soon as health recovers; a later outage can notify again, but repeated failed checks during the same outage do not generate duplicate notifications.
+At startup, and every five seconds afterward, the tray process checks `API_BASE_URL/health` on a background thread so a slow backend cannot block the Windows message loop. While the CGA backend is unavailable, the tray alternates its normal account icon with an embedded yellow `CGA` warning icon every 500 milliseconds. The first failed check in each continuous outage also raises a Windows system notification titled `CGA Server Container is unavailable` with the message `Start the CGA Server Container to reconnect CGA-Relay.` The warning stops as soon as health recovers; a later outage can notify again, but repeated failed checks during the same outage do not generate duplicate notifications.
 
 When `tray` starts successfully, CGA-Relay releases the startup console so the long-running tray process does not leave a blank command window on the desktop. Status and diagnostic commands such as `tray --status --json`, `doctor`, and `settings --render` keep normal terminal output.
 
