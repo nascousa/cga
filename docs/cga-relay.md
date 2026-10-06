@@ -22,6 +22,38 @@ cga-relay --help
 
 The executable must be on `PATH`, or the project MCP pointer must use the full executable path.
 
+## Approved ADC Onboarding And Sync
+
+The seven server ADC tools and Relay-only `adc_sync` are described in
+[ADC remote interfaces](adc-framework.md#remote-adc-interfaces). MCP stdio now
+answers each request immediately without waiting for stdin EOF. NDJSON and
+bounded Content-Length input frames are accepted; responses are NDJSON.
+
+```powershell
+cga-relay adc catalog --config C:\Users\me\.cga\project.env
+cga-relay adc current --config C:\Users\me\.cga\project.env
+cga-relay adc history --config C:\Users\me\.cga\project.env --limit 20
+cga-relay adc diff --config C:\Users\me\.cga\project.env --release-id 2
+cga-relay adc document --config C:\Users\me\.cga\project.env --path .adc/index.md
+cga-relay adc bundle --config C:\Users\me\.cga\project.env
+cga-relay adc sync --config C:\Users\me\.cga\project.env
+# Review the preview, then explicitly apply:
+cga-relay adc sync --config C:\Users\me\.cga\project.env --apply
+```
+
+`PROJECT_ID`, `PROJECT_ROOT` and `STATE_DIR` are taken from the existing config;
+tool arguments cannot redirect synchronization to another project/root.
+`API_KEY_ENV` refers to an environment variable, never a literal token in the
+config or MCP pointer. Account login remains an alternative, subject to project
+access checks. Version publishing, adoption and exception approval stay in CGA.
+
+To use a remote CGA, first establish a certificate-verified, authenticated tunnel
+that exposes the API only on client loopback, then set `API_BASE_URL` and
+`CONTROL_API_BASE_URL` to that loopback address. The existing one-process policy
+is unchanged: exit a running tray relay before starting the stdio relay, or use
+direct authenticated MCP SSE for a separate client. No running client is
+automatically stopped by these ADC commands.
+
 ## Build And Test
 
 ```powershell

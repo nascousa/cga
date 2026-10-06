@@ -81,12 +81,17 @@ async def main() -> None:
             description = proj.get("description", "")
 
             # Upsert project (ON CONFLICT DO NOTHING keeps existing rows)
-            await db.execute(
-                """INSERT INTO projects(project_name, project_id, upstream_url, description)
-                   VALUES(?,?,?,?)
-                   ON CONFLICT (project_name) DO NOTHING""",
-                (project_name, project_id, upstream_url, description),
-            )
+            async with db.raw.transaction():
+                async with db.execute(
+                    """INSERT INTO projects(project_name, project_id, upstream_url, description)
+                       VALUES(?,?,?,?)
+                       ON CONFLICT (project_name) DO NOTHING RETURNING id""",
+                    (project_name, project_id, upstream_url, description),
+                ) as cur:
+                    created = await cur.fetchone()
+                if created:
+                    from backend.adc.service import onboarding
+                    await onboarding(db.raw, created["id"], "system:registry-import")
 
             # Fetch row id
             async with db.execute(

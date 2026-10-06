@@ -40,6 +40,9 @@ from backend.auth.router import _effective_output_rules
 from backend.graph.client import GraphGenerationChanged
 from backend.cga_relay.storage import MAX_SYNC_BYTES, load_sync_batch, list_sync_batches, save_sync_batch
 from backend.tools import server as mcp_server
+from backend.adc.mcp import adc_call
+from backend.adc.remote import OPERATIONS, RemoteQuery
+from pydantic import ValidationError
 
 log = structlog.get_logger()
 
@@ -424,6 +427,16 @@ async def _maybe_await(value: Any) -> Any:
 async def dispatch_tool(tool: str, arguments: dict[str, Any], project_name: str) -> dict[str, Any]:
     """Dispatch a CGA-Relay tool call into existing CGA MCP tool functions."""
     args = dict(arguments or {})
+    if tool in OPERATIONS:
+        supplied_project = args.pop("project_id", None)
+        if supplied_project is not None and supplied_project != require_project_scope().project_id:
+            raise HTTPException(403, "project_id must match authenticated project")
+        try:
+            request = RemoteQuery(operation=tool, **args)
+        except (ValidationError, TypeError) as exc:
+            raise HTTPException(422, "Invalid ADC tool arguments") from exc
+        result = await adc_call(**request.model_dump())
+        return {"ok": True, "tool": tool, "backend_tool": tool, "result": result}
     ref_id, parent_ref = _ref_arguments(args)
     graph_name = _graph_name_for_project(project_name, ref_id)
     requested_graph_name = graph_name

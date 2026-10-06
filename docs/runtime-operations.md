@@ -73,6 +73,32 @@ Default URLs:
 
 ## Default Runtime Shape
 
+### Recovery Builds
+
+The `recovery/complete-20261006` working branch combines the
+`dev/graph-safety-recovery-20260914` baseline (including transparent CGA tray
+icons and Relaunch) with the local ADC REST/MCP/Relay changes. A matching version
+number alone does not establish that two builds contain the same changes.
+The integrated release is 1.30.127, distinguishing it from earlier local
+1.30.126 builds. Windows artifacts remain internal unsigned candidates until
+an authorized signing certificate is supplied.
+Run the Relay CLI and icon-resource tests before replacing an installed Relay,
+and preserve database volumes when replacing the API container.
+
+On this recovered Windows installation, the active deployment is
+`%USERPROFILE%\.nasco\docker\main\cga\compose.json`, using the existing `cga-dev`
+volumes. The outer workspace's `start-cga-desktop.cmd` and VS Code `Start CGA`
+task both use that deployment, not the historical September desktop stack.
+`start-cga-relay.cmd` launches the verified standalone executable installed at
+`%USERPROFILE%\.cga\bin\cga-relay.exe`, with the existing account state and
+credential environment-variable configuration. The pre-integration Git stash
+and `backups\complete-recovery-20261006` database/configuration snapshots are
+retained for rollback.
+
+`Dockerfile.dev` accepts a `PIP_INDEX_URL` build argument for environments that
+require an alternative HTTPS package index. The default remains PyPI; do not
+disable TLS verification to work around download failures.
+
 For CGA local development, the default supported single-machine runtime is:
 
 - Backend and Admin UI are served together by the single CGA API container.

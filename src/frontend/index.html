@@ -2864,6 +2864,7 @@
     <div class="topbar-spacer" style="flex:1"></div>
     <div class="topbar-nav">
       <button class="tab-btn" id="tab-briefing-btn" style="display:none" onclick="switchTab('briefing',this)">Dashboard</button>
+      <button class="tab-btn" id="tab-adc-btn" style="display:none" onclick="switchTab('adc',this)">ADC</button>
       <button class="tab-btn" id="tab-report-btn" style="display:none" onclick="switchTab('report',this)">Report</button>
       <button class="tab-btn" id="tab-ai-first-btn" style="display:none" onclick="switchTab('ai-first',this)">AI-First</button>
       <button class="tab-btn active" id="tab-projects-btn" onclick="switchTab('projects',this)">Project</button>
@@ -2891,6 +2892,9 @@
   </div>
 
   <div class="tab-content">
+    <div class="pane" id="pane-adc">
+      <div id="adc-manager"></div>
+    </div>
     <!-- PROJECTS -->
     <div class="pane active" id="pane-projects">
       <div class="section-header">
@@ -4443,6 +4447,7 @@
 
 <div id="toast-area"></div>
 
+<script src="/adc.js"></script>
 <script>
 let _jwt = localStorage.getItem('cg_jwt') || '';
 let _me = null;
@@ -4609,6 +4614,7 @@ let _disabledParserLanguagesDraft = new Set();
 let _parserLanguageFilter = '';
 
 const ADMIN_TAB_ROUTES = Object.freeze({
+  adc: '/admin/adc',
   projects: '/admin/projects',
   extensions: '/admin/extensions',
   schedule: '/admin/schedule',
@@ -4635,6 +4641,7 @@ const SETTINGS_PATH_SUBTABS = Object.freeze(
   Object.fromEntries(Object.entries(SETTINGS_SUBTAB_ROUTES).map(([name, route]) => [route, name])),
 );
 const ADMIN_PATH_TABS = Object.freeze({
+  '/admin/adc': 'adc',
   '/admin': 'projects',
   '/admin/projects': 'projects',
   '/admin/project': 'projects',
@@ -5263,6 +5270,7 @@ async function initApp() {
     document.getElementById('tab-schedule-btn').style.display = '';
     document.getElementById('tab-viewer-btn').style.display = '';
     document.getElementById('tab-settings-btn').style.display = '';
+    document.getElementById('tab-adc-btn').style.display = '';
   }
   if (_me.role !== 'admin') {
     document.getElementById('new-project-btn').style.display = 'none';
@@ -5977,6 +5985,9 @@ function refreshGraphViewer() {
 }
 
 function logout() {
+  adcState = null;
+  document.getElementById('adc-manager').replaceChildren();
+  document.getElementById('tab-adc-btn').style.display = 'none';
   destroyLoginBackground();
   _jwt = ''; _me = null;
   localStorage.removeItem('cg_jwt');
@@ -6052,6 +6063,7 @@ function switchTab(name, btn, options = {}) {
     _schedulePollInterval = null;
   }
   if (nextName === 'viewer') loadGraphViewerFrame();
+  if (nextName === 'adc') loadAdcManager();
   if (nextName === 'users') loadUsers();
   if (nextName === 'ai-first') {
     loadAiFirstReadiness();

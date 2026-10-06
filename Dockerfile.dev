@@ -19,6 +19,8 @@ RUN ldconfig && pg_dump --version && psql --version
 
 FROM runtime-base AS runtime
 
+ARG PIP_INDEX_URL=https://pypi.org/simple
+
 # Use canonical runtime constraints without optional ML or test dependencies.
 COPY requirements.txt .
 RUN grep -vE '^(sentence-transformers|numpy|pytest|black|ruff|mypy|pip-audit)' \

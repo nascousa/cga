@@ -43,6 +43,7 @@ from backend.auth.dependencies import get_current_user, require_admin
 from backend.auth.middleware import ProjectTokenMiddleware
 from backend.auth.pgshim import get_pool as get_auth_pool
 from backend.auth.router import router as auth_router
+from backend.adc.router import router as adc_router
 from backend.auth.security import JWTError, decode_access_token, hash_token
 from backend.ai_first.service import AiFirstEvidencePackNotFoundError
 from backend.ai_first.service import AiFirstPolicyProfileError
@@ -80,7 +81,7 @@ from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.126"
+APP_VERSION = "1.30.127"
 AUTH_SCHEMA_VERSION = 1
 GRAPH_SCHEMA_VERSION = 2
 RUNTIME_CONFIG_VERSION = 1
@@ -411,6 +412,7 @@ app.add_middleware(ProjectTokenMiddleware)
 
 # ── Auth API ───────────────────────────────────────────────────────────────
 app.include_router(auth_router, prefix="/api")
+app.include_router(adc_router, prefix="/api")
 app.include_router(cga_relay_router, prefix="/api")
 app.include_router(cga_relay_account_router, prefix="/api")
 app.include_router(viewer_router, prefix="/api")
@@ -1293,4 +1295,3 @@ if _FRONTEND.is_dir():
 
 if __name__ == "__main__":
     uvicorn.run("backend.main:app", host="0.0.0.0", port=8000, reload=False)
-
