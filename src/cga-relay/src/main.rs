@@ -533,7 +533,7 @@ fn cmd_settings(args: &[String]) -> AgentResult<()> {
         return Ok(());
     }
     if has_flag(args, "--render") {
-        println!("{}", settings_page_html(&config, None));
+        println!("{SETTINGS_PAGE_PREVIEW_HTML}");
         return Ok(());
     }
     Err(AgentError(
@@ -1360,7 +1360,9 @@ fn handle_settings_connection(config: &AgentConfig, mut stream: TcpStream) -> Ag
     } else {
         match (request.method.as_str(), request.path.as_str()) {
             ("OPTIONS", _) => empty_response(200),
-            ("GET", "/") | ("GET", "/settings") => html_response(&settings_page_html(config, None)),
+            ("GET", "/") | ("GET", "/settings") => {
+                html_response(&settings_page_html(config, None))
+            }
             ("POST", "/login") => match handle_settings_login(config, &request.body) {
                 Ok(message) => html_response(&settings_page_html(config, Some((&message, false)))),
                 Err(error) => html_response(&settings_page_html(config, Some((&error.0, true)))),
@@ -1622,6 +1624,9 @@ fn handle_settings_refresh(config: &AgentConfig) -> AgentResult<String> {
     ))
 }
 
+const SETTINGS_LOGIN_HTML: &str = "<section class=\"panel account-panel\"><div><p class=\"eyebrow\">Account</p><h2>Sign in to CGA</h2><p class=\"muted\">Use your CGA account to load accessible projects onto this machine.</p></div><form class=\"login-form\" method=\"post\" action=\"/login\"><label><span>Username</span><input name=\"username\" autocomplete=\"username\" required></label><label><span>Password</span><input name=\"password\" type=\"password\" autocomplete=\"current-password\" required></label><button type=\"submit\">Sign in</button></form></section>";
+const SETTINGS_PAGE_PREVIEW_HTML: &str = "<!doctype html><html data-theme=\"dark\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>CGA-Relay Settings</title><style>:root{color-scheme:dark}</style></head><body><main><h1>CGA-Relay Settings</h1><div class=\"status-grid\"><span>Relay</span><span>API</span></div><div class=\"version-pill\">Settings preview</div><p>Sign in to CGA to view account-specific settings.</p></main></body></html>";
+
 fn settings_page_html(config: &AgentConfig, message: Option<(&str, bool)>) -> String {
     let session = read_account_session(config).unwrap_or_default();
     let groups = refresh_account_groups(config, &session)
@@ -1629,12 +1634,6 @@ fn settings_page_html(config: &AgentConfig, message: Option<(&str, bool)>) -> St
         .unwrap_or_default();
     let signed_in = current_account_access_token(&session).is_some();
     let username = session.get("username").map(String::as_str).unwrap_or("");
-    let message_html = message
-        .map(|(text, is_error)| {
-            let class = if is_error { "notice notice-error" } else { "notice" };
-            format!("<div class=\"{class}\">{}</div>", html_escape(text))
-        })
-        .unwrap_or_default();
     let group_html = render_account_groups(&groups, signed_in);
     let account_html = if signed_in {
         format!(
@@ -1642,8 +1641,23 @@ fn settings_page_html(config: &AgentConfig, message: Option<(&str, bool)>) -> St
             html_escape(username)
         )
     } else {
-        "<section class=\"panel account-panel\"><div><p class=\"eyebrow\">Account</p><h2>Sign in to CGA</h2><p class=\"muted\">Use your CGA account to load accessible projects onto this machine.</p></div><form class=\"login-form\" method=\"post\" action=\"/login\"><label><span>Username</span><input name=\"username\" autocomplete=\"username\" required></label><label><span>Password</span><input name=\"password\" type=\"password\" autocomplete=\"current-password\" required></label><button type=\"submit\">Sign in</button></form></section>".to_string()
+        SETTINGS_LOGIN_HTML.to_string()
     };
+    render_settings_page(config, message, &account_html, &group_html)
+}
+
+fn render_settings_page(
+    config: &AgentConfig,
+    message: Option<(&str, bool)>,
+    account_html: &str,
+    group_html: &str,
+) -> String {
+    let message_html = message
+        .map(|(text, is_error)| {
+            let class = if is_error { "notice notice-error" } else { "notice" };
+            format!("<div class=\"{class}\">{}</div>", html_escape(text))
+        })
+        .unwrap_or_default();
     let stylesheet = r#"
 :root{color-scheme:dark;--bg:#070b0e;--panel:#11181d;--panel-2:#0d1317;--line:#27343b;--text:#e8f4f1;--muted:#8ea19d;--accent:#2ee6a6;--accent-2:#ffcc66;--danger:#ff7a90;--shadow:0 24px 70px rgba(0,0,0,.42)}
 *{box-sizing:border-box}html{min-height:100%}body{min-height:100%;margin:0;font-family:Segoe UI,Arial,sans-serif;background:#070b0e;color:var(--text);letter-spacing:0}body::before{content:"";position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);background-size:44px 44px;mask-image:linear-gradient(to bottom,#000,transparent 82%)}main{width:min(1120px,calc(100vw - 40px));margin:0 auto;padding:36px 0 44px}.topbar{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:18px}.eyebrow{margin:0 0 8px;color:var(--accent);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}h1,h2{margin:0;letter-spacing:0}h1{font-size:34px;line-height:1.08}h2{font-size:20px}h3{margin:0;font-size:16px}.muted{color:var(--muted);line-height:1.55}.version-pill{border:1px solid var(--line);background:#0b1115;border-radius:999px;color:var(--accent-2);padding:8px 12px;white-space:nowrap}.notice{border:1px solid rgba(46,230,166,.38);background:rgba(46,230,166,.1);color:#d8fff2;border-radius:8px;padding:12px 14px;margin:18px 0}.notice-error{border-color:rgba(255,122,144,.55);background:rgba(255,122,144,.12);color:var(--danger)}.status-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:20px 0}.metric{background:rgba(17,24,29,.82);border:1px solid var(--line);border-radius:8px;padding:12px}.metric span{display:block;color:var(--muted);font-size:12px;margin-bottom:4px}.metric strong{font-size:14px;word-break:break-word}.panel{background:linear-gradient(180deg,var(--panel),var(--panel-2));border:1px solid var(--line);border-radius:8px;box-shadow:var(--shadow);padding:22px;margin:16px 0}.account-panel{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,420px);gap:22px;align-items:start}.account-actions{display:flex;justify-content:flex-end;align-items:flex-start;gap:10px;flex-wrap:wrap}.account-actions form{margin:0}.group-list{display:grid;gap:16px;margin-top:14px}.group-card{border:1px solid rgba(39,52,59,.78);border-radius:8px;background:rgba(8,13,16,.42);padding:14px}.group-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.login-form{display:grid;gap:14px}label span{display:block;color:var(--muted);font-size:13px;margin-bottom:6px}input{width:100%;height:40px;border:1px solid #31434a;border-radius:8px;background:#080d10;color:var(--text);padding:0 12px;outline:none}input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(46,230,166,.14)}button{height:40px;border:0;border-radius:8px;background:var(--accent);color:#03110c;font-weight:800;padding:0 16px;cursor:pointer}button.secondary{border:1px solid #34444a;background:#0a1014;color:var(--text)}table{width:100%;border-collapse:collapse;margin-top:16px;overflow:hidden}th,td{border-bottom:1px solid var(--line);text-align:left;padding:12px 10px;vertical-align:top}th{color:var(--muted);font-size:12px;font-weight:700;text-transform:uppercase}code{color:#b5fff0;background:#07100e;border:1px solid #1a3b34;border-radius:6px;padding:3px 6px;font-size:12px}.project-name{font-weight:700}.status{display:inline-flex;align-items:center;border-radius:999px;padding:4px 9px;font-size:12px;font-weight:800;white-space:nowrap}.ready{background:rgba(46,230,166,.14);color:#7dffd3;border:1px solid rgba(46,230,166,.35)}.pending{background:rgba(255,204,102,.13);color:#ffe0a3;border:1px solid rgba(255,204,102,.36)}.empty-state{color:var(--muted);padding:28px 10px}@media(max-width:760px){main{width:min(100vw - 24px,1120px);padding-top:24px}.topbar,.account-panel{display:block}.account-actions{justify-content:flex-start;margin-top:16px}.version-pill{display:inline-block;margin-top:14px}.status-grid{grid-template-columns:1fr}h1{font-size:28px}td,th{padding:10px 8px}}
