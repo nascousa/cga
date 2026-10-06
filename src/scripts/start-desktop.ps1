@@ -15,6 +15,11 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..\..")
 $composeFile = Join-Path $repoRoot 'docker-compose.desktop.yml'
+$recoveredCompose = Join-Path $env:USERPROFILE '.nasco\docker\main\cga\compose.json'
+$useRecoveredDeployment = Test-Path -LiteralPath $recoveredCompose -PathType Leaf
+if ($useRecoveredDeployment) {
+    $composeFile = $recoveredCompose
+}
 $envExample = Join-Path $repoRoot '.env.example'
 $envFile = Join-Path $repoRoot '.env'
 $runtimeStateFile = Join-Path $repoRoot 'tmp\cga-desktop-runtime.json'
@@ -112,11 +117,65 @@ function Invoke-Compose {
     $composeArgs = @('compose', '-f', $composeFile) + $ComposeArguments
     & docker @composeArgs
     if ($LASTEXITCODE -ne 0) {
-        throw "docker compose failed with exit code $LASTEXITCODE"
+        $exitCode = $LASTEXITCODE
+        Write-Error "docker compose failed with exit code $exitCode" -ErrorAction Continue
+        exit $exitCode
     }
 }
 
+function Get-RecoveredAdminUrl {
+    $bindings = @(& docker compose -f $composeFile port cga 8000)
+    if ($LASTEXITCODE -ne 0 -or $bindings.Count -eq 0) {
+        throw 'Cannot determine the recovered CGA API port. Check the deployment status.'
+    }
+    $binding = $bindings | Where-Object { $_ -match '^(127\.0\.0\.1|\[::1\]|0\.0\.0\.0|\[::\]):' } | Select-Object -First 1
+    if (-not $binding) {
+        $binding = $bindings[0]
+    }
+    if ($binding -notmatch '^(?<host>.+):(?<port>[0-9]+)$') {
+        throw "Invalid recovered CGA API port binding: $binding"
+    }
+    $hostName = $Matches.host
+    if ($hostName -in @('0.0.0.0', '[::]')) {
+        $hostName = 'localhost'
+    }
+    return "http://${hostName}:$($Matches.port)/admin"
+}
+
 Set-Location $repoRoot
+
+if ($useRecoveredDeployment) {
+    switch ($Command) {
+        { $_ -in @('start', 'restart') } {
+            Assert-CgaGraphPersistence -ComposeFile $composeFile
+            $upArgs = @('up', '--no-build', '--pull', 'never')
+            if ($Detached -or $Command -eq 'restart') {
+                $upArgs += @('-d', '--wait', '--wait-timeout', '180')
+            }
+            Invoke-Compose $upArgs
+            $adminUrl = Get-RecoveredAdminUrl
+            Write-Host "Admin UI: $adminUrl"
+            if ($OpenBrowser) {
+                Start-Process $adminUrl
+            }
+        }
+        'stop' { Invoke-Compose @('stop') }
+        'logs' {
+            $logArgs = @('logs', '--tail=200')
+            if (-not $Detached) {
+                $logArgs += '-f'
+            }
+            Invoke-Compose $logArgs
+        }
+        'status' {
+            Invoke-Compose @('ps')
+            Write-Host "Admin UI: $(Get-RecoveredAdminUrl)"
+        }
+        'open' { Start-Process (Get-RecoveredAdminUrl) }
+        'config' { Invoke-Compose @('config') }
+    }
+    return
+}
 
 if (-not (Test-Path $envFile) -and (Test-Path $envExample)) {
     Copy-Item $envExample $envFile
@@ -124,6 +183,9 @@ if (-not (Test-Path $envFile) -and (Test-Path $envExample)) {
 }
 
 $savedState = Get-DesktopRuntimeState
+if (-not $savedState) {
+    $savedState = [pscustomobject]@{ apiPort = $null; graphPort = $null; browserPort = $null }
+}
 $existingServices = @(docker compose -f $composeFile ps -q 2>$null | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $stackExists = $existingServices.Count -gt 0
 

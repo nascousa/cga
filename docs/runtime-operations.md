@@ -89,14 +89,22 @@ and preserve database volumes when replacing the API container.
 
 On this recovered Windows installation, the active deployment is
 `%USERPROFILE%\.nasco\docker\main\cga\compose.json`, using the existing `cga-dev`
-volumes. The workspace's `start-cga-desktop.cmd` and VS Code `Start CGA`
-task both use that deployment, not the historical September desktop stack.
-When that deployment configuration is absent, `start-cga-desktop.cmd` retains
-the standard repository launcher, including its persistence checks and Admin
-browser startup. Neither path falls back after a deployment startup failure.
+volumes. The workspace's start/stop/logs/open launchers select this deployment
+through the shared `src/scripts/start-desktop.ps1` entry point. Start and restart
+check FalkorDB persistence before Compose can recreate a container. The Admin
+URL is discovered from the recovered deployment's published API port rather
+than assuming port 18001. The local VS Code `Start CGA` task also targets that
+deployment.
+When that deployment configuration is absent, all workspace launcher actions
+retain the standard repository deployment. Neither path falls back after a
+startup failure; Docker's failure exit code is preserved.
 `start-cga-relay.cmd` launches the verified standalone executable installed at
 `%USERPROFILE%\.cga\bin\cga-relay.exe`, with the existing account state and
-credential environment-variable configuration. The pre-integration Git stash
+credential environment-variable configuration. It does not require a checkout
+`.env` or an unrelated MCP token: inherited credentials take precedence, and
+missing variables named by `API_KEY_ENV` or `ACCOUNT_TOKEN_ENV` can optionally
+be loaded from the checkout `.env`. Relay remains responsible for validating
+credentials or using its stored account session. The pre-integration Git stash
 and `backups\complete-recovery-20261006` database/configuration snapshots are
 retained for rollback.
 

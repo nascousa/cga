@@ -1,5 +1,13 @@
 # Agent Session State / Brain Dump
 
+## 2026-10-06 Consolidation review follow-up
+
+- Addressed all five initial PR #48 inline comments: recovered startup now uses the existing graph-persistence guard; start/stop/logs/open share deployment selection; recovered Admin links use the actual published port; Relay accepts stored account sessions and configured optional credential names without overwriting inherited values; native failure codes are preserved.
+- Replaced the earlier CMD-stub routing tests. A `.cmd` Docker stub could transfer control away from its caller and hide the real error-code bug. The replacement executes actual PowerShell scripts with scoped Docker/Relay function doubles, verifies guard-before-recreation ordering and refusal, and checks actual Windows CMD wrappers.
+- Those real wrapper tests also exposed Boolean argument binding failures under Windows PowerShell 5.1. Start/logs now pass actual Boolean values through `-Command`, with terminating-error handling and explicit exit propagation. Stop/open retain their working `-File` entry points.
+- Validation: 82 launcher/desktop tests passed, including 58 workspace-launcher cases. Ruff, PowerShell parsing and whitespace checks passed. No installed Relay or existing Docker deployment was started, stopped or replaced.
+- Fresh CI is required for this follow-up. Independent approval remains blocked: the collaborators endpoint lists only the PR author as a write/admin collaborator; automated reviewer comments are not approvals. No credentials, collaborators, rulesets or auto-merge settings were changed.
+
 ## 2026-10-06 Branch conflicts reconciled
 
 - All seventeen previously unmerged distinct branch tips are now ancestors of the consolidation branch. A fresh HTTPS fetch followed by ancestry checks covered all 29 current local/remote refs, including symbolic refs, with no unintegrated tip. No original worktree-only edit was staged or overwritten.
