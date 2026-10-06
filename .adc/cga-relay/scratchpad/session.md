@@ -1,5 +1,16 @@
 # Agent Session State / Brain Dump
 
+## 2026-10-06 Branch consolidation checkpoint
+
+- Scope: `nascousa/cga` itself, not every project indexed by CGA. Original worktrees and their uncommitted/untracked files were not staged, switched, reset, or deleted.
+- Fetched current remote refs over HTTPS after SSH failed because its configured identity file was missing and host verification failed. No SSH security settings were relaxed. Remote main is `87277fa5671d9edf8b2080dd26c158728995429b`.
+- Fast-forwarded local main to that remote commit, then created `dev/consolidate-branches-20261006` in `D:\Repos\_worktrees\cga-consolidate-20261006`.
+- Inventoried 19 local and 7 remote branches. Seventeen distinct tips had commits not reachable from main: fourteen produced merge conflicts and three merged cleanly. No conflicting branch was resolved by choosing ours/theirs.
+- Preserved merge ancestry for `dev/disable-routine-dependabot-updates` (patch already present), `dev/login-version-in-card-20260706`, and `origin/dependabot/pip/pip-2118ef368f`. Net product changes are login presentation/tests and the declared PyJWT 2.15.0 update.
+- Validation: focused authentication and viewer tests yielded 30 passed, 17 skipped (database fixture unavailable). `git diff --check origin/main` passed. Existing test environment has PyJWT 2.12.1, so this does NOT validate execution against the newly declared 2.15.0 dependency; CI/exact-version validation remains required.
+- Blockers: fourteen conflicting tips, original worktree-only changes, dependency-version validation, and independent PR approval. The active main ruleset requires one approval; no direct push or ruleset bypass is permitted. Existing PRs #44, #46 and #47 were not closed or modified.
+- CGA aggregation/indexing is not complete: configured MCP endpoint returned HTTP 426. Found the existing local Relay at port 17860; it is configured for `D:\Repos\ContextGraphAdmin`, not the new integration worktree. Its CLI correctly refused a second instance. Did not relabel original-branch indexing as integration-branch indexing, change its account/configuration, or count direct fallback as official completion.
+
 **Objective:**
 Write down exactly what you are currently doing, the last known successful step, and any immediate blockers.
 This ensures the NEXT agent handling this repository knows exactly where you left off.
