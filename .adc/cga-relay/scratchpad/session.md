@@ -1,5 +1,35 @@
 # Agent Session State / Brain Dump
 
+## 2026-10-06 Consolidation review follow-up
+
+- Addressed all five initial PR #48 inline comments: recovered startup now uses the existing graph-persistence guard; start/stop/logs/open share deployment selection; recovered Admin links use the actual published port; Relay accepts stored account sessions and configured optional credential names without overwriting inherited values; native failure codes are preserved.
+- Replaced the earlier CMD-stub routing tests. A `.cmd` Docker stub could transfer control away from its caller and hide the real error-code bug. The replacement executes actual PowerShell scripts with scoped Docker/Relay function doubles, verifies guard-before-recreation ordering and refusal, and checks actual Windows CMD wrappers.
+- Those real wrapper tests also exposed Boolean argument binding failures under Windows PowerShell 5.1. Start/logs now pass actual Boolean values through `-Command`, with terminating-error handling and explicit exit propagation. Stop/open retain their working `-File` entry points.
+- Validation: 82 launcher/desktop tests passed, including 58 workspace-launcher cases. Ruff, PowerShell parsing and whitespace checks passed. No installed Relay or existing Docker deployment was started, stopped or replaced.
+- Fresh CI is required for this follow-up. Independent approval remains blocked: the collaborators endpoint lists only the PR author as a write/admin collaborator; automated reviewer comments are not approvals. No credentials, collaborators, rulesets or auto-merge settings were changed.
+
+## 2026-10-06 Branch conflicts reconciled
+
+- All seventeen previously unmerged distinct branch tips are now ancestors of the consolidation branch. A fresh HTTPS fetch followed by ancestry checks covered all 29 current local/remote refs, including symbolic refs, with no unintegrated tip. No original worktree-only edit was staged or overwritten.
+- Recovery launcher changes and documentation were incorporated while retaining main's graph restoration fixes and backend release 1.30.127. Added a tested standard-launcher fallback when the recovered deployment configuration does not exist; startup errors do not select a different deployment.
+- Six historical documentation/policy branches were joined only after every source-only commit had a matching stable patch ID in main. Those ancestry-only merges had identical before/after trees.
+- Benchmark tip 0ec01f7 matches reachable d2d32c3 everywhere except main's newer README title and additive Star History. Preserved current runtime controls, historical benchmark wording, dependencies and governance layout.
+- BrowserAgent execution/models/tests and persisted runtime-root configuration/routes/tests match reachable release 4ca0100. Preserved subsequent ADC/extension initialization, extension task handling, editor improvements and corrected text encoding. The WSR merge was automatically content-identical. Release metadata/diagram/CI changes were already present; the obsolete scratchpad remains removed as intended by e743dfc, with its history still reachable.
+- The PostCSS branch requested 8.5.26; retained main's newer 8.5.28 and nanoid 3.3.18. Viewer package metadata remains exactly as in main (1.30.79), rather than falsely aligning it with backend 1.30.127 during this consolidation.
+- Validation: 99 targeted tests passed with zero skips using PyJWT 2.15.0 in an isolated dependency overlay and a new temporary PostgreSQL container/schema set. The container and its ephemeral storage were removed afterwards. Coverage included auth, schedules/task IDs/BrowserAgent, runtime settings, viewer/WSR/site contracts, desktop persistence contracts and four executable Windows launcher routing/error regressions. Touched-test Ruff, PowerShell launcher parsing, metadata assertions and git whitespace checks passed.
+- Pending: fresh PR #48 CI and independent approving review. Main's one-review ruleset remains enforced; no admin override, main push, original branch deletion or production replacement was performed. Official integration-worktree CGA indexing remains unverified because the existing Relay targets the original worktree.
+
+## 2026-10-06 Branch consolidation checkpoint
+
+- Scope: `nascousa/cga` itself, not every project indexed by CGA. Original worktrees and their uncommitted/untracked files were not staged, switched, reset, or deleted.
+- Fetched current remote refs over HTTPS after SSH failed because its configured identity file was missing and host verification failed. No SSH security settings were relaxed. Remote main is `87277fa5671d9edf8b2080dd26c158728995429b`.
+- Fast-forwarded local main to that remote commit, then created `dev/consolidate-branches-20261006` in `D:\Repos\_worktrees\cga-consolidate-20261006`.
+- Inventoried 19 local and 7 remote branches. Seventeen distinct tips had commits not reachable from main: fourteen produced merge conflicts and three merged cleanly. No conflicting branch was resolved by choosing ours/theirs.
+- Preserved merge ancestry for `dev/disable-routine-dependabot-updates` (patch already present), `dev/login-version-in-card-20260706`, and `origin/dependabot/pip/pip-2118ef368f`. Net product changes are login presentation/tests and the declared PyJWT 2.15.0 update.
+- Validation: focused authentication and viewer tests yielded 30 passed, 17 skipped (database fixture unavailable). `git diff --check origin/main` passed. Existing test environment has PyJWT 2.12.1, so this does NOT validate execution against the newly declared 2.15.0 dependency; CI/exact-version validation remains required.
+- Blockers: fourteen conflicting tips, original worktree-only changes, dependency-version validation, and independent PR approval. The active main ruleset requires one approval; no direct push or ruleset bypass is permitted. Existing PRs #44, #46 and #47 were not closed or modified.
+- CGA aggregation/indexing is not complete: configured MCP endpoint returned HTTP 426. Found the existing local Relay at port 17860; it is configured for `D:\Repos\ContextGraphAdmin`, not the new integration worktree. Its CLI correctly refused a second instance. Did not relabel original-branch indexing as integration-branch indexing, change its account/configuration, or count direct fallback as official completion.
+
 **Objective:**
 Write down exactly what you are currently doing, the last known successful step, and any immediate blockers.
 This ensures the NEXT agent handling this repository knows exactly where you left off.
