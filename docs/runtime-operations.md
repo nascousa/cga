@@ -91,6 +91,9 @@ On this recovered Windows installation, the active deployment is
 `%USERPROFILE%\.nasco\docker\main\cga\compose.json`, using the existing `cga-dev`
 volumes. The workspace's `start-cga-desktop.cmd` and VS Code `Start CGA`
 task both use that deployment, not the historical September desktop stack.
+When that deployment configuration is absent, `start-cga-desktop.cmd` retains
+the standard repository launcher, including its persistence checks and Admin
+browser startup. Neither path falls back after a deployment startup failure.
 `start-cga-relay.cmd` launches the verified standalone executable installed at
 `%USERPROFILE%\.cga\bin\cga-relay.exe`, with the existing account state and
 credential environment-variable configuration. The pre-integration Git stash

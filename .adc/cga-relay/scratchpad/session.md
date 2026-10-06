@@ -1,5 +1,16 @@
 # Agent Session State / Brain Dump
 
+## 2026-10-06 Branch conflicts reconciled
+
+- All seventeen previously unmerged distinct branch tips are now ancestors of the consolidation branch. A fresh HTTPS fetch followed by ancestry checks covered all 29 current local/remote refs, including symbolic refs, with no unintegrated tip. No original worktree-only edit was staged or overwritten.
+- Recovery launcher changes and documentation were incorporated while retaining main's graph restoration fixes and backend release 1.30.127. Added a tested standard-launcher fallback when the recovered deployment configuration does not exist; startup errors do not select a different deployment.
+- Six historical documentation/policy branches were joined only after every source-only commit had a matching stable patch ID in main. Those ancestry-only merges had identical before/after trees.
+- Benchmark tip 0ec01f7 matches reachable d2d32c3 everywhere except main's newer README title and additive Star History. Preserved current runtime controls, historical benchmark wording, dependencies and governance layout.
+- BrowserAgent execution/models/tests and persisted runtime-root configuration/routes/tests match reachable release 4ca0100. Preserved subsequent ADC/extension initialization, extension task handling, editor improvements and corrected text encoding. The WSR merge was automatically content-identical. Release metadata/diagram/CI changes were already present; the obsolete scratchpad remains removed as intended by e743dfc, with its history still reachable.
+- The PostCSS branch requested 8.5.26; retained main's newer 8.5.28 and nanoid 3.3.18. Viewer package metadata remains exactly as in main (1.30.79), rather than falsely aligning it with backend 1.30.127 during this consolidation.
+- Validation: 99 targeted tests passed with zero skips using PyJWT 2.15.0 in an isolated dependency overlay and a new temporary PostgreSQL container/schema set. The container and its ephemeral storage were removed afterwards. Coverage included auth, schedules/task IDs/BrowserAgent, runtime settings, viewer/WSR/site contracts, desktop persistence contracts and four executable Windows launcher routing/error regressions. Touched-test Ruff, PowerShell launcher parsing, metadata assertions and git whitespace checks passed.
+- Pending: fresh PR #48 CI and independent approving review. Main's one-review ruleset remains enforced; no admin override, main push, original branch deletion or production replacement was performed. Official integration-worktree CGA indexing remains unverified because the existing Relay targets the original worktree.
+
 ## 2026-10-06 Branch consolidation checkpoint
 
 - Scope: `nascousa/cga` itself, not every project indexed by CGA. Original worktrees and their uncommitted/untracked files were not staged, switched, reset, or deleted.

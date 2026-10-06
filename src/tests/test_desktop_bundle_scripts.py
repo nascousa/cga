@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -14,6 +15,45 @@ DESKTOP = ROOT / "deploy" / "docker-desktop"
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows command launcher")
+@pytest.mark.parametrize("recovered", [False, True])
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_workspace_launcher_preserves_both_deployment_paths(
+    tmp_path: Path, recovered: bool, exit_code: int
+) -> None:
+    root = tmp_path / "launcher root"
+    root.mkdir()
+    launcher = root / "start-cga-desktop.cmd"
+    shutil.copyfile(ROOT / launcher.name, launcher)
+    profile = tmp_path / "test profile"
+    if recovered:
+        compose = profile / ".nasco" / "docker" / "main" / "cga" / "compose.json"
+        compose.parent.mkdir(parents=True)
+        compose.write_text("{}", encoding="utf-8")
+    for command in ("powershell", "docker"):
+        (root / f"{command}.cmd").write_text(
+            f"@echo off\necho {command} %*\nexit /b {exit_code}\n", encoding="ascii"
+        )
+
+    result = subprocess.run(
+        [os.environ["COMSPEC"], "/d", "/c", str(launcher)],
+        cwd=tmp_path,
+        env={**os.environ, "USERPROFILE": str(profile), "PATH": str(root)},
+        capture_output=True, text=True, timeout=15, check=False,
+    )
+
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    if recovered:
+        assert "docker compose" in result.stdout
+        assert "--no-build --pull never --wait --wait-timeout 180" in result.stdout
+        assert "powershell" not in result.stdout
+    else:
+        assert "powershell" in result.stdout
+        assert r".\src\scripts\start-desktop.ps1" in result.stdout
+        assert "-OpenBrowser:$true" in result.stdout
+        assert "docker compose" not in result.stdout
 
 
 def test_desktop_launcher_prefers_prebuilt_image_tar_before_building() -> None:
