@@ -71,6 +71,10 @@ _recorder = None        # TraceRecorder | None  – set via init()
 _work_briefing_service: WorkBriefingService | None = None
 _repo_root = Path(os.getenv("CONTEXTGRAPH_REPO_ROOT", ".")).resolve()
 
+from backend.adc.mcp import register as register_adc_tools
+
+register_adc_tools(mcp)
+
 
 class _GraphProxy:
     """Module-level proxy that routes graph calls to the current project's GraphClient.

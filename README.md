@@ -5,7 +5,7 @@
 - **Version:** 1.30.126
 - **Status:** Published
 - **Author:** Nate Scott
-- **Date:** 2026-09-22 (transparent CGA Relay icon resources and pixel-level regression coverage)
+- **Date:** 2026-10-06 (graph-safety recovery baseline, transparent CGA Relay icons and Relaunch, plus ADC REST/MCP/Desktop Relay integration)
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
@@ -37,6 +37,14 @@ For the short answers to common questions from agent builders, see [docs/faq.md]
 - Helps agents answer, edit, and search through repositories with less prompt waste and lower evidence ambiguity.
 
 ## Quick Start
+
+Administrators can manage ADC at `/admin/adc`: publish immutable releases, pin
+project baselines, review upgrades, record project-specific changes and export
+traceable onboarding bundles. See [ADC governance](docs/adc-framework.md#integrated-adc-governance).
+Remote clients can read approved ADC through the authenticated MCP endpoint or
+Desktop Relay, including revision history, diffs and file hashes. Relay provides
+preview-first local synchronization; local edits are never silently overwritten.
+See [remote ADC interfaces](docs/adc-framework.md#remote-adc-interfaces).
 
 ### Option A: Docker Desktop Release
 

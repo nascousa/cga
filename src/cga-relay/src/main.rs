@@ -11,6 +11,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
+mod adc;
+mod json;
 mod secret_store;
 mod single_instance;
 
@@ -213,6 +215,7 @@ fn run(args: Vec<String>) -> AgentResult<()> {
         "settings" => cmd_settings(&args[1..]),
         "tray" => cmd_tray(&args[1..]),
         "mcp" => cmd_mcp(&args[1..]),
+        "adc" => adc::command(&args[1..]),
         "--version" | "-V" => {
             println!("{SERVER_NAME} {VERSION}");
             Ok(())
@@ -238,6 +241,7 @@ fn print_help() {
     println!("  settings  Render or inspect the local account settings page");
     println!("  tray      Run the Windows notification-area tray icon");
     println!("  mcp       Run the stdio MCP-compatible gateway");
+    println!("  adc       Read approved project ADC; sync previews by default (--apply writes)");
     println!();
     println!("Branch graph examples:");
     println!("  cga-relay index git --config <path> --repo-path <path> --branch <ref> [--parent-ref <ref>] [--no-include-untracked]");
@@ -3236,9 +3240,28 @@ fn read_mcp_message(input: &mut impl BufRead) -> AgentResult<Option<String>> {
 }
 
 fn handle_mcp_message(config: &AgentConfig, message: &str) -> Option<String> {
-    let id = json_field(message, "id").unwrap_or_else(|| "null".to_string());
-    let method = json_string_field(message, "method").unwrap_or_default();
-    match method.as_str() {
+    let parsed = match json::parse(message) {
+        Ok(json::Value::Object(fields)) => fields,
+        _ => {
+            return Some(rpc_error(
+                "null",
+                -32600,
+                "MCP request must be a JSON object",
+            ))
+        }
+    };
+    let id = match parsed.get("id") {
+        None => return None,
+        Some(value @ (json::Value::Null | json::Value::Number(_) | json::Value::String(_))) => {
+            value.encode()
+        }
+        _ => return Some(rpc_error("null", -32600, "Invalid MCP request id")),
+    };
+    let method = match parsed.get("method").and_then(|v| v.text().ok()) {
+        Some(value) => value,
+        None => return Some(rpc_error(&id, -32600, "Missing MCP method")),
+    };
+    match method {
         "initialize" => Some(format!(
             "{{\"jsonrpc\":\"2.0\",\"id\":{},\"result\":{{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{{\"tools\":{{}}}},\"serverInfo\":{{\"name\":\"{}\",\"version\":\"{}\"}}}}}}",
             id, SERVER_NAME, VERSION
@@ -3259,7 +3282,7 @@ fn handle_mcp_message(config: &AgentConfig, message: &str) -> Option<String> {
 }
 
 fn mcp_tools_json() -> String {
-    [
+    let existing = [
         "health_check",
         "getstarted",
         "index_incremental",
@@ -3278,7 +3301,8 @@ fn mcp_tools_json() -> String {
         )
     })
     .collect::<Vec<_>>()
-    .join(",")
+    .join(",");
+    format!("{existing},{}", adc::schemas())
 }
 
 #[derive(Debug, Default)]
@@ -3454,10 +3478,29 @@ fn call_cga_tool(config: &AgentConfig, tool_name: &str, arguments: &str) -> Agen
 }
 
 fn handle_mcp_tool_call(config: &AgentConfig, message: &str, id: &str) -> String {
-    let Some(tool_name) = json_string_field(message, "name") else {
-        return rpc_error(id, -32602, "missing tool name");
+    let parsed = match json::parse(message) {
+        Ok(value) => value,
+        Err(error) => return rpc_error(id, -32602, &error.0),
     };
-    let arguments = json_object_field(message, "arguments").unwrap_or_else(|| "{}".to_string());
+    let params = match parsed.get("params") {
+        Ok(json::Value::Object(fields)) => fields,
+        _ => return rpc_error(id, -32602, "missing tool params"),
+    };
+    let tool_name = match params.get("name").and_then(|v| v.text().ok()) {
+        Some(name) => name,
+        None => return rpc_error(id, -32602, "missing tool name"),
+    };
+    let arguments = match params.get("arguments") {
+        None => "{}".into(),
+        Some(value @ json::Value::Object(_)) => value.encode(),
+        _ => return rpc_error(id, -32602, "tool arguments must be an object"),
+    };
+    if tool_name.starts_with("adc_") {
+        return match adc::call(config, tool_name, &arguments) {
+            Ok(body) => rpc_text_result(id, &body),
+            Err(error) => rpc_error(id, -32000, &error.0),
+        };
+    }
     if tool_name == "health_check" {
         return match http_get_json(config, &format!("{}/health", config.api_base_url)) {
             Ok(body) => rpc_text_result(id, &body),
@@ -3485,7 +3528,7 @@ fn handle_mcp_tool_call(config: &AgentConfig, message: &str, id: &str) -> String
     ]
     .into_iter()
     .collect();
-    if !known_tools.contains(tool_name.as_str()) {
+    if !known_tools.contains(tool_name) {
         return rpc_error(id, -32602, "unknown tool");
     }
     if tool_name == "index_git_incremental" {
@@ -3988,44 +4031,6 @@ fn json_bool_field(text: &str, field: &str) -> Option<bool> {
         "false" => Some(false),
         _ => None,
     }
-}
-
-fn json_object_field(text: &str, field: &str) -> Option<String> {
-    let marker = format!("\"{}\":", field);
-    let start = text.find(&marker)? + marker.len();
-    let tail = text[start..].trim_start();
-    if !tail.starts_with('{') {
-        return None;
-    }
-    let mut depth = 0_i32;
-    let mut in_string = false;
-    let mut escaped = false;
-    for (index, ch) in tail.char_indices() {
-        if escaped {
-            escaped = false;
-            continue;
-        }
-        if in_string {
-            if ch == '\\' {
-                escaped = true;
-            } else if ch == '"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match ch {
-            '"' => in_string = true,
-            '{' => depth += 1,
-            '}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(tail[..=index].to_string());
-                }
-            }
-            _ => {}
-        }
-    }
-    None
 }
 
 fn json_array_field(text: &str, field: &str) -> Option<String> {

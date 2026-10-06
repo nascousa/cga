@@ -2,7 +2,143 @@
 
 The Autonomous Development Constitution (ADC) is the project-context governance model used by CGA. It keeps architecture, conventions, domain knowledge, and AI instructions close to the code while separating them from ordinary product documentation.
 
-## Purpose
+## Integrated ADC Governance
+
+CGA administrators manage the complete ADC document catalog at `/admin/adc`.
+The bundled initial release is the locally available ADC **1.1.23** package
+(44 documents), not a claim that upstream GitHub has no newer release. Its
+provenance, publisher, publication timestamp and SHA256 are recorded. The
+original package's document paths and content are retained.
+
+- A published semantic version (`major.minor.patch`) is immutable, including
+  at the database level. Stage document edits/additions/removals or import
+  release JSON, then publish a **new** version with a reason. "Latest" means
+  the greatest semantic version published in this CGA catalog, not the last
+  historical version imported. No remote upstream polling is performed.
+- New project creation and new registry imports atomically pin that latest
+  release. Existing projects remain unbound until an administrator explicitly
+  adopts a release; existing bindings never auto-upgrade.
+- Each project revision references a release and stores its own changes:
+  **amendment** adds a new project document, **override** replaces an existing
+  baseline document, and **exemption** excludes a baseline document from the
+  effective bundle without erasing the baseline or its history. All changes
+  require a justification; exemptions can have a timezone-aware expiry.
+- Revisions are append-only and record actor, reason, creation time, reviewed
+  upgrade paths and rollback origin. Concurrent edits use an expected revision:
+  stale writers receive HTTP 409 rather than overwriting someone else's work.
+- Before an upgrade, preview the release diff and review affected project
+  changes. Baseline changes underneath overrides/exemptions require explicit
+  acknowledgement. Invalid overlay targets must be corrected, not silently
+  dropped. Rollback creates a new revision; it does not delete history.
+- Current effective content evaluates expiry at request time. A requested
+  historical revision evaluates expiry at that revision's creation time.
+  Rolling back an old revision does **not** reactivate an expired exemption.
+- Downloaded ZIPs contain effective documents and `.adc/adc-lock.json` with
+  release/hash, project revision, actor, reasons, change records and evaluation
+  time. Archives are for review/apply through a project's normal source-control
+  workflow: CGA does not overwrite repository files or execute imported scripts.
+  In particular, review the original package's IDE/CI template locations
+  before promoting them to root-level trigger files.
+
+Authenticated account API:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET/POST /api/adc/releases` | List / publish releases (publish: admin only) |
+| `GET /api/adc/releases/{id}` | Read all documents and provenance |
+| `GET /api/adc/diff?from_release={id}&to_release={id}` | Document diffs |
+| `GET /api/adc/projects/{id}` | Effective project ADC; optional `revision` |
+| `GET /api/adc/projects/{id}/history` | Revision history |
+| `POST /api/adc/projects/{id}/revisions` | Explicit adoption / upgrade / changes |
+| `POST /api/adc/projects/{id}/restore` | Append a rollback revision |
+| `GET /api/adc/projects/{id}/download` | Traceable effective ZIP; optional `revision` |
+
+All project reads use CGA's existing group/project access rules. All writes
+require an administrator. Existing project MCP tokens can retrieve their own
+pinned ADC through `GET /api/project/adc` and `/api/project/adc/download`, using
+the existing project-token middleware and header requirements. They cannot
+publish releases, approve exceptions or read another project's ADC.
+
+The release catalog and history live in PostgreSQL tables `adc_releases` and
+`adc_project_revisions`, so they are included in existing database backups.
+No graph schema migration or reindex is required. The complete seed is stored
+in `src/backend/adc/seed.json`; the validated local release importer is
+`src/scripts/import-adc-release.py`. Existing published seed content must not
+be overwritten; later changes are new releases.
+
+## Remote ADC Interfaces
+
+From CGA/Relay 1.30.126, all three authenticated transports share the same
+project-scoped service and immutable history:
+
+- REST: `POST /api/project/adc/query` with `{"operation":"adc_current"}`.
+- Direct MCP SSE: `/mcp/sse` (the `/mcp` discovery URL is not itself the SSE
+  connection). Standard MCP clients can list and call the tools below.
+- Desktop Relay stdio: `cga-relay mcp --config <project.env>`, forwarding through
+  `/api/project/cga-relay/mcp-tool` or the account-JWT bridge
+  `/api/auth/cga-relay/mcp-tool`.
+
+| Tool | Parameters | Result |
+| --- | --- | --- |
+| `adc_catalog` | `offset=0`, `limit=50` (1..100) | Published versions; highest semantic version |
+| `adc_release` | `release_id` | Immutable baseline documents and provenance |
+| `adc_current` | Optional `revision` | Project binding, effective documents and exceptions |
+| `adc_history` | `offset=0`, `limit=50` | This project's append-only revisions |
+| `adc_diff` | `release_id` | Proposed baseline differences and affected overlay paths |
+| `adc_document` | `path`, optional `revision` | Effective content, SHA256 and evaluation time |
+| `adc_bundle` | Optional `revision` | Files with content/hash, project identity and provenance lock |
+| `adc_sync` (local Relay only) | `apply=false` | Preview/apply the approved bundle to configured checkout |
+
+REST uses the same parameter names alongside `operation`. Project-token calls
+require `Authorization: Bearer <token>` and the configured external project ID
+in `X-Project-ID`. Include the existing communication-profile headers:
+
+```text
+X-CGA-Communication-Profile: CRYSTALS-CNSA-2.0
+X-CGA-Key-Establishment: ML-KEM-1024
+X-CGA-Signature: ML-DSA-87
+X-CGA-Transport-Scope: local-ipc
+```
+
+These are compatibility/policy declarations, **not an implementation or proof
+of post-quantum cryptography**. Relay sends them for its loopback HTTP hop.
+Remote network hops must use a separately authenticated, certificate-verified
+secure tunnel/proxy. Do not send project/account credentials over LAN plaintext.
+The Rust client intentionally rejects non-loopback HTTP; remote direct SSE
+clients also need secure transport and an allowed server Host/Origin.
+
+Project credentials cannot publish, adopt, upgrade, roll back or approve their
+own exceptions. Those remain administrator operations in CGA's UI/account API.
+Existing unbound projects receive 409 for bundles/documents until an administrator
+adopts a baseline. Catalog availability is not approval to install the latest
+version. Explicit historical bundles are marked `historical` and Relay will not
+auto-install them. Responses above 7 MiB receive an explicit 413, not truncated
+content; read individual documents, paginate history/catalog, or use the ZIP
+download endpoint for larger exports.
+
+Local synchronization checks configured project identity, SHA256, safe document
+paths, case collisions and symlink/reparse-point ancestors before writing.
+It never executes downloaded documents. Preview is the default; `--apply` is
+required for CLI writes. Modified managed files and conflicting untracked files
+block **all** planned writes; unrelated untracked files are retained. Approved
+removals/exemptions remove only previously managed, unchanged files.
+
+Relay retains checkpoints and per-operation backups in
+`STATE_DIR/adc-<project-and-root-hash>/`. Normal validation conflicts make no
+changes. I/O failures or process interruption during apply can leave a partial
+tree: `pending.json` explicitly blocks subsequent sync rather than claiming
+success. Preserve that journal and its backup directory; restore each recorded
+path from its numeric backup (or remove a newly created path whose `existed`
+flag is false), verify the tree against the previous `applied.json`, and only
+then clear the pending journal/staging file. Do not discard local work during
+recovery. Per-file replacements are atomic, not a filesystem-wide transaction.
+
+Neither server nor Relay requires an independent ADC checkout: seed documents,
+published releases, overlays and history are owned by CGA and its PostgreSQL
+backup. Keep the old ADC project until all consuming projects have explicitly
+adopted CGA governance and their local edits have been reviewed.
+
+## Purpose (Background)
 
 ADC exists to help AI coding agents and human developers acquire accurate project context quickly. It reduces the chance that an agent writes code that violates local conventions or misses historical architecture decisions.
 

@@ -2215,6 +2215,27 @@ fn mcp_initialize_returns_server_info() {
 }
 
 #[test]
+fn mcp_framed_multiline_json_and_top_level_method_are_respected() {
+    let tmp = TestDir::new("mcp-frame-multiline");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[]);
+    let body = "{\n\"jsonrpc\":\"2.0\",\n\"params\":{\"method\":\"tools/list\",\"name\":\"adc_sync\"},\n\"id\":1,\"method\":\"ping\"\n}";
+    let input = format!("Content-Length: {}\r\n\r\n{body}", body.len());
+    let output = run_mcp(&config, &input, &[]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("\"status\":\"ok\""));
+    assert!(!stdout(&output).contains("\"tools\""));
+    let output = run_mcp(
+        &config,
+        "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{\"id\":9}}\n",
+        &[],
+    );
+    assert!(output.status.success());
+    assert!(stdout(&output).is_empty());
+}
+
+#[test]
 fn mcp_tools_list_exposes_expected_tools() {
     let tmp = TestDir::new("mcp-tools");
     let repo = tmp.path().join("repo");
@@ -2238,11 +2259,82 @@ fn mcp_tools_list_exposes_expected_tools() {
         "fetch_minimal_code",
         "get_optimized_context",
         "promote_ref",
+        "adc_catalog",
+        "adc_release",
+        "adc_current",
+        "adc_history",
+        "adc_diff",
+        "adc_document",
+        "adc_bundle",
+        "adc_sync",
     ] {
         assert!(out.contains(tool), "tools/list missing {tool}: {out}");
     }
 }
 
+#[test]
+fn mcp_responds_without_waiting_for_stdin_eof() {
+    use std::io::BufRead;
+    use std::process::Stdio;
+    use std::sync::mpsc;
+    let tmp = TestDir::new("mcp-interactive");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[]);
+    let mut child = Command::new(agent_bin())
+        .args(["mcp", "--config", config.to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let (tx, rx) = mpsc::channel();
+    let reader = thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout).lines() {
+            if tx.send(line.unwrap()).is_err() {
+                break;
+            }
+        }
+    });
+    stdin
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n")
+        .unwrap();
+    stdin.flush().unwrap();
+    let first = rx.recv_timeout(Duration::from_secs(5));
+    if first.is_err() {
+        child.kill().unwrap();
+    }
+    assert!(first.unwrap().contains("serverInfo"));
+    stdin
+        .write_all(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n")
+        .unwrap();
+    stdin.flush().unwrap();
+    assert!(rx
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .contains("adc_sync"));
+    drop(stdin);
+    assert!(child.wait().unwrap().success());
+    reader.join().unwrap();
+}
+
+#[test]
+fn adc_tool_rejects_cross_project_and_unknown_arguments_locally() {
+    let tmp = TestDir::new("adc-project-guard");
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(&repo).unwrap();
+    let config = write_safe_config(tmp.path(), &repo, &[]);
+    let output = run_mcp(&config,
+            "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"adc_current\",\"arguments\":{\"project_id\":\"other\"}}}\n",
+            &[("CGA_TEST_API_KEY", TEST_SECRET)]);
+    assert!(stdout(&output).contains("does not match this local relay config"));
+    let output = run_mcp(&config,
+            "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"adc_sync\",\"arguments\":{\"root\":\"C:/other\"}}}\n",
+            &[("CGA_TEST_API_KEY", TEST_SECRET)]);
+    assert!(stdout(&output).contains("cannot be overridden"));
+}
 #[test]
 fn mcp_promote_ref_forwards_branch_arguments() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

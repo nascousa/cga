@@ -374,6 +374,8 @@ async def init_db(dsn: str | None = None) -> None:
                 '{"preamble":"none","explanations":"on_request","summary":"short","tool_updates":"errors_only","show_diff_only":true,"echo_unchanged_code":false,"require_evidence":false,"max_response_tokens":800,"directives":[]}',
             ),
         )
+        from backend.adc.service import initialize
+        await initialize(db.raw)
         try:
             await db.execute("ALTER TABLE extension_configs ALTER COLUMN project_id DROP NOT NULL")
         except Exception:

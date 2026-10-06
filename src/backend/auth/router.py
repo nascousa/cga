@@ -1207,14 +1207,16 @@ async def create_project(
 ):
     pid = _random_project_id()
     try:
-        async with db.execute(
-            """INSERT INTO projects(project_name, project_id, upstream_url, description, repo_path)
-               VALUES(?,?,?,?,?)
-               RETURNING id, project_name, project_id, upstream_url, description, repo_path, created_at, is_active""",
-            (body.project_name, pid, body.upstream_url, body.description, body.repo_path),
-        ) as cur:
-            row = await cur.fetchone()
-        await db.commit()
+        async with db.raw.transaction():
+            async with db.execute(
+                """INSERT INTO projects(project_name, project_id, upstream_url, description, repo_path)
+                   VALUES(?,?,?,?,?)
+                   RETURNING id, project_name, project_id, upstream_url, description, repo_path, created_at, is_active""",
+                (body.project_name, pid, body.upstream_url, body.description, body.repo_path),
+            ) as cur:
+                row = await cur.fetchone()
+            from backend.adc.service import onboarding
+            await onboarding(db.raw, row["id"], _["username"])
     except aiosqlite.IntegrityError:
         raise HTTPException(status_code=409, detail="project_name already exists")
     return ProjectOut(**dict(row))
