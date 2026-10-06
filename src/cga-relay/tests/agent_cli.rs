@@ -895,7 +895,7 @@ fn tray_status_treats_expired_account_jwt_as_signed_out() {
 }
 
 #[test]
-fn settings_render_shows_local_account_login_page() {
+fn settings_render_omits_account_data_from_stdout() {
     let tmp = TestDir::new("settings-render");
     let repo = tmp.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
@@ -933,16 +933,14 @@ fn settings_render_shows_local_account_login_page() {
     assert!(out.contains("status-grid"));
     assert!(out.contains("version-pill"));
     assert!(!out.contains("<span>Project</span>"));
-    assert!(out.contains("User Groups"));
-    assert!(out.contains("Team Alpha"));
-    assert!(out.contains("Alpha Project"));
+    assert!(!out.contains("User Groups"));
+    assert!(!out.contains("Team Alpha"));
+    assert!(!out.contains("Alpha Project"));
     assert!(!out.contains("Beta Project"));
-    assert!(!out.contains("<p class=\"eyebrow\">Projects</p>"));
-    assert!(!out.contains("Account Projects"));
-    assert!(out.contains("Signed in"));
-    assert!(out.contains("dev@example.com"));
-    assert!(out.contains("action=\"/refresh\""));
-    assert!(out.contains("Refresh access"));
+    assert!(!out.contains("dev@example.com"));
+    assert!(!out.contains("test-token"));
+    assert!(out.contains("Sign in to CGA"));
+    assert!(!out.contains("action=\"/refresh\""));
     assert!(!out.contains(TEST_SECRET));
 
     let status = run_agent(&[
