@@ -251,5 +251,11 @@ class GraphClient:
             try:
                 self.query(stmt)
             except (redis.ResponseError, RuntimeError) as exc:
-                if "already exists" not in str(exc).lower():
+                message = str(exc).lower()
+                existing_attribute = (
+                    isinstance(exc, redis.ResponseError)
+                    and message.startswith("attribute '")
+                    and message.endswith("' is already indexed")
+                )
+                if "already exists" not in message and not existing_attribute:
                     raise

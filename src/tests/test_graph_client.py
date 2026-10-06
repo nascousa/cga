@@ -38,11 +38,24 @@ def test_ensure_indexes_ignores_existing_index_errors() -> None:
     assert client.query.call_count >= 1
 
 
-def test_ensure_indexes_propagates_database_failures() -> None:
+def test_ensure_indexes_ignores_falkordb_existing_attribute() -> None:
     client = GraphClient()
-    client.query = MagicMock(side_effect=RuntimeError("database unavailable"))
+    client.query = MagicMock(side_effect=ResponseError("Attribute 'path' is already indexed"))
 
-    with pytest.raises(RuntimeError, match="database unavailable"):
+    client.ensure_indexes()
+
+    assert client.query.call_count == 7
+
+
+@pytest.mark.parametrize("error", [
+    RuntimeError("database unavailable"),
+    ResponseError("database unavailable"),
+])
+def test_ensure_indexes_propagates_database_failures(error: Exception) -> None:
+    client = GraphClient()
+    client.query = MagicMock(side_effect=error)
+
+    with pytest.raises(type(error), match="database unavailable"):
         client.ensure_indexes()
 
 
