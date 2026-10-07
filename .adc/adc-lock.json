@@ -1,0 +1,493 @@
+{
+  "actor": "nasco",
+  "changes": [
+    {
+      "active": true,
+      "content": "# Autonomous Development Constitution (ADC) Rule Pointer\r\n\r\nBefore reasoning, planning, or writing any code, you MUST first read `.adc/index.md` and `.adc/prompt-rules.md` to load your core constraints.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.aider.rules",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "active": true,
+      "content": "# Autonomous Development Constitution (ADC) Rule Pointer\r\n\r\nBefore reasoning, planning, or writing any code, you MUST first read `.adc/index.md` and `.adc/prompt-rules.md` to load your core constraints.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.antigravityrules",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "active": true,
+      "content": "# Autonomous Development Constitution (ADC) Rule Pointer\r\n\r\nBefore reasoning, planning, or writing any code, you MUST first read `.adc/index.md` and `.adc/prompt-rules.md` to load your core constraints.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.clinerules",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "active": true,
+      "content": "# Autonomous Development Constitution (ADC) Rule Pointer\r\n\r\nBefore reasoning, planning, or writing any code, you MUST first read `.adc/index.md` and `.adc/prompt-rules.md` to load your core constraints.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.codexrules",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "active": true,
+      "content": "# Autonomous Development Constitution (ADC) Rule Pointer\r\n\r\nBefore reasoning, planning, or writing any code, you MUST first read `.adc/index.md` and `.adc/prompt-rules.md` to load your core constraints.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.codyrules",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "active": true,
+      "content": "# Autonomous Development Constitution (ADC) Rule Pointer\r\n\r\nBefore reasoning, planning, or writing any code, you MUST first read `.adc/index.md` and `.adc/prompt-rules.md` to load your core constraints.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.cursorrules",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "active": true,
+      "content": "# Autonomous Development Constitution (ADC) Rule Pointer\r\n\r\nBefore reasoning, planning, or writing any code, you MUST first read `.adc/index.md` and `.adc/prompt-rules.md` to load your core constraints.\r\nDefault frontend theme and layout should closely match https://admin-demo.vuestic.dev, with dark theme as the default.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.github/copilot-instructions.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 e25602be48a8048cd5f8846c7ed656552f115265cc4a88503c1c55a5e3032d62"
+    },
+    {
+      "active": true,
+      "content": "## Summary\r\n\r\nDescribe what changed and why.\r\n\r\n## Validation\r\n\r\n- [ ] Unit/E2E tests pass locally\r\n- [ ] New dependencies were checked for CVEs/CVSS threshold policy\r\n- [ ] This change was developed on `dev/*` (or `hotfix/*`) branch and not committed directly to `main`\r\n- [ ] `docs/deploy_key.md` is updated with the current public deploy key when deploy credentials changed\r\n- [ ] Mermaid diagrams were updated if architecture/data-flow/schema changed\r\n- [ ] Docker CPU/Memory limits are configured via env variables when applicable\r\n\r\n## Policy Checklist\r\n\r\n- [ ] JWT/token entropy policy applied (algorithm, key strength, claims, TTL, rotation)\r\n- [ ] Data policy applied for pgvector/sqlite-vec/graph usage and index/query constraints\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.github/pull_request_template.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 33307a8c2fcaa43ef38ddde350cb05db46b83f59d20f6a1aca834aeb91af3e38"
+    },
+    {
+      "active": true,
+      "content": "name: Policy CI\r\n\r\non:\r\n  pull_request:\r\n  push:\r\n    branches:\r\n      - main\r\n\r\njobs:\r\n  quality-security:\r\n    runs-on: ubuntu-latest\r\n\r\n    steps:\r\n      - name: Checkout\r\n        uses: actions/checkout@v4\r\n\r\n      - name: Setup Python\r\n        if: ${{ hashFiles('requirements.txt') != '' }}\r\n        uses: actions/setup-python@v5\r\n        with:\r\n          python-version: \"3.13\"\r\n\r\n      - name: Install dependencies\r\n        if: ${{ hashFiles('requirements.txt') != '' }}\r\n        run: |\r\n          python -m pip install --upgrade pip\r\n          pip install -r requirements.txt\r\n          pip install pip-audit pytest-cov\r\n\r\n      - name: Run tests with coverage gate\r\n        if: ${{ hashFiles('requirements.txt') != '' }}\r\n        run: |\r\n          pytest --cov=src --cov-report=term-missing --cov-fail-under=80\r\n\r\n      - name: Enforce vulnerability exception expiry\r\n        if: ${{ hashFiles('requirements.txt') != '' }}\r\n        env:\r\n          VULN_EXCEPTION_ID: CVE-2026-4539\r\n          VULN_EXCEPTION_EXPIRES: \"2026-04-15\"\r\n        run: |\r\n          TODAY=\"$(date -u +%F)\"\r\n          if [[ \"$TODAY\" > \"$VULN_EXCEPTION_EXPIRES\" ]]; then\r\n            echo \"Temporary vulnerability exception expired: $VULN_EXCEPTION_ID (expired $VULN_EXCEPTION_EXPIRES).\"\r\n            echo \"Remove ignore or update dependency to a fixed version.\"\r\n            exit 1\r\n          fi\r\n\r\n      - name: Run dependency vulnerability audit\r\n        if: ${{ hashFiles('requirements.txt') != '' }}\r\n        env:\r\n          VULN_EXCEPTION_ID: CVE-2026-4539\r\n        run: |\r\n          pip-audit -r requirements.txt --ignore-vuln \"$VULN_EXCEPTION_ID\"\r\n\r\n      - name: Skip Python quality/security checks when no requirements.txt\r\n        if: ${{ hashFiles('requirements.txt') == '' }}\r\n        run: echo \"No requirements.txt found; skipping Python-specific policy checks.\"\r\n\r\n  pr-policy-checklist:\r\n    if: github.event_name == 'pull_request'\r\n    runs-on: ubuntu-latest\r\n\r\n    steps:\r\n      - name: Validate PR policy checklist text\r\n        env:\r\n          PR_BODY: ${{ github.event.pull_request.body }}\r\n        run: |\r\n          if [ -z \"$PR_BODY\" ]; then\r\n            echo \"PR body is empty. Fill in the policy checklist in the PR template.\"\r\n            exit 1\r\n          fi\r\n\r\n          echo \"$PR_BODY\" | grep -qi \"JWT/token entropy policy applied\" || {\r\n            echo \"Missing JWT/token entropy checklist item in PR body.\"\r\n            exit 1\r\n          }\r\n\r\n          echo \"$PR_BODY\" | grep -qi \"Data policy applied for pgvector/sqlite-vec/graph\" || {\r\n            echo \"Missing data policy checklist item in PR body.\"\r\n            exit 1\r\n          }\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.github/workflows/policy-ci.yml",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 29b1a111acca35a9492ff95697787b5c175da8e01a4393f65e25bbb491180797"
+    },
+    {
+      "active": true,
+      "content": "# Autonomous Development Constitution (ADC) Rule Pointer\r\n\r\nBefore reasoning, planning, or writing any code, you MUST first read `.adc/index.md` and `.adc/prompt-rules.md` to load your core constraints.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.roomadesrules",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "active": true,
+      "content": "# Autonomous Development Constitution (ADC) Rule Pointer\r\n\r\nBefore reasoning, planning, or writing any code, you MUST first read `.adc/index.md` and `.adc/prompt-rules.md` to load your core constraints.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/.windsurfrules",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "active": true,
+      "content": "node_modules/\r\nsrc/dist/\r\nbuild/\r\n.env\r\n.git/\r\ncoverage/\r\ntmp/\r\nsrc/log/\r\ncga-relay/scratchpad/\r\ncga-relay/tasks/\r\n\r\n\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/adcignore",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 075747a14e89add887e4b3a6ba60e17e0476f4df18ef006348aa3bbd718801e0"
+    },
+    {
+      "active": true,
+      "content": "# Environment Bootstrap Guide\r\n\r\nFollow these exact steps to start the application locally from scratch. \r\nNever attempt to guess the start commands.\r\n\r\n## ContextGraph Services Integration\r\n\r\nBefore starting the application, register with the ContextGraph ecosystem:\r\n\r\n```bash\r\n# 1. Register this project with ContextGraph\r\n# Open CGA Admin UI: http://localhost:18001/admin\r\n# Follow the guided setup to:\r\n#   - Register this project in the ContextGraph catalog\r\n#   - Retrieve CGA MCP server credentials\r\n#   - Store credentials in .env (see step 2 below)\r\n\r\n# 2. Configure ContextGraph environment variables\r\necho \"CONTEXTGRAPH_MCP_SERVER_URL=http://localhost:18001/mcp/sse\" >> .env\r\necho \"CONTEXTGRAPH_MCP_TOKEN=<token-from-cga-admin>\" >> .env\r\necho \"CONTEXTGRAPH_PROJECT_ID=<project-id-from-cga-admin>\" >> .env\r\n```\r\n\r\nAfter CGA-Relay and CGA MCP Server are integrated, initialize a full repository index before starting feature work:\r\n\r\n```text\r\nRequired one-time bootstrap indexing flow\r\n1) Ensure `mcp-servers.json` contains the `cga-mcp-server` endpoint profile and receives project context from environment variables.\r\n2) Run a full-project indexing call through ContextGraph MCP using:\r\n\t- project_id: CONTEXTGRAPH_PROJECT_ID\r\n\t- repo_path: repository root\r\n\t- changed_files: all tracked source and documentation files\r\n3) Treat indexing as successful only after the ContextGraph service returns a successful completion status.\r\n```\r\n\r\nFor all later changes, prefer the MCP tool `index_repo_changes(repo_path)` for git-backed repositories.\r\nIt discovers current worktree changes automatically and includes deleted or renamed-away paths in incremental indexing so stale file-local graph data is removed natively.\r\nUse `index_repo_changes(repo_path, auto_full_on_destructive=true)` only when you explicitly want a conservative full rebuild.\r\nUse raw `index_incremental(repo_path, changed_paths)` only when the caller already has an exact changed-file list.\r\n\r\n## Auto-Enable CGA MCP Server Profile (ADC Standard)\r\n\r\nADC-compliant projects must keep the `cga-mcp-server` profile enabled in `.adc/cga-relay/mcp/mcp-servers.json`.\r\n\r\n```text\r\nQuick enable checklist for downstream projects\r\n1) Copy the ADC template `.adc/cga-relay/mcp/mcp-servers.json` into the target project.\r\n2) Confirm `cga-mcp-server` exists and points to a reachable CGA MCP SSE endpoint (default local dev endpoint: `http://localhost:18001/mcp/sse`).\r\n3) Set environment variables before starting your IDE/agent host:\r\n\t- CONTEXTGRAPH_MCP_TOKEN\r\n\t- CONTEXTGRAPH_PROJECT_ID\r\n4) Import the MCP file in your AI client so the server profile is loaded automatically.\r\n5) Run one full-project index once, then switch to incremental indexing on changed files.\r\n```\r\n\r\n## Local Development Setup\r\n\r\n```bash\r\n# 3. Install dependencies\r\nnpm install\r\n\r\n# 4. Setup the environment configuration\r\ncp .env.example .env\r\n# (Edit .env with values from ContextGraph registration above)\r\n\r\n# 5. Start ContextGraph services\r\nnpm run contextgraph-mcp:start      # Starts optional repository-local MCP bridge when present\r\nnpm run cga-relay:start             # Starts src/cga-relay when this repository ships a relay runner\r\n\r\n# 6. Start backing services (e.g. database, redis)\r\ndocker-compose up -d db redis\r\n\r\n# 7. Run database migrations\r\nnpm run db:migrate\r\n\r\n# 8. Start the local development server\r\nnpm run dev\r\n```\r\n\r\n## Verify ContextGraph Connectivity\r\n\r\nOnce running, verify local ContextGraph services are reachable:\r\n\r\n```bash\r\n# Check optional repository-local MCP bridge health\r\ncurl http://localhost:3001/mcp/health\r\n\r\n# Verify upstream ContextGraph connectivity\r\ncurl http://localhost:18001/health\r\n```\r\n\r\n\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/bootstrap.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 912d47fd7f95b770ae46e2f72802ff726cd2225e13f34bbd473b93c3f52bed5d"
+    },
+    {
+      "active": true,
+      "content": "# Sample Skill\r\n\r\nProject-specific CGA-Relay workflow skills can be added here.",
+      "expires_at": null,
+      "kind": "amendment",
+      "path": ".adc/cga-relay/skills/sample-skill/SKILL.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 0abfb98fe95bfe9830c9d348f9f255e9f296c99e076101e77f19bc4fa8daee16"
+    },
+    {
+      "active": true,
+      "content": "# Deploy Public Key\r\n\r\nThis file stores the current active public deploy key for repository deployment workflows.\r\n\r\n## Policy\r\n- Prefer reusing an existing approved public deploy key.\r\n- If no approved key exists, generate a new SSH key pair without passphrase.\r\n- Record only the public key in this document.\r\n- Never commit a private key.\r\n\r\n## Active Public Key\r\n\r\nReplace the placeholder below with the current public key:\r\n\r\n```text\r\nssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIyU/BX24A+3S5XONjPguCW5Tu7oxDis0RwR6bn9KYj1 adc-deploy-key-20260417\r\n```\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/docs/deploy_key.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 4ae7d6ff12fffefe9b8534ea72fe4f492e1a8b5e4bac3412f31b6bd4a0b37baf"
+    },
+    {
+      "active": true,
+      "content": "---\r\nproject-name: \"Agentic Boilerplate Project\"\r\nversion: \"1.0.0\"\r\ndescription: \"A reference implementation of the Autonomous Development Constitution (ADC).\"\r\ntech-stack:\r\n  - React 18\r\n  - Node.js 20\r\n  - PostgreSQL\r\narchitecture-style: \"Microservices\"\r\nentry-points:\r\n  - src/main.ts\r\n---\r\n\r\n# Project Overview\r\nThis project serves as a reference implementation of the ADC standard. \r\nIt defines the exact rules, constraints, and architecture that AI Agents must follow.\r\n\r\n## Core Modules\r\n- `src/api`: Core backend services\r\n- `src/web`: Frontend React application\r\n- `src/cga-relay`: CGA-Relay (local MCP gateway and project sync)\r\n\r\n## Required Integrations\r\nThis project **MUST** integrate with the ContextGraph ecosystem:\r\n- **ContextGraph Project**: Central repository and artifact management system (registration via CGA Admin UI at `http://localhost:18001/admin`)\r\n- **CGA-Relay** (`src/cga-relay`): Local MCP gateway and project sync agent\r\n- **CGA MCP Server**: Model Context Protocol endpoint for programmatic ContextGraph access (default local dev SSE endpoint: `http://localhost:18001/mcp/sse`)\r\n- **CGA MCP Server Profile Standard**: `.adc/cga-relay/mcp/mcp-servers.json` MUST include a `cga-mcp-server` entry so ADC-based projects can auto-load CGA MCP wiring.\r\n- **Initial ContextGraph Indexing**: Immediately after CGA-Relay + CGA MCP Server integration, run full-project indexing once so retrieval/review tools can access the entire repository context.\r\n\r\nBoth ContextGraph services are implemented locally within this project and must be started during bootstrap.\r\n\r\n## Environment Requirements\r\nRefer to `bootstrap.md` for exact start-up commands.\r\n\r\n\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/index.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 b4e4ed7c3fe1a65ee56d64836af3167d1d106826bc4940fcfc93696bcaa30def"
+    },
+    {
+      "active": true,
+      "content": "# Constitutional Amendments\r\n*All changes to the rules inside the `.adc` directory MUST be proposed via PR with the `[AMENDMENT]` prefix. It MUST NOT be modified autonomously without human ratification.*\r\n\r\n- **2026-03-13**: Digital Constitution initial ratification. V1.0.0 created.\r\n- **2026-03-23**: Added ContextGraph integration policy in `standards/conventions/devops.md`; local setup now uses the CGA Admin UI at `http://localhost:18001/admin` and enforces PR traceability/MCP alignment.\r\n- **2026-04-18**: Added `cga-mcp-server` as the ADC baseline MCP profile so downstream ADC projects auto-inherit CGA MCP Server wiring and guidance.\r\n- **2026-04-18**: Updated CGA MCP baseline to endpoint-first, language-agnostic wiring so repositories are not forced to provide a local Node entrypoint.\r\n- **2026-04-18**: Added default token generation policy: unless explicitly overridden by target system requirements, tokens MUST use cryptographically random 35-character values restricted to `A-Za-z0-9`.\r\n- **2026-05-26**: Standardized the ADC MCP profile name to `cga-mcp-server`, set the default local dev SSE endpoint to `http://localhost:18001/mcp/sse`, and required Authorization/X-Project-ID headers in the standard profile.\r\n\r\n\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/knowledge/amendments.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 3759a5291904f5b131d498d1dd921ed284017909c359b110cd2e03f833b3eee6"
+    },
+    {
+      "active": true,
+      "content": "sequenceDiagram\r\n    autonumber\r\n    participant A as External Agent\r\n    participant MW as ProjectTokenMiddleware\r\n    participant M as MCP Tool Handler\r\n    participant C as Query Cache\r\n    participant G as GraphRegistry and FalkorDB\r\n    participant P as MCPProducer\r\n    participant Q as Redis Jobs Stream\r\n    participant I as IndexerConsumer\r\n    participant Admin as Admin API\r\n\r\n    A->>MW: Call ContextGraph MCP tool\r\n    alt Token missing or revoked\r\n        MW-->>A: Reject request with 401 or 403\r\n    else Token accepted\r\n        MW->>M: Continue request in project scope\r\n        opt Cache unavailable\r\n            M->>C: Attempt cache read\r\n            C-->>M: Cache error\r\n            Note over M,C: Tool continues without cache\r\n        end\r\n\r\n        alt Graph retrieval is weak or incomplete\r\n            M->>G: Query graph anyway\r\n            G-->>M: Sparse result set\r\n            Note over M,A: CG-first strategy falls back to bounded local snippets\r\n            M-->>A: Partial graph evidence plus local fallback\r\n        else Graph retrieval is healthy\r\n            M-->>A: Graph-backed answer\r\n        end\r\n    end\r\n\r\n    A->>M: Request index_repo_changes\r\n    alt Deleted or renamed files detected\r\n        Note over M,P: Tool escalates to full index because incremental does not purge stale symbols\r\n        M->>P: Enqueue full index job\r\n    else Safe incremental change set\r\n        M->>P: Enqueue incremental index job\r\n    end\r\n\r\n    P->>Q: Publish job\r\n    I->>Q: Consume job\r\n    alt Pipeline failure while processing\r\n        Note over I,Q: Job marked failed and stream entry is not ACKed\r\n        I-->>Admin: Failed job visible in index status\r\n    else Worker stalls on processing\r\n        Admin->>I: Recover stale jobs by repo\r\n        I->>Q: ACK stale stream entry during recovery\r\n        I-->>Admin: Job marked failed for manual retry\r\n    else Pipeline succeeds\r\n        I->>Q: ACK message\r\n        I-->>Admin: Job status becomes done\r\n    end",
+      "expires_at": null,
+      "kind": "amendment",
+      "path": ".adc/knowledge/diagrams/agent-exception-recovery.mmd",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 9296d960c51fa0160f7f825b7dc3851b4a3056751bb23c54f8f48608afbe7cc2"
+    },
+    {
+      "active": true,
+      "content": "sequenceDiagram\r\n    autonumber\r\n    participant A as External Agent\r\n    participant SSE as /mcp SSE\r\n    participant MW as ProjectTokenMiddleware\r\n    participant M as MCP Tool Handler\r\n    participant C as Query Cache\r\n    participant R as GraphRegistry\r\n    participant G as FalkorDB Graph\r\n    participant T as Trace Recorder\r\n    participant S as CG-first Strategy\r\n\r\n    A->>S: Ask for repository context\r\n    S->>SSE: Open MCP session\r\n    SSE->>MW: Validate bearer token\r\n\r\n    alt Token invalid\r\n        MW-->>A: 401 or 403\r\n    else Token valid\r\n        MW->>M: Route tool call in project context\r\n        M->>C: Check cached retrieval\r\n        alt Cache hit\r\n            C-->>M: Cached result\r\n        else Cache miss\r\n            M->>R: Resolve current project graph\r\n            R->>G: Query symbols and relationships\r\n            G-->>M: Graph result\r\n            M->>C: Store result in cache\r\n        end\r\n        M->>T: Record tool call, latency, result\r\n        M-->>S: Graph-backed context\r\n        S->>S: Score context quality under token budget\r\n        alt Graph quality sufficient\r\n            S-->>A: Return ContextGraph evidence\r\n        else Quality too low\r\n            S->>S: Read bounded local snippets as fallback\r\n            S-->>A: Return graph evidence plus local snippets\r\n        end\r\n    end",
+      "expires_at": null,
+      "kind": "amendment",
+      "path": ".adc/knowledge/diagrams/agent-lifecycle-sequence.mmd",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 76e1564e066a2353498c73644f2ebee8234679be1dd82186fe11f8454b1f8634"
+    },
+    {
+      "active": true,
+      "content": "flowchart LR\r\n    ClientAgent[External Coding Agent]\r\n    Strategy[CGFirstQueryStrategy]\r\n    MCPTools[ContextGraph MCP Tools]\r\n    Registry[GraphRegistry]\r\n    Graph[(Project FalkorDB Graph)]\r\n    Cache[(Redis Query Cache)]\r\n    Trace[(Trace Recorder and Evaluator)]\r\n    LocalFallback[Local Snippet Fallback]\r\n    Producer[MCPProducer]\r\n    Queue[(Redis Jobs Stream)]\r\n    Consumer[IndexerConsumer]\r\n    Pipeline[IndexPipeline]\r\n    Repo[Repository Files]\r\n\r\n    ClientAgent -->|query| Strategy\r\n    Strategy -->|retrieve_context and call graph| MCPTools\r\n    Strategy -->|fallback when graph quality is low| LocalFallback\r\n\r\n    MCPTools --> Cache\r\n    MCPTools --> Registry\r\n    MCPTools --> Trace\r\n    Registry --> Graph\r\n\r\n    MCPTools -->|index requests| Producer\r\n    Producer --> Queue\r\n    Consumer --> Queue\r\n    Consumer --> Pipeline\r\n    Pipeline --> Repo\r\n    Pipeline --> Registry\r\n\r\n    Trace -->|quality signals| Strategy\r\n    Graph -->|symbol and edge context| Strategy\r\n    Cache -->|warm reads| Strategy\r\n    LocalFallback -->|bounded code snippets| ClientAgent\r\n    MCPTools -->|final graph-backed context| ClientAgent\r\n",
+      "expires_at": null,
+      "kind": "amendment",
+      "path": ".adc/knowledge/diagrams/agent-relationships.mmd",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 bc36d754ca8318c39e9d8afeb5f3d9ab2fe3bf3b9c252300dca98e902d270f6d"
+    },
+    {
+      "active": true,
+      "content": "flowchart TB\r\n    Operator[Operator / Admin]\r\n    Browser[Browser]\r\n    AgentClient[Agent / MCP Client]\r\n    GitRepo[Repository on Disk]\r\n    GitHub[GitHub OAuth]\r\n    Microsoft[Microsoft Device Code OAuth]\r\n    AzureDevOps[Azure DevOps REST API]\r\n    BrowserAgentBridge[BrowserAgent Bridge at localhost:9876]\r\n    FdbBrowser[FalkorDB Browser UI]\r\n\r\n    subgraph Runtime[ContextGraph Runtime]\r\n        direction TB\r\n\r\n        subgraph Entry[HTTP Entry Surfaces]\r\n            AdminSPA[Admin SPA at /admin]\r\n            ViewerStatic[Viewer Static App at /viewer]\r\n            AuthAPI[Auth and Admin API at /api/auth]\r\n            RuntimeConfigAPI[Runtime Config API at /api/admin/runtime-config]\r\n            WorkBriefingAPI[WorkBriefing and Report API]\r\n            ScheduleAPI[Schedule API at /api/admin/schedules]\r\n            ViewerAPI[Viewer API at /api/viewer]\r\n            MCPServer[MCP SSE Server at /mcp]\r\n            AuditMW[Audit Middleware]\r\n            TokenMW[ProjectTokenMiddleware]\r\n        end\r\n\r\n        subgraph Services[Application Services]\r\n            GraphRegistry[GraphRegistry]\r\n            QueryStrategy[CG-first Query Strategy]\r\n            JobProducer[MCPProducer]\r\n            JobConsumer[IndexerConsumer]\r\n            IndexPipeline[IndexPipeline]\r\n            QueryCache[Redis Query Cache]\r\n            TraceRecorder[Trace Recorder]\r\n            TraceEvaluator[Trace Evaluator]\r\n            AdoEnrichment[ADO Ticket Enrichment]\r\n            ScheduledTaskWorker[Scheduled Task Worker]\r\n            BackupScheduler[Backup Service Scheduler]\r\n        end\r\n    end\r\n\r\n    subgraph State[State and Infrastructure]\r\n        AuthDB[(PostgreSQL Auth, OAuth, Audit, Ticket Cache)]\r\n        WorkDB[(PostgreSQL Work Activities)]\r\n        JobStream[(Redis Streams: contextgraph:jobs)]\r\n        TraceStream[(Redis Traces and Cache DB)]\r\n        Falkor[(FalkorDB Project Graphs)]\r\n        RuntimeConfigFile[(Runtime Config JSON: indexing, modules, SMTP)]\r\n    end\r\n\r\n    Operator --> Browser\r\n    Browser --> AdminSPA\r\n    Browser --> ViewerStatic\r\n    Browser --> AuthAPI\r\n    Browser --> RuntimeConfigAPI\r\n    Browser --> WorkBriefingAPI\r\n    Browser --> ScheduleAPI\r\n    AgentClient --> MCPServer\r\n\r\n    AuthAPI --> AuditMW\r\n    RuntimeConfigAPI --> AuditMW\r\n    WorkBriefingAPI --> AuditMW\r\n    ScheduleAPI --> AuditMW\r\n    ViewerAPI --> AuditMW\r\n    MCPServer --> AuditMW\r\n    MCPServer --> TokenMW\r\n\r\n    AdminSPA --> AuthAPI\r\n    AdminSPA --> RuntimeConfigAPI\r\n    AdminSPA --> WorkBriefingAPI\r\n    AdminSPA --> ScheduleAPI\r\n    AdminSPA --> ViewerAPI\r\n    AdminSPA -->|launch browser| FdbBrowser\r\n    ViewerStatic --> ViewerAPI\r\n\r\n    AuthAPI --> AuthDB\r\n    AuthAPI --> RuntimeConfigFile\r\n    RuntimeConfigAPI --> RuntimeConfigFile\r\n    RuntimeConfigAPI -->|start or stop modules| JobConsumer\r\n    RuntimeConfigAPI -->|start or stop modules| ScheduledTaskWorker\r\n    RuntimeConfigAPI -->|start or stop modules| BackupScheduler\r\n    AuthAPI --> GitHub\r\n    AuthAPI --> Microsoft\r\n    WorkBriefingAPI --> WorkDB\r\n    WorkBriefingAPI --> AdoEnrichment\r\n    ScheduleAPI --> AuthDB\r\n    ScheduleAPI --> ScheduledTaskWorker\r\n    ScheduledTaskWorker --> AuthDB\r\n    BackupScheduler --> AuthDB\r\n    ScheduledTaskWorker -->|BrowserAgent sequential page-test commands| BrowserAgentBridge\r\n    BrowserAgentBridge -->|queued command results| ScheduledTaskWorker\r\n    AdoEnrichment --> AuthDB\r\n    AdoEnrichment --> AzureDevOps\r\n    ViewerAPI --> GraphRegistry\r\n    MCPServer --> QueryStrategy\r\n    MCPServer --> QueryCache\r\n    MCPServer --> TraceRecorder\r\n    MCPServer --> JobProducer\r\n\r\n    QueryStrategy --> GraphRegistry\r\n    QueryStrategy --> QueryCache\r\n    GraphRegistry --> Falkor\r\n\r\n    JobProducer --> JobStream\r\n    JobConsumer --> JobStream\r\n    JobConsumer --> IndexPipeline\r\n    IndexPipeline --> GitRepo\r\n    IndexPipeline --> GraphRegistry\r\n\r\n    QueryCache --> TraceStream\r\n    TraceRecorder --> TraceStream\r\n    TraceEvaluator --> TraceStream\r\n    TraceEvaluator --> Falkor\r\n\r\n    AuthAPI --> JobConsumer\r\n    AuthAPI --> GraphRegistry\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/knowledge/diagrams/architecture.mmd",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 a2f55e020fc0b2a6c4ced07bce9ab86318b5e80a57081b48629a89c5f5389444"
+    },
+    {
+      "active": true,
+      "content": "%% Layout target: landscape Letter paper, compact two-lane diagram.\r\nflowchart TB\r\n    subgraph Build[\"Build the AST\"]\r\n        direction LR\r\n        Code[\"Source code or model output\"]\r\n        Tokens[\"Tokens\"]\r\n        Parser[\"Parser\"]\r\n        AST[\"Abstract Syntax Tree\"]\r\n        Code --> Tokens --> Parser --> AST\r\n    end\r\n\r\n    subgraph Shape[\"What the AST contains\"]\r\n        direction LR\r\n        Root[\"File root\"]\r\n        Imports[\"Imports\"]\r\n        Funcs[\"Functions\"]\r\n        Calls[\"Calls and variables\"]\r\n        Root --> Imports\r\n        Root --> Funcs\r\n        Funcs --> Calls\r\n    end\r\n\r\n    subgraph Use[\"Use the AST\"]\r\n        direction LR\r\n        Symbols[\"Symbols and scopes\"]\r\n        Semantics[\"Reference and API checks\"]\r\n        Edges[\"ContextGraph code edges\"]\r\n        Gate{\"Valid?\"}\r\n        Transform[\"Safe transform\"]\r\n        Done[\"Verified code change\"]\r\n        Symbols --> Semantics --> Edges --> Gate\r\n        Gate -->|yes| Transform --> Done\r\n    end\r\n\r\n    AST --> Root\r\n    AST --> Symbols\r\n\r\n    Gate -->|no| Error[\"Exact error location\"]\r\n    Error --> Repair[\"Repair subtree\"]\r\n    Repair --> Parser\r\n\r\n    classDef source fill:#ecfeff,stroke:#0891b2,color:#0f172a\r\n    classDef ast fill:#eef2ff,stroke:#4f46e5,color:#111827\r\n    classDef check fill:#f0fdf4,stroke:#16a34a,color:#111827\r\n    classDef error fill:#fef2f2,stroke:#dc2626,color:#111827\r\n    classDef context fill:#fff7ed,stroke:#ea580c,color:#111827\r\n\r\n    class Code,Tokens,Parser source\r\n    class AST,Root,Imports,Funcs,Calls ast\r\n    class Symbols,Semantics,Gate,Transform,Done check\r\n    class Error,Repair error\r\n    class Edges context",
+      "expires_at": null,
+      "kind": "amendment",
+      "path": ".adc/knowledge/diagrams/ast-workflow.mmd",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 9939bd919fbbcedc29dd7276bd8f5cb8574b4be1ead6a386d5c8d1df8aec5d7c"
+    },
+    {
+      "active": true,
+      "content": "flowchart TD\r\n    Agent[Agent / MCP Client] --> SSE[/mcp SSE endpoint/]\r\n    SSE --> TokenMW[ProjectTokenMiddleware]\r\n\r\n    TokenMW -->|invalid or missing token| Unauthorized[401 or 403]\r\n    Unauthorized --> Agent\r\n\r\n    TokenMW -->|project resolved| Tools[MCP retrieval and index tools]\r\n\r\n    Tools --> Cache{Query cache hit?}\r\n    Cache -->|yes| CachedResult[Cached graph result]\r\n    CachedResult --> Trace[Trace recorder]\r\n    Trace --> Agent\r\n\r\n    Cache -->|no| GraphLookup[Current project graph]\r\n    GraphLookup --> Falkor[(Project-scoped FalkorDB graph)]\r\n    Falkor --> ToolResult[retrieve_context or call-graph result]\r\n    ToolResult --> CacheWrite[Write cache]\r\n    CacheWrite --> Trace\r\n\r\n    Tools -->|index_full or index_incremental| JobProducer[MCPProducer]\r\n    JobProducer --> Jobs[(Redis stream contextgraph:jobs)]\r\n    Jobs --> JobConsumer[IndexerConsumer]\r\n    JobConsumer --> Pipeline[IndexPipeline]\r\n    Pipeline --> Repo[Repository files]\r\n    Pipeline --> Falkor\r\n\r\n    Admin[Admin UI] --> AuthAPI[/api/auth/]\r\n    AuthAPI --> AuthDB[(PostgreSQL auth, OAuth, and audit DB)]\r\n    AuthAPI --> MSLogin[Microsoft device-code OAuth]\r\n    MSLogin --> AuthDB\r\n    AuthAPI -->|trigger index| JobProducer\r\n    AuthAPI --> RuntimeConfig[(runtime-config.json indexing, module states, SMTP)]\r\n    RuntimeConfig -->|project fallback repo path| AuthAPI\r\n    AuthAPI -->|queue snapshot and graph stats| JobConsumer\r\n    AuthAPI -->|live graph stats| GraphLookup\r\n\r\n    Admin --> RuntimeConfigAPI[/api/admin/runtime-config/]\r\n    RuntimeConfigAPI --> RuntimeConfig\r\n    RuntimeConfig --> RuntimeConfigAPI\r\n    RuntimeConfigAPI -->|start or stop| JobConsumer\r\n    RuntimeConfigAPI -->|start or stop| Scheduler\r\n    RuntimeConfigAPI -->|start or stop| BackupScheduler[BackupService scheduler]\r\n    BackupScheduler --> AuthDB\r\n    RuntimeConfigAPI --> Admin\r\n\r\n    Admin --> ScheduleAPI[/api/admin/schedules/]\r\n    ScheduleAPI --> ScheduleTables[(scheduled_tasks and scheduled_task_runs)]\r\n    ScheduleTables --> Scheduler[ScheduledTaskWorker]\r\n    Scheduler -->|POST /command with tabId context| BABridge[BrowserAgent bridge]\r\n    BABridge -->|GET /result/{id}| Scheduler\r\n    Scheduler -->|run status and compact artifacts| ScheduleTables\r\n    ScheduleTables --> ScheduleAPI\r\n    ScheduleAPI --> Admin\r\n\r\n    Admin --> ReportAPI[/api/admin/work-briefing/]\r\n    ReportAPI --> WorkStore[(PostgreSQL work_activities)]\r\n    ReportAPI -->|include_external=true| AdoEnrich[Azure DevOps enrichment]\r\n    AdoEnrich --> AuthDB\r\n    AdoEnrich --> TicketCache[(external_ticket_cache)]\r\n    AdoEnrich --> AdoAPI[Azure DevOps work item and PR APIs]\r\n    AdoEnrich --> ReportData[Enriched WSR activity payload]\r\n    ReportData --> Admin\r\n\r\n    Viewer[Viewer UI] --> ViewerAPI[/api/viewer/]\r\n    ViewerAPI --> GraphLookup\r\n    ViewerAPI --> Chunk[graph chunk and stats response]\r\n    Chunk --> Viewer\r\n\r\n    Trace --> TraceStore[(Redis traces)]\r\n    TraceStore --> Eval[TraceEvaluator]\r\n    Eval --> Metrics[Quality and hallucination proxy metrics]\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/knowledge/diagrams/data-flow.mmd",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 7f5c7d40c8dafd20a3be52e9cc557640cef134b59fb807497c215c58e9a3c397"
+    },
+    {
+      "active": true,
+      "content": "# Technical Debt & No-Touch Zones\r\n- `src/legacy-billing/`: **DO NOT TOUCH**. This is a fragile legacy sub-system. Only modify if explicitly instructed by human to fix a critical P0 bug.\r\n- The `AuthService` class currently has tight coupling with the Redis cache. Do not attempt to refactor this class without explicit permission.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/knowledge/known-issues.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 0cecdcb3c72c1cc670f84297caaebbb79899886e5901524f6bc5f47ce327c450"
+    },
+    {
+      "active": true,
+      "content": "# Project Terminology & Abbreviations\r\n\r\nThis file defines all domain-specific terminology, abbreviations, and shortcuts used in this project and the ADC framework.\r\n\r\n## Development Workflow Abbreviations\r\n\r\n| Abbreviation | Full Term | Definition |\r\n|---|---|---|\r\n| **CPMD** | Checkin/Push/Merge/Deploy | Four-step git workflow: `git add -A`, `git commit -m \"...\"`, `git push origin main`, then deploy via CI/CD pipeline |\r\n| **TDD** | Test-Driven Development | Development methodology: write failing tests first, then implement to pass, then refactor with tests passing |\r\n| **ADC** | Autonomous Development Constitution | Standardized framework for managing project governance, AI instructions, and developer context in `.adc/` folder |\r\n| **GHC** | GitHub Copilot | Standard abbreviation for GitHub Copilot in this project documentation and discussion |\r\n| **MCP** | Model Context Protocol | Protocol for AI agents (like Copilot, Claude) to access external tools and data sources |\r\n| **ContextGraph** | ContextGraph | Central repository and artifact management system; use `ContextGraph` as shorthand in code/docs |\r\n\r\n## ContextGraph Components\r\n\r\n| Term | Definition |\r\n|---|---|\r\n| **ContextGraph** | Central artifact catalog, project registry, and orchestration service (default local CGA endpoint `http://localhost:18001`) |\r\n| **CGA MCP Server** | Model Context Protocol endpoint for programmatic ContextGraph access (default local dev SSE endpoint `http://localhost:18001/mcp/sse`) |\r\n| **CGA-Relay** | Local MCP gateway and project sync agent; workspace stored in `.adc/cga-relay`, implementation in `src/cga-relay` |\r\n| **CGA MCP Server Profile** | Standard MCP server profile name (`cga-mcp-server`) used by ADC templates for auto-loading CGA MCP wiring |\r\n| **CGA Admin UI** | Local setup surface for project registration and token creation at `http://localhost:18001/admin` |\r\n\r\n## Project Structure Terms\r\n\r\n| Term | Definition |\r\n|---|---|\r\n| **.adc/** | Hidden \"Autonomous Development Constitution\" directory at project root containing governance, AI instructions, and agent workspace |\r\n| **src/** | Source code directory containing all application logic, utilities, and build scripts |\r\n| **src/dist/** | Compiled/bundled output directory with subdirs: `release/` (production artifacts), `staging/` (pre-prod), `build/` (cache) |\r\n| **docs/** | User-facing, publishable project documentation (separate from `.adc/`) |\r\n| **tests/** | Isolated test directory mirroring `src/` structure; never mix with source files |\r\n| **.env** | Environment configuration file (git-ignored); never commit real secrets |\r\n| **.env.example** | Template with dummy values showing all required environment variables (committed to git) |\r\n\r\n## ADC Subdomains\r\n\r\n| Subdomain | Location | Purpose |\r\n|---|---|---|\r\n| **Planning** | `.adc/planning/` | Project phases, roadmap, status tracking |\r\n| **Standards** | `.adc/standards/` | Conventions, checklists, runbooks organized by domain |\r\n| **Knowledge** | `.adc/knowledge/` | Glossary, known issues, ADRs, diagrams |\r\n| **CGA-Relay** | `.adc/cga-relay/` | Relay workspace: tasks, scratchpad, MCP configs, skills |\r\n\r\n## File Type Conventions\r\n\r\n| Abbreviation | Full Name | Usage |\r\n|---|---|---|\r\n| **.md** | Markdown | Documentation, guidelines, decisions |\r\n| **.mmd** | Mermaid | Diagram format for architecture, data flow, state machines |\r\n| **.json** | JSON | Configuration files (mcp-servers.json, package.json) |\r\n| **ADR** | Architecture Decision Record | Historical record of why architectural choices were made |\r\n\r\n## Git & Deployment\r\n\r\n| Term | Definition |\r\n|---|---|\r\n| **Commit** | Git snapshot of code changes with descriptive message |\r\n| **Push** | Send committed changes from local to remote repository (origin/main) |\r\n| **Merge** | Integrate changes from one branch into another; main branch is primary |\r\n| **Deploy** | Release code to production via CI/CD pipeline triggered after push to main |\r\n| **origin/main** | Primary branch on remote repository; commits here trigger deployments |\r\n\r\n## Testing & Quality\r\n\r\n| Term | Definition |\r\n|---|---|\r\n| **Unit Test** | Test of single function/module in isolation |\r\n| **Integration Test** | Test of multiple components working together |\r\n| **E2E Test** | End-to-end test simulating real user workflows |\r\n| **Coverage** | Percentage of code lines executed by tests; target 80%+ for core logic |\r\n| **Mock** | Simulated object/service used in tests instead of real implementation |\r\n\r\n## Quality Glossary\r\n\r\n| Term | Definition |\r\n|---|---|\r\n| **Branch Coverage** | Percentage of decision branches (`if/else`, match/case, boolean paths) exercised by tests |\r\n| **Changed-Lines Coverage** | Coverage measured only on lines modified in the current change set |\r\n| **Mutation Score** | Percentage of injected code mutations that are detected (killed) by tests |\r\n| **Flaky Test Rate** | Ratio of tests that fail nondeterministically without code changes |\r\n| **Golden Test** | Regression test comparing generated output against approved baseline artifacts |\r\n| **Smoke Test** | Small, fast test set validating critical system behavior after changes |\r\n\r\n## Security & DevOps\r\n\r\n| Term | Definition |\r\n|---|---|\r\n| **CVE** | Common Vulnerabilities and Exposures; tracked severity score |\r\n| **CVSS** | Common Vulnerability Scoring System; 0-10 scale (threshold: 7.0+) |\r\n| **Secret Manager** | Secure storage for credentials (AWS Secrets Manager, HashiCorp Vault) |\r\n| **.gitignore** | File specifying paths Git should NOT commit (build artifacts, .env, node_modules) |\r\n| **Container** | Docker containerized application environment with resource limits |\r\n\r\n## Observability & Logging\r\n\r\n| Term | Definition |\r\n|---|---|\r\n| **Structured Logging** | JSON logs with consistent schema including event_id, timestamp, user_id |\r\n| **Distributed Tracing** | OpenTelemetry context propagation across services for end-to-end request tracking |\r\n| **Metrics** | Quantitative measurements (e.g., `orders_processed_total`) tracked over time |\r\n| **Telemetry** | Automated collection of system behavior data for monitoring and debugging |\r\n\r\n\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/knowledge/terminology.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 a631fbce79516f46b2420415f35c612cea22897ef372e9b7b55b0eab1e40f0bb"
+    },
+    {
+      "active": true,
+      "content": "# Project Status\r\n**Current Phase:** Phase 1 - Foundation & Prototyping\r\n**Active Goals:**\r\n- Establish base ADC infrastructure\r\n- Set up continuous integration\r\n- Initialize core database schemas\r\n\r\n**Recent Changes:**\r\n- [2026-03-13] Drafted the initial ADC specification.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/planning/status.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 7d7ef691853d5e61d288491a93fd8de703b930a2d4cbe27a3ca439a7f0a4bf66"
+    },
+    {
+      "active": true,
+      "content": "# AI Prompt Rules\r\n\r\n## Mandatory Core Rules\r\n- Use absolute paths when importing modules.\r\n- For every ADC update, increment README version and update README date in the same change.\r\n- Do not bypass safety checks in `.adc/standards/conventions/security.md`.\r\n- All project communications MUST follow the PQC/CNSA 2.0 baseline in `.adc/standards/conventions/security.md`.\r\n- Follow Test-Driven Development (TDD) in `.adc/standards/conventions/testing.md`.\r\n- Default frontend theme and layout should closely match `https://admin-demo.vuestic.dev`, with dark theme as the default.\r\n- For web page design/debug tasks, use the built-in browser shared page as the default validation surface before considering external browser automation.\r\n- Default web applications should use FastAPI, PostgreSQL with `pgvector`, dark mode, and the login background pattern defined in `.adc/standards/conventions/frontend.md`.\r\n- Do not introduce new third-party dependencies (for example, `npm install`, `pip install`) without explicit human authorization.\r\n- Document progress, failed attempts, and environment issues in `.adc/cga-relay/scratchpad/session.md` before concluding a task.\r\n- Keep outputs deterministic for the same symbol and unchanged repository state.\r\n\r\n## ADC Standard Version Tracking\n- CGA /admin/adc is the authoritative ADC catalog; do not fetch updates from the retired standalone ADC repository.\n- Read adc_catalog, adc_current and adc_history through the authenticated CGA MCP or Desktop Relay.\n- Only administrators approve adoption, upgrades, overrides and exemptions; projects remain pinned until approval.\n- Preview adc_diff and adc_sync before explicit application. Preserve project changes and resolve conflicts rather than overwriting them.\n- Track the published release, project revision, hashes and provenance in .adc/adc-lock.json; rollback appends history.\n\r\n## Repository and Workflow Rules\r\n- For new features, write tests first.\r\n- Keep source logic in `src/`, scripts in `src/scripts/`, tests in `src/tests/`, and docs in `docs/`.\r\n- Do not commit secrets, tokens, or private keys.\r\n- Unless a target system explicitly requires another format, all tokens MUST default to cryptographically random 35-character strings using only `A-Za-z0-9`.\r\n- All Docker commands must use the local Docker context by default; do not set `DOCKER_HOST` to an unauthenticated remote daemon.\r\n- Never commit directly to `main`; use a `dev/*` branch and merge through review.\r\n- If `.env` contains `CICD=enabled` and both `GITHUB_TOKEN` + `DEPLOY_WEBHOOK_URL`, ask for explicit human confirmation before initializing CI/CD wiring.\r\n\r\n## ContextGraph Use Policy\r\n- Use `cga-relay/` for local task orchestration and session context only.\r\n- Use `mcp-servers.json` and ContextGraph MCP endpoints for indexed retrieval/integration workflows only.\r\n- Ensure `.adc/cga-relay/mcp/mcp-servers.json` contains `cga-relay` before `cga-mcp-server`, with `cga-relay` enabled as the mandatory ContextGraph indexing and change aggregation path while `cga-mcp-server` is retained only as non-indexing fallback.\r\n- Register every project in Context Graph Agent (CGA) and automatically install or refresh the paired `cga-relay` profile before substantial feature work.\r\n- Report meaningful project change information to CGA through `cga-relay`, including change summaries, progress, validation evidence, release events, blockers, risks, and PR/PBI metadata. Also run `index_repo_changes(repo_path)` through `cga-relay` after meaningful source, documentation, configuration, or test changes; if relay is unavailable, record blocked change aggregation and retry rather than counting direct API or `cga-mcp-server` fallback as successful completion.\r\n- Do not assume a Node-specific local MCP bootstrap; prefer endpoint-first MCP profiles and keep integration language/runtime-agnostic unless the repository explicitly provides a local server implementation.\r\n- ContextGraph MCP must not replace local compile, lint, unit test, or integration test execution.\r\n- Treat scratchpad/task outputs as operational context, not canonical product truth.\r\n- Canonical rules must remain in `.adc/planning/`, `.adc/standards/`, and `.adc/knowledge/`.\r\n- Inject `CONTEXTGRAPH_MCP_TOKEN`, `CONTEXTGRAPH_EDGE_AGENT_TOKEN`, and `CONTEXTGRAPH_PROJECT_ID` via environment variables only.\r\n- Never write ContextGraph credentials into tracked files.\r\n- PRs changing ContextGraph integration behavior must update `.adc/bootstrap.md` and MCP server wiring, and include validation notes.\r\n\r\n## ContextGraph Retrieval and Token Policy\r\n- For non-trivial coding tasks, perform ContextGraph retrieval before editing files.\r\n- Prefer FalkorDB Cypher traversal over Python loops for impact graph search.\r\n- Required pre-edit sequence: `contextgraph_index_incremental` -> `contextgraph_query_impact_graph` -> `get_optimized_context` -> `contextgraph_fetch_minimal_code`.\r\n- Use incremental indexing for changed files through `cga-relay`; avoid full reindex for routine tasks.\r\n- Retrieve context in order: impact graph -> optimized context -> minimal code.\r\n- Use symbol-scoped or change-scoped queries; avoid whole-repository prompts.\r\n- Start with conservative budgets (`800-1500`) and expand only when evidence is insufficient.\r\n- Apply explicit `token_budget` limits and keep only direct dependencies, recent changes, and high-frequency call paths.\r\n- Reuse previously selected minimal context across related follow-up questions instead of re-fetching broad context.\r\n- If ContextGraph evidence is missing, report missing symbols/files first, then run one bounded fallback search.\r\n- Keep answers evidence-first by citing minimal retrieved code context before proposing broad refactors.\r\n\r\n## ContextGraph-First Trigger Conditions\r\n- Cross-module changes.\r\n- Noisy repository search or ambiguous ownership.\r\n- Runtime errors where call chain/source owner is unclear.\r\n- Requests expected to exceed a small context window.\r\n\r\n## Allowed Exceptions\r\n- Single-line edits with exact file and line already known.\r\n- Pure formatting or comment-only updates.\r\n- Emergency hotfixes where retrieval failure blocks immediate mitigation.\r\n\r\n## Architectural AI Assistant Role\r\n\r\n### Role\r\n\r\nYou are an architecture-level AI assistant integrated with the ContextGraph system. You hold the highest-privilege access to the project's logic graph via the MCP protocol and can understand complex code topology across file boundaries.\r\n\r\n### Universal Execution Logic\r\n\r\n**Graph-First:** Before handling any task, you MUST call the ContextGraph interface. Do not reason solely from the currently open file; you must obtain global context.\r\n\r\n**High-Signal Retrieval:** Refuse to read redundant code. Leverage graph database traversal to retrieve only what is relevant to the task nodes: interface definitions, upstream callers, downstream dependencies, and related configuration metadata.\r\n\r\n**Impact Analysis:** Before modifying any code, you MUST produce an impact analysis report identifying which modules will experience cascading effects from the change.\r\n\r\n**Architectural Consistency:** Strictly follow the design patterns expressed by the current project in ContextGraph. For security-sensitive projects, apply additional static checks for privilege escalation and data-leakage risks.\r\n\r\n### Output Rules\r\n\r\n- The server-managed effective output rules are authoritative for response formatting.\r\n- The relay materializes the current project rules at `.adc/standards/output/effective.md`; treat the `CGA-MANAGED` file marker as read-only.\r\n- Project-specific rules override the global profile only for fields explicitly configured by that project.\r\n- If the server is temporarily unavailable, continue using the last successfully synchronized rules and do not delete or replace that file with an empty fallback.\r\n- If no managed rules are available, use the legacy protocol: include the status header `[ContextGraph Indexing: Active]`, a brief topology summary, and prominently flag any `Logic Gap`.\r\n\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/prompt-rules.md",
+      "reason": "Explicit CGA consolidation: replace retired ADC update authority and obsolete plaintext Docker host; preceding revision retains original text"
+    },
+    {
+      "active": true,
+      "content": "# Autonomous PR Checklist\r\n*AI Agents MUST read and verify every item below before generating a Git commit or PR.*\r\n\r\n- [ ] Are all unit tests and E2E tests passing?\r\n- [ ] Did I verify the CVSS score of all new dependencies introduced?\r\n- [ ] Did I verify that all added or changed communication paths use PQC/CNSA 2.0-compliant ML-KEM/ML-DSA or approved CRYSTALS/PQC successor algorithms?\r\n- [ ] Did I verify that ContextGraph indexing and project change information aggregation completed through `cga-relay`, and that no direct API or `cga-mcp-server` fallback was counted as official success?\r\n- [ ] Did I auto-update the Mermaid diagrams in `.adc/knowledge/diagrams/` to match my architectural modifications?\r\n- [ ] Are Docker CPU/Memory resource limits properly set as environment variables?",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/standards/checklists/pr-review.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 ba715fef95589a665bc569099bf590d22b8bd8802a7bc245a0834e23bf31094d"
+    },
+    {
+      "active": true,
+      "content": "# Backend Application Policy\r\n\r\n## Default API Runtime\r\n- **FastAPI Default**: New web application backends SHOULD use FastAPI as the default API framework unless project requirements explicitly justify another runtime.\r\n- **Typed Contracts**: FastAPI request and response models MUST use explicit Pydantic schemas for externally visible API contracts.\r\n- **Health Endpoint**: FastAPI services MUST expose a lightweight `/health` endpoint suitable for Docker Compose health checks and local smoke validation.\r\n- **Async Boundaries**: Use async handlers for I/O-heavy endpoints and keep blocking CPU-heavy work outside request handlers unless explicitly bounded.\r\n\r\n## Default Web App Data Pairing\r\n- **PostgreSQL Default**: New web application backends SHOULD use PostgreSQL as the default relational database.\r\n- **pgvector Default**: If the application includes semantic search, recommendations, embeddings, RAG, or AI-assisted retrieval, PostgreSQL with `pgvector` is the default vector store.\r\n- **Migration Discipline**: Schema changes MUST be expressed through repeatable migrations and include rollback or forward-fix notes.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/standards/conventions/backend.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 3130fd3d5c09898492bb58687d292f68dfd8ca488d7546d8426628c7fc4c54db"
+    },
+    {
+      "active": true,
+      "content": "# DevOps Workflow Policy\r\n\r\n## Branching and Check-In Rules\r\n- **No Direct Check-In to `main`**: Direct commits or direct pushes to the `main` branch are forbidden.\r\n- **Required Development Branch**: All code check-ins MUST be performed on a dedicated development branch named `dev/<scope>` (or `dev/<scope>-<ticket>`).\r\n- **Merge Path**: Changes MUST be merged into `main` only through a reviewed Pull Request.\r\n- **Pre-Merge Gates**: Required CI checks and policy checklist validation MUST pass before merge.\r\n- **Hotfix Exception**: Emergency hotfixes may use `hotfix/<scope>` branches, but direct commits to `main` are still forbidden.\r\n\r\n## Deploy Key Handling Policy\r\n- **Documentation Location**: The active public deploy key MUST be recorded in `docs/deploy_key.md`.\r\n- **Preferred Source**: Reuse an existing approved public deploy key when available.\r\n- **Fallback Generation**: If no approved deploy key exists, generate a new SSH key pair without passphrase and record the public key in `docs/deploy_key.md`.\r\n- **No Private Key in Repo**: Private keys MUST NEVER be committed to the repository.\r\n- **Rotation Update**: When deploy keys rotate, `docs/deploy_key.md` MUST be updated in the same change set.\r\n\r\n## ContextGraph Integration Policy\r\n- **Authoritative Onboarding URL**: Integration with ContextGraph MUST use the Context Graph Agent (CGA) Admin UI at `http://localhost:18001/admin` as the local setup surface for project registration and token creation.\r\n- **Mandatory Registration**: All ADC-compliant projects MUST be registered in Context Graph Agent (CGA) before feature work begins unless CGA is temporarily unavailable and the exception is documented.\r\n- **Automatic Relay Installation**: Project bootstrap MUST automatically install or refresh the paired `cga-relay` profile before the fallback `cga-mcp-server` profile in `.adc/contextgraph-edge-agent/mcp/mcp-servers.json` using environment-variable backed credentials.\r\n- **No Unreviewed Deviation**: Agents and developers MUST NOT use alternate ContextGraph onboarding flows unless explicitly approved in the same PR description.\r\n- **Traceability Requirement**: Any PR that introduces or changes ContextGraph integration MUST include a short \"ContextGraph integration notes\" section describing what step(s) from the onboarding URL were applied.\r\n- **MCP Alignment**: If ContextGraph integration adds or changes external service endpoints or credentials, `mcp-servers.json` MUST be updated in the same change set.\r\n\r\n## ContextGraph Edge Agent and ContextGraph MCP Use Policy\r\n- **Responsibility Split**: `contextgraph-edge-agent/` is for local orchestration artifacts (task queues, scratchpad notes, MCP wiring). ContextGraph MCP is for programmatic integration/retrieval against ContextGraph services.\r\n- **CGA Relay Profile Baseline**: ADC templates MUST ship a `cga-relay` entry before `cga-mcp-server` in `.adc/contextgraph-edge-agent/mcp/mcp-servers.json` so downstream repositories auto-inherit mandatory relay-first CGA wiring with MCP server fallback.\r\n- **Relay-First Execution Policy**: All ContextGraph MCP retrieval, progress-reporting, and integration operations MUST attempt `cga-relay` first. `cga-mcp-server` MAY be used for non-indexing compatibility only after relay is unavailable, and the fallback reason MUST be documented in task or validation notes.\r\n- **Mandatory CGA-Relay Indexing**: All ADC-compliant projects MUST complete ContextGraph indexing through `cga-relay`, including initial full-project indexing, incremental indexing, and `index_repo_changes(repo_path)`. `cga-mcp-server` fallback MAY document a relay outage, but it MUST NOT be treated as successful indexing completion.\r\n- **Mandatory CGA-Relay Change Aggregation**: All ADC-compliant projects MUST aggregate project change information into CGA through `cga-relay`, including change summaries, modified-file indexing metadata, progress updates, validation evidence, release events, blockers, risks, and PR/PBI metadata. Direct CGA API writes or fallback MCP writes MAY document relay outages, but they MUST NOT be treated as official change reporting completion.\r\n- **Runtime Neutrality**: MCP wiring MUST be language-agnostic by default. Do not require a Node-specific local entrypoint unless that repository explicitly ships and maintains one.\r\n- **Execution Policy**: ContextGraph MCP MUST NOT be used to replace local compile, lint, unit test, or integration test execution. Build/test must run through project-native tooling.\r\n- **Authority Policy**: Outputs from ContextGraph Edge Agent scratchpad/tasks are operational context, not product truth. Canonical product rules remain in constitution/convention/planning files.\r\n- **Network Policy**: Local ContextGraph services are expected on localhost endpoints; upstream ContextGraph access MUST use the configured upstream URL and approved credentials only.\r\n- **Default Relay Endpoint**: Local dev MCP clients MUST route `cga-relay` to `http://localhost:18001/mcp/sse` unless the CGA deployment explicitly advertises a different relay or MCP SSE endpoint.\r\n- **Secret Policy**: Tokens and project identifiers (`CONTEXTGRAPH_MCP_TOKEN`, `CONTEXTGRAPH_EDGE_AGENT_TOKEN`, `CONTEXTGRAPH_PROJECT_ID`) MUST be injected via environment variables and never committed to repository files.\r\n- **Change Policy**: Any PR changing ContextGraph integration behavior MUST update both `bootstrap.md` and `mcp-servers.json`, and include validation notes.\r\n\r\n## CGA Change Aggregation, Progress Reporting, and Indexing Policy\r\n- **Automatic Progress Reporting**: Projects MUST emit progress and change reports to CGA through `cga-relay`, using `workassist_record_activity` or the relay-approved change reporting tool for service starts, template generation, feature milestones, validation runs, releases, blockers, risks, and PR/PBI metadata.\r\n- **Change Indexing**: After meaningful source, documentation, configuration, or test changes, agents MUST run `index_repo_changes(repo_path)` through `cga-relay`, so CGA indexes modified content through the required relay path.\r\n- **Periodic Indexing**: Long-running projects SHOULD schedule periodic incremental indexing even when no single task explicitly requests it, so CGA remains current.\r\n- **Failure Handling**: If `cga-relay` change aggregation or indexing is unavailable, continue local build/test validation, record the blocked change aggregation in `.adc/contextgraph-edge-agent/scratchpad/session.md`, and retry when CGA is reachable. Do not mark change reporting or indexing complete through direct API or `cga-mcp-server` fallback.\r\n\r\n## CI/CD Policy (GitHub + Webhook Deploy)\r\n\r\n### Conditional Initialization Rule\r\n- If `.env` includes `CICD=enabled` (or legacy `CICD_Enabled=true`), `GITHUB_TOKEN`, and `DEPLOY_WEBHOOK_URL`, the automation workflow MUST ask the user to confirm initialization before making CI/CD changes.\r\n- Confirmation text MUST clearly state target repo, deployment webhook endpoint, deployment branch, and whether deployment test trigger is enabled.\r\n\r\n### Baseline Inputs\r\n- Git provider and repository URL MUST be defined using GitHub.\r\n- ADC implementation changes belong in the CGA repository; governance content is published as immutable releases through CGA /admin/adc. Do not write to the retired standalone ADC repository.\r\n- Deployment target MUST include a reachable deployment webhook endpoint.\r\n- Production deployment branch is `main` unless explicitly overridden.\r\n- Branch policy: `main -> production`, `dev/* -> staging/non-prod`.\r\n\r\n### Trigger and Fallback Model\r\n- Preferred mode is **Webhook-driven auto deploy** on push events for target branch.\r\n- Fallback mode is manual deployment trigger from deployment platform tooling.\r\n- Canonical trigger chain: push -> GitHub push event -> webhook delivery -> deployment queue -> build/startup -> health check pass.\r\n\r\n### Secret and Security Controls\r\n- Required environment variables: `GITHUB_URL`, `GITHUB_TOKEN`, `DEPLOY_WEBHOOK_URL`.\r\n- Recommended variable: `WEBHOOK_SECRET` for explicit secret ownership and rotation.\r\n- Admin tokens MUST NOT be logged, echoed, or written to tracked files.\r\n- Tokens MUST use least privilege and be scoped to repo-hook management (GitHub) and deployment operations for your target platform.\r\n- CI/CD setup jobs MUST fail closed if webhook secret synchronization fails.\r\n- Webhook events MUST be restricted to push events and branch-filtered to target branch.\r\n- CI/CD setup output MUST provide an auditable summary without exposing sensitive values.\r\n\r\n### Required Validation Sequence\r\n- Validate GitHub token with `GET /user`.\r\n- Validate deployment webhook endpoint reachability.\r\n- Ensure deployment target branch equals configured deployment branch.\r\n- Create or update GitHub webhook with push-only events and matching secret.\r\n- Execute webhook test delivery and require HTTP 2xx.\r\n- Verify deployment appears in deployment queue and commit SHA matches pushed SHA.\r\n\r\n## Docker Compose Health Check Policy\r\n- Every service in every `docker-compose.yml` / `docker-compose.yaml` file MUST include the following health check block (unless a stricter service-specific endpoint is explicitly approved):\r\n\r\n```yaml\r\nhealthcheck:\r\n\ttest:\r\n\t\t- CMD\r\n\t\t- curl\r\n\t\t- '-f'\r\n\t\t- 'http://localhost:8000/health'\r\n\tinterval: 30s\r\n\ttimeout: 10s\r\n\tretries: 3\r\n\tstart_period: 40s\r\n```\r\n\r\n\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/standards/conventions/devops.md",
+      "reason": "Explicit CGA consolidation: replace retired ADC update authority and obsolete plaintext Docker host; preceding revision retains original text"
+    },
+    {
+      "active": true,
+      "content": "# Frontend Application Policy\r\n\r\n## Default Web App Experience\r\n- **Dark Mode Default**: All web application projects MUST default to dark mode unless the product owner explicitly approves another theme. Light mode may exist as an option, but the first-run experience should be dark.\r\n- **Admin UI Baseline**: Dashboard/admin surfaces SHOULD use the layout density, navigation rhythm, and component proportions of `https://admin-demo.vuestic.dev` as the default visual reference.\r\n- **Login Background Default**: Login pages SHOULD use a Vanta.js net-style background with white dots/lines at 15% opacity. If Vanta.js cannot be loaded safely, provide a static CSS fallback that preserves the same white net-on-dark visual intent.\r\n- **Accessible Contrast**: Dark mode colors MUST meet WCAG AA contrast for text and controls. Do not rely on opacity-only text for primary labels or actionable controls.\r\n\r\n## Browser Debugging Policy\r\n- **Built-In Browser First**: For all projects that design or modify web pages, agents MUST use the built-in browser shared page as the default debugging and self-validation surface.\r\n- **Self-Debug Requirement**: Before concluding frontend work, agents SHOULD load the changed page in the built-in browser shared page, inspect visible layout/state, and capture console or network errors when available.\r\n- **BrowserAgent Exception**: Use the BrowserAgent (BA) project plus browser extension only for special cases that require extension APIs, browser-permission flows, cross-browser behavior, or automation unavailable in the built-in browser shared page.\r\n- **Evidence Discipline**: Frontend validation notes SHOULD state which page was opened, what viewport/state was checked, and whether console/runtime errors were observed.\r\n\r\n## Default Frontend Integration\r\n- **FastAPI Pairing**: New web apps SHOULD assume a FastAPI backend unless the target platform explicitly requires another API framework.\r\n- **pgvector-Aware UX**: Search, recommendation, semantic retrieval, or AI-assist UI flows SHOULD be designed with PostgreSQL `pgvector` as the default vector persistence layer.\r\n",
+      "expires_at": null,
+      "kind": "override",
+      "path": ".adc/standards/conventions/frontend.md",
+      "reason": "Preserve pre-existing ContextGraphAgent governance during CGA adoption; file SHA256 4cb4c5768c7f09c60157f904bb1e2f80470a27772784c324227a68921c968e1d"
+    },
+    {
+      "active": true,
+      "content": null,
+      "expires_at": null,
+      "kind": "exemption",
+      "path": ".adc/contextgraph-edge-agent/mcp/mcp-servers.json",
+      "reason": "Machine-local MCP credentials, session notes and task queues remain local; they are not centrally exported or overwritten"
+    },
+    {
+      "active": true,
+      "content": null,
+      "expires_at": null,
+      "kind": "exemption",
+      "path": ".adc/contextgraph-edge-agent/scratchpad/session.md",
+      "reason": "Machine-local MCP credentials, session notes and task queues remain local; they are not centrally exported or overwritten"
+    },
+    {
+      "active": true,
+      "content": null,
+      "expires_at": null,
+      "kind": "exemption",
+      "path": ".adc/contextgraph-edge-agent/tasks/done/.gitkeep",
+      "reason": "Machine-local MCP credentials, session notes and task queues remain local; they are not centrally exported or overwritten"
+    },
+    {
+      "active": true,
+      "content": null,
+      "expires_at": null,
+      "kind": "exemption",
+      "path": ".adc/contextgraph-edge-agent/tasks/in-progress/.gitkeep",
+      "reason": "Machine-local MCP credentials, session notes and task queues remain local; they are not centrally exported or overwritten"
+    },
+    {
+      "active": true,
+      "content": null,
+      "expires_at": null,
+      "kind": "exemption",
+      "path": ".adc/contextgraph-edge-agent/tasks/todo/TASK-001.md",
+      "reason": "Machine-local MCP credentials, session notes and task queues remain local; they are not centrally exported or overwritten"
+    }
+  ],
+  "created_at": "2026-10-06 17:32:00.376804+00:00",
+  "effective_sha256": "eb2f913889b0aced7f6cdcd695d8218ef69ae7e8702a75e624f1e3e9698886cb",
+  "evaluated_at": "2026-10-06 18:21:43.679065+00:00",
+  "files": [
+    {
+      "path": ".adc/.aider.rules",
+      "sha256": "22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "path": ".adc/.antigravityrules",
+      "sha256": "22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "path": ".adc/.clinerules",
+      "sha256": "22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "path": ".adc/.codexrules",
+      "sha256": "22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "path": ".adc/.codyrules",
+      "sha256": "22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "path": ".adc/.cursorrules",
+      "sha256": "22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "path": ".adc/.github/copilot-instructions.md",
+      "sha256": "e25602be48a8048cd5f8846c7ed656552f115265cc4a88503c1c55a5e3032d62"
+    },
+    {
+      "path": ".adc/.github/pull_request_template.md",
+      "sha256": "33307a8c2fcaa43ef38ddde350cb05db46b83f59d20f6a1aca834aeb91af3e38"
+    },
+    {
+      "path": ".adc/.github/workflows/policy-ci.yml",
+      "sha256": "29b1a111acca35a9492ff95697787b5c175da8e01a4393f65e25bbb491180797"
+    },
+    {
+      "path": ".adc/.roomadesrules",
+      "sha256": "22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "path": ".adc/.windsurfrules",
+      "sha256": "22bad47baed51fbada4383b7b4c7aefe0ef87df2fa5ab9b3fbcf7a330dd708b5"
+    },
+    {
+      "path": ".adc/adcignore",
+      "sha256": "075747a14e89add887e4b3a6ba60e17e0476f4df18ef006348aa3bbd718801e0"
+    },
+    {
+      "path": ".adc/bootstrap.md",
+      "sha256": "912d47fd7f95b770ae46e2f72802ff726cd2225e13f34bbd473b93c3f52bed5d"
+    },
+    {
+      "path": ".adc/cga-relay/skills/sample-skill/SKILL.md",
+      "sha256": "0abfb98fe95bfe9830c9d348f9f255e9f296c99e076101e77f19bc4fa8daee16"
+    },
+    {
+      "path": ".adc/contextgraph-edge-agent/skills/sample-skill/SKILL.md",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".adc/docs/deploy_key.md",
+      "sha256": "4ae7d6ff12fffefe9b8534ea72fe4f492e1a8b5e4bac3412f31b6bd4a0b37baf"
+    },
+    {
+      "path": ".adc/index.md",
+      "sha256": "b4e4ed7c3fe1a65ee56d64836af3167d1d106826bc4940fcfc93696bcaa30def"
+    },
+    {
+      "path": ".adc/knowledge/adr/001-why-we-use-redis.md",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".adc/knowledge/amendments.md",
+      "sha256": "3759a5291904f5b131d498d1dd921ed284017909c359b110cd2e03f833b3eee6"
+    },
+    {
+      "path": ".adc/knowledge/diagrams/agent-exception-recovery.mmd",
+      "sha256": "9296d960c51fa0160f7f825b7dc3851b4a3056751bb23c54f8f48608afbe7cc2"
+    },
+    {
+      "path": ".adc/knowledge/diagrams/agent-lifecycle-sequence.mmd",
+      "sha256": "76e1564e066a2353498c73644f2ebee8234679be1dd82186fe11f8454b1f8634"
+    },
+    {
+      "path": ".adc/knowledge/diagrams/agent-relationships.mmd",
+      "sha256": "bc36d754ca8318c39e9d8afeb5f3d9ab2fe3bf3b9c252300dca98e902d270f6d"
+    },
+    {
+      "path": ".adc/knowledge/diagrams/architecture.mmd",
+      "sha256": "a2f55e020fc0b2a6c4ced07bce9ab86318b5e80a57081b48629a89c5f5389444"
+    },
+    {
+      "path": ".adc/knowledge/diagrams/ast-workflow.mmd",
+      "sha256": "9939bd919fbbcedc29dd7276bd8f5cb8574b4be1ead6a386d5c8d1df8aec5d7c"
+    },
+    {
+      "path": ".adc/knowledge/diagrams/data-flow.mmd",
+      "sha256": "7f5c7d40c8dafd20a3be52e9cc557640cef134b59fb807497c215c58e9a3c397"
+    },
+    {
+      "path": ".adc/knowledge/glossary.md",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".adc/knowledge/known-issues.md",
+      "sha256": "0cecdcb3c72c1cc670f84297caaebbb79899886e5901524f6bc5f47ce327c450"
+    },
+    {
+      "path": ".adc/knowledge/terminology.md",
+      "sha256": "a631fbce79516f46b2420415f35c612cea22897ef372e9b7b55b0eab1e40f0bb"
+    },
+    {
+      "path": ".adc/planning/development-phases.md",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".adc/planning/project-roadmap.md",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": ".adc/planning/status.md",
+      "sha256": "7d7ef691853d5e61d288491a93fd8de703b930a2d4cbe27a3ca439a7f0a4bf66"
+    },
+    {
+      "path": ".adc/prompt-rules.md",
+      "sha256": "0907c0be42d5a3ca369889b5023282ea0704865c32d012d09f8eb37c381aab7a"
+    },
+    {
+      "path": ".adc/standards/checklists/pr-review.md",
+      "sha256": "ba715fef95589a665bc569099bf590d22b8bd8802a7bc245a0834e23bf31094d"
+    },
+    {
+      "path": ".adc/standards/conventions/backend.md",
+      "sha256": "3130fd3d5c09898492bb58687d292f68dfd8ca488d7546d8426628c7fc4c54db"
+    },
+    {
+      "path": ".adc/standards/conventions/data-engineering.md",
+      "sha256": "7c2234367f839e00582927d5a3264684f83b04c1568f7edc3b28e6802f3235c0"
+    },
+    {
+      "path": ".adc/standards/conventions/devops.md",
+      "sha256": "75886eb63ba7fe5c23c47737ffa1ea6877075f11ef01d140017d82e4828cdfa8"
+    },
+    {
+      "path": ".adc/standards/conventions/frontend.md",
+      "sha256": "4cb4c5768c7f09c60157f904bb1e2f80470a27772784c324227a68921c968e1d"
+    },
+    {
+      "path": ".adc/standards/conventions/observability.md",
+      "sha256": "8d284d8cca3af47b2f7977ceb487eb476232b1d3caaa0481aebaf6b2cd155389"
+    },
+    {
+      "path": ".adc/standards/conventions/performance.md",
+      "sha256": "898fc991cb445a13252f1b86e659f6dfbd819ce023c5e9f37d90268d6c9f0779"
+    },
+    {
+      "path": ".adc/standards/conventions/security.md",
+      "sha256": "c8a56fd987141d4f29a7ca87f9f811cc82fa6a90adfc7ed9c9c181bfd98c58aa"
+    },
+    {
+      "path": ".adc/standards/conventions/structure.md",
+      "sha256": "c756a5cfc48f3cc3a3703e9d9198c60d6313017b65b15d96f96b2bd1e082411e"
+    },
+    {
+      "path": ".adc/standards/conventions/testing.md",
+      "sha256": "874363d68ae1438f878123f9eea2ec35615d0f8704c40c56bfe8a490ff0bfdf6"
+    },
+    {
+      "path": ".adc/standards/runbooks/001-common-errors.md",
+      "sha256": "1daee17844d175ace1f1a6f3f6a44b1f34050a28a4ef8c105678aaa2512de925"
+    },
+    {
+      "path": ".adc/standards/runbooks/002-cicd-github-webhook-debug.md",
+      "sha256": "502d111043c183ba21a83d5936ecd9eb867a94a30a80208e950658ff1958faee"
+    }
+  ],
+  "project_external_id": "J4BE9NUG2A",
+  "project_id": 8,
+  "reason": "CGA authority cutover with all original project-specific rules retained in prior revision",
+  "release": {
+    "actor": "system:local-adc-import",
+    "created_at": "2026-10-05 22:40:28.241495+00:00",
+    "id": 1,
+    "major": 1,
+    "minor": 1,
+    "patch": 23,
+    "reason": "Import the complete locally available ADC release; no claim of upstream freshness.",
+    "sha256": "2308792a05d5418fd1f821d0777e373ddc4e11d13eabafcc29ae7cba9d4154a3",
+    "source": "ADC local release package 1.1.23",
+    "version": "1.1.23"
+  },
+  "release_id": 1,
+  "restored_from": null,
+  "reviewed_paths": [],
+  "revision": 2
+}
