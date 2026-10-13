@@ -1,6 +1,6 @@
 # Agent Memory Layer: Borrowed Design Ideas
 
-Status: Proposed (design only, no runtime changes yet)
+Status: Phase 1 implemented locally; phases 2-3 remain proposed.
 Reference studied: TencentDB Agent Memory (`TencentCloud/tencentdb-agent-memory`, v2.0.3-beta.1).
 Licensing note: the upstream license metadata was `NOASSERTION` when reviewed. Only architectural ideas are adopted here; no upstream code, schemas, or prompts are copied.
 
@@ -32,10 +32,13 @@ A memory layer is an optional, derived view on top of those records. It must nev
 ## Phased Adoption
 
 ### Phase 1: Read-only summary export
-- Export sanitized activity summaries using the existing `_sanitize_activity` pattern in `src/backend/ai_first/service.py` (drops `body_text` and raw metadata values).
-- Attach provenance (idea 8) to every exported item.
-- Keep injection minimal (idea 2) and keep Knowledge separate (idea 5).
-- Exit criteria: summaries are retrievable through existing MCP tools with no raw content leakage, covered by tests.
+- Added the read-only `workassist_get_memory_context` MCP tool, scoped to the authenticated project and capped at 100 items.
+- Each returned item contains only its summary (falling back to title), event type, status, tags, and provenance. It omits `body_text`, raw metadata, and embedding text, following the safe projection pattern in `src/backend/ai_first/service.py`.
+- Provenance includes the activity ID, source item ID, project ID, occurred-at timestamp, and a sanitized source URL with credentials, query, and fragment removed. A commit SHA is extracted when the URL has a recognizable commit path.
+- `confidence` is `null` until CGA has a defensible confidence-scoring method; the implementation does not invent a score.
+- This is read-only and derives results from existing Work Briefing records; no memory database, persisted summary, or conversation write-back was added.
+- Unit tests cover authenticated project scoping, sanitized provenance, and exclusion of body, metadata, embedding text, and URL credentials.
+- ContextGraph indexing and change aggregation were unavailable during this implementation; local tests are not a substitute for that workflow.
 
 ### Phase 2: Derived layers and governance
 - Add atomic-fact and scenario summary layers (idea 1).
