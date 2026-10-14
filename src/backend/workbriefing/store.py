@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from typing import Any, Protocol
 
 import asyncpg
+import structlog
 
 from backend.workbriefing.models import WorkActivity
 
@@ -16,10 +17,26 @@ DEFAULT_DSN_ENV = "WORKBRIEFING_POSTGRES_DSN"
 DEFAULT_DSN = "postgresql://app:app@localhost:15432/appdb"
 
 
+log = structlog.get_logger()
+
+_ACTIVITY_COLUMNS = (
+    "activity_id, plugin_id, source_system, source_type, source_item_id, project_id, workspace_name, "
+    "event_type, title, summary, body_text, status, priority, owner, source_url, tags, occurred_at, "
+    "synced_at, content_hash, raw_metadata, embedding_text"
+)
+
+
 @dataclass(frozen=True)
 class ActivityUpsertResult:
     operation: str
     activity: WorkActivity
+
+
+@dataclass(frozen=True)
+class ActivitySearchResult:
+    activities: list[WorkActivity]
+    mode: str
+    fts_available: bool
 
 
 class ActivityStore(Protocol):
@@ -43,6 +60,9 @@ class ActivityStore(Protocol):
         ...
 
     async def cleanup_exact_duplicates(self, project_id: str | None = None, dry_run: bool = True) -> dict[str, Any]:
+        ...
+
+    async def search_activities(self, *, project_id: str, query: str, limit: int = 25) -> ActivitySearchResult:
         ...
 
 
@@ -435,6 +455,50 @@ class PgVectorActivityStore:
             "duplicate_count": len(deleted_ids),
             "deleted_activity_ids": deleted_ids,
         }
+
+    async def search_activities(self, *, project_id: str, query: str, limit: int = 25) -> ActivitySearchResult:
+        """Rank project activity by full-text match on title, summary and tags; fall back to substring match."""
+        await self.ensure_schema()
+        safe_limit = max(1, min(int(limit), 100))
+        try:
+            activities = await self._search_full_text(project_id, query, safe_limit)
+            return ActivitySearchResult(activities=activities, mode="full_text", fts_available=True)
+        except asyncpg.PostgresError as exc:
+            log.warning("work_activity_full_text_unavailable", error_type=type(exc).__name__)
+        activities = await self._search_lexical(project_id, query, safe_limit)
+        return ActivitySearchResult(activities=activities, mode="lexical_fallback", fts_available=False)
+
+    def _search_document_sql(self) -> str:
+        return "coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || array_to_string(tags, ' ')"
+
+    async def _search_full_text(self, project_id: str, query: str, limit: int) -> list[WorkActivity]:
+        pool = await self._get_pool()
+        document = f"to_tsvector('simple', {self._search_document_sql()})"
+        sql = f"""
+        SELECT {_ACTIVITY_COLUMNS}
+        FROM {self._qualified("work_activities")}
+        WHERE project_id = $1 AND {document} @@ websearch_to_tsquery('simple', $2)
+        ORDER BY ts_rank({document}, websearch_to_tsquery('simple', $2)) DESC,
+                 occurred_at DESC, source_item_id DESC
+        LIMIT $3
+        """
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql, project_id, query, limit)
+        return [self._activity_from_row(row) for row in rows]
+
+    async def _search_lexical(self, project_id: str, query: str, limit: int) -> list[WorkActivity]:
+        pool = await self._get_pool()
+        escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        sql = f"""
+        SELECT {_ACTIVITY_COLUMNS}
+        FROM {self._qualified("work_activities")}
+        WHERE project_id = $1 AND ({self._search_document_sql()}) ILIKE $2 ESCAPE '\\'
+        ORDER BY occurred_at DESC, source_item_id DESC
+        LIMIT $3
+        """
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(sql, project_id, f"%{escaped}%", limit)
+        return [self._activity_from_row(row) for row in rows]
 
     @staticmethod
     def _activity_from_row(row: asyncpg.Record) -> WorkActivity:

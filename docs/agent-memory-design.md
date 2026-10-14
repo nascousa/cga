@@ -1,6 +1,6 @@
 # Agent Memory Layer: Borrowed Design Ideas
 
-Status: Phase 1 implemented locally; phases 2-3 remain proposed.
+Status: Phases 1-3 implemented; the transparent proxy remains deferred.
 Reference studied: TencentDB Agent Memory (`TencentCloud/tencentdb-agent-memory`, v2.0.3-beta.1).
 Licensing note: the upstream license metadata was `NOASSERTION` when reviewed. Only architectural ideas are adopted here; no upstream code, schemas, or prompts are copied.
 
@@ -40,14 +40,18 @@ A memory layer is an optional, derived view on top of those records. It must nev
 - Unit tests cover authenticated project scoping, sanitized provenance, and exclusion of body, metadata, embedding text, and URL credentials.
 - ContextGraph indexing and change aggregation were unavailable during this implementation; local tests are not a substitute for that workflow.
 
-### Phase 2: Derived layers and governance
-- Add atomic-fact and scenario summary layers (idea 1).
-- Add governance fields and a review state for team sharing (idea 3).
-- Add the full-text fallback and health flag (idea 6).
+### Phase 2: Derived layers and governance (implemented)
+- Layered memory (idea 1): `workassist_get_memory_context` now returns the per-item fact layer (`memories`) plus a derived `scenarios` layer grouped by event type, with counts, latest timestamp, status counts, top tags and member IDs. Persona / team doctrine stays in `.adc/standards/`.
+- Governance (idea 3): each memory item carries `governance` with `owner`, `visibility` (`project`), `review_status` (`unreviewed`) and a `version` derived from the content hash. No cross-project or team sharing path exists, so nothing leaves the authenticated project unreviewed.
+- Full-text fallback and health flag (idea 6): `workassist_search_memory` ranks title, summary and tags with PostgreSQL full-text search (`websearch_to_tsquery` + `ts_rank`; this is not literal BM25). If full-text search fails, it falls back to an escaped substring match and returns `fts_available: false` with `search_mode: lexical_fallback`. Body text is never searched or returned.
 
-### Phase 3: Skills and cold start
-- Formalize skill metadata (idea 4).
-- Run a one-time backfill (idea 7).
+### Phase 3: Skills and cold start (implemented)
+- Skill library (idea 4): `backend.adc.skills` validates `SKILL.md` files: frontmatter `name` (kebab-case, matching the folder), `description`, SemVer `version`, and non-empty "When to Use", "Steps" and "Validation" sections. Run `python src/scripts/validate_skills.py .adc`. The two existing ADC sample skills are empty placeholders pinned by `.adc/adc-lock.json`; they are reported as invalid but were not modified.
+- Cold start (idea 7): `python src/scripts/memory_cold_start.py --project-id <id> --root .` builds a dry-run plan from `docs/**/*.md` and `.adc/knowledge/**/*.md`. Each document contributes only its title, a first-paragraph summary capped at 400 characters (frontmatter, code, lists, tables and metadata lines skipped), and provenance (`path`, SHA-256). Documents with no summary, or whose summary looks like a credential, are skipped. `--apply` upserts with external ID `doc:<path>`, so reruns update instead of duplicating.
+
+### Deferred
+- Transparent proxy (idea 9).
+- Numeric confidence scores, persisted review workflow, and team-level sharing. These need a product decision before implementation.
 
 ## Guardrails
 

@@ -143,7 +143,60 @@ class WorkBriefingService:
     async def get_memory_context(self, project_id: str, limit: int = 25) -> dict[str, Any]:
         activities = await self.list_recent(project_id=project_id, limit=max(1, min(int(limit), 100)))
         memories = [self._to_memory_item(activity) for activity in activities]
-        return {"project_id": project_id, "count": len(memories), "memories": memories}
+        return {
+            "project_id": project_id,
+            "count": len(memories),
+            "scenarios": self._build_scenarios(activities),
+            "memories": memories,
+        }
+
+    async def search_memory(self, project_id: str, query: str, limit: int = 25) -> dict[str, Any]:
+        cleaned_query = " ".join((query or "").split())
+        if not cleaned_query:
+            raise WorkActivityValidationError("query is required")
+        result = await self._store.search_activities(
+            project_id=project_id,
+            query=cleaned_query[:200],
+            limit=max(1, min(int(limit), 100)),
+        )
+        memories = [self._to_memory_item(activity) for activity in result.activities]
+        return {
+            "project_id": project_id,
+            "query": cleaned_query[:200],
+            "search_mode": result.mode,
+            "fts_available": result.fts_available,
+            "count": len(memories),
+            "memories": memories,
+        }
+
+    @staticmethod
+    def _build_scenarios(activities: list[WorkActivity]) -> list[dict[str, Any]]:
+        grouped: dict[str, list[WorkActivity]] = {}
+        for activity in activities:
+            grouped.setdefault(activity.event_type, []).append(activity)
+
+        scenarios: list[dict[str, Any]] = []
+        for event_type, members in grouped.items():
+            ordered = sorted(members, key=lambda item: (item.occurred_at, item.activity_id), reverse=True)
+            status_counts: dict[str, int] = {}
+            tag_counts: dict[str, int] = {}
+            for item in ordered:
+                if item.status:
+                    status_counts[item.status] = status_counts.get(item.status, 0) + 1
+                for tag in item.tags:
+                    tag_counts[tag] = tag_counts.get(tag, 0) + 1
+            scenarios.append(
+                {
+                    "scenario": event_type,
+                    "memory_count": len(ordered),
+                    "latest_occurred_at": ordered[0].occurred_at.isoformat().replace("+00:00", "Z"),
+                    "status_counts": dict(sorted(status_counts.items())),
+                    "top_tags": [tag for tag, _ in sorted(tag_counts.items(), key=lambda kv: (-kv[1], kv[0]))[:5]],
+                    "memory_ids": [item.activity_id for item in ordered],
+                }
+            )
+        scenarios.sort(key=lambda item: (-item["memory_count"], item["scenario"]))
+        return scenarios
 
     @classmethod
     def _to_memory_item(cls, activity: WorkActivity) -> dict[str, Any]:
@@ -154,6 +207,13 @@ class WorkBriefingService:
             "status": activity.status,
             "tags": list(activity.tags),
             "confidence": None,
+            # Derived items are visible only inside the authenticated project; nothing is shared until reviewed.
+            "governance": {
+                "owner": activity.owner,
+                "visibility": "project",
+                "review_status": "unreviewed",
+                "version": activity.content_hash[:12],
+            },
             "provenance": {
                 "source_activity_id": activity.activity_id,
                 "source_item_id": activity.source_item_id,

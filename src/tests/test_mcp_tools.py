@@ -353,6 +353,9 @@ def test_workassist_tools_are_registered_in_existing_cga_mcp_server():
     briefing_tool = tools_by_name["workassist_get_activity_briefing"]
     assert "project_id" in briefing_tool.parameters["properties"]
     assert briefing_tool.parameters["properties"]["limit"]["default"] == 25
+    search_tool = tools_by_name["workassist_search_memory"]
+    assert "read-only" in search_tool.description.lower()
+    assert "query" in search_tool.parameters["required"]
     memory_tool = tools_by_name["workassist_get_memory_context"]
     assert "read-only" in memory_tool.description.lower()
     assert memory_tool.parameters["properties"]["limit"]["default"] == 25
@@ -477,6 +480,29 @@ async def test_workassist_get_memory_context_uses_authenticated_project_context(
         {"project_id": "CGA123", "limit": 10},
         {"project_id": "CGA123", "limit": 100},
     ]
+
+
+@pytest.mark.asyncio
+async def test_workassist_search_memory_uses_authenticated_project_context(monkeypatch):
+    class FakeWorkBriefingService:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+
+        async def search_memory(self, *, project_id: str, query: str, limit: int) -> dict:
+            self.calls.append({"project_id": project_id, "query": query, "limit": limit})
+            return {"project_id": project_id, "count": 0, "memories": []}
+
+    service = FakeWorkBriefingService()
+    monkeypatch.setattr(mcp_srv, "_work_briefing_service", service)
+    token = _current_project_external_id.set("CGA123")
+    try:
+        await mcp_srv.workassist_search_memory(query="relay", limit=500)
+        with pytest.raises(Exception, match="project_id must match"):
+            await mcp_srv.workassist_search_memory(query="relay", project_id="WA999")
+    finally:
+        _current_project_external_id.reset(token)
+
+    assert service.calls == [{"project_id": "CGA123", "query": "relay", "limit": 100}]
 
 
 @pytest.mark.asyncio
