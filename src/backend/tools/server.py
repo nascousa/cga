@@ -1571,6 +1571,24 @@ async def workassist_get_activity_briefing(project_id: str | None = None, limit:
 
 
 @mcp.tool()
+async def workassist_get_memory_context(project_id: str | None = None, limit: int = 25) -> dict:
+    """Read-only retrieval of sanitized activity summaries and provenance for the authenticated project."""
+    service = _require_work_briefing_service()
+    resolved_project_id = _resolve_project_external_id(project_id)
+    safe_limit = max(1, min(int(limit), 100))
+    return await service.get_memory_context(project_id=resolved_project_id, limit=safe_limit)
+
+
+@mcp.tool()
+async def workassist_search_memory(query: str, project_id: str | None = None, limit: int = 25) -> dict:
+    """Read-only full-text search over sanitized activity summaries for the authenticated project; reports fallback health."""
+    service = _require_work_briefing_service()
+    resolved_project_id = _resolve_project_external_id(project_id)
+    safe_limit = max(1, min(int(limit), 100))
+    return await service.search_memory(project_id=resolved_project_id, query=query, limit=safe_limit)
+
+
+@mcp.tool()
 async def workassist_cleanup_duplicate_activity(project_id: str | None = None, dry_run: bool = True) -> dict:
     """Detect and optionally remove exact duplicate activity rows (same project/plugin/source type/content hash)."""
     service = _require_work_briefing_service()

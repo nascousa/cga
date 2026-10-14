@@ -40,6 +40,14 @@ original package's document paths and content are retained.
   In particular, review the original package's IDE/CI template locations
   before promoting them to root-level trigger files.
 
+This checkout records its approved adoption of ADC 1.1.23, project revision 2,
+in `.adc/adc-lock.json`. The lock is the exported adoption snapshot, including
+the preserved project overrides and document hashes; it is not a declaration
+that subsequent local edits have been approved by the catalog. Keep the
+exported baseline files intact, including the empty sample skill placeholder.
+Future governance changes require administrator approval and a new project
+revision through CGA, not edits to the retired standalone ADC repository.
+
 Authenticated account API:
 
 | Endpoint | Purpose |

@@ -14,11 +14,11 @@
 - Keep outputs deterministic for the same symbol and unchanged repository state.
 
 ## ADC Standard Version Tracking
-- The upstream ADC standard is maintained at `git@github.com:nascousa/ADC.git`.
-- Periodically check for new releases and compare the upstream `adc-template/index.md` version against the local `.adc/index.md` version.
-- When a newer upstream version is detected, review the changelog and sync `index.md`, `prompt-rules.md`, `bootstrap.md`, and updated files under `standards/`, `knowledge/`, and `planning/` into the local `.adc/` directory.
-- After syncing, increment the local `.adc/index.md` version to match upstream and update the date field. Commit with the message format: `docs(adc): sync with upstream ADC vX.Y.Z`.
-- Project-specific overrides added to local `.adc/prompt-rules.md` MUST be preserved and re-applied after each sync.
+- CGA /admin/adc is the authoritative ADC catalog; do not fetch updates from the retired standalone ADC repository.
+- Read adc_catalog, adc_current and adc_history through the authenticated CGA MCP or Desktop Relay.
+- Only administrators approve adoption, upgrades, overrides and exemptions; projects remain pinned until approval.
+- Preview adc_diff and adc_sync before explicit application. Preserve project changes and resolve conflicts rather than overwriting them.
+- Track the published release, project revision, hashes and provenance in .adc/adc-lock.json; rollback appends history.
 
 ## Repository and Workflow Rules
 - For new features, write tests first.

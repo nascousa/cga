@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock
+
 import pytest
 
+from backend.workbriefing.models import WorkActivity
 from backend.workbriefing.service import WorkActivityValidationError, WorkBriefingService
 
 
@@ -71,6 +75,58 @@ async def test_get_briefing_aggregates_projects_and_statuses(pg_activity_store) 
     assert briefing["event_type_counts"] == {"review": 1, "sync": 1}
     assert briefing["status_counts"] == {"done": 1, "pending": 1}
     assert briefing["project_counts"] == {"CGA123": 1, "WA123": 1}
+
+
+@pytest.mark.asyncio
+async def test_get_memory_context_exports_sanitized_activity_with_provenance() -> None:
+    activity = WorkActivity(
+        activity_id="activity-123",
+        plugin_id="workassist.mcp.activity",
+        source_system="workassist_mcp",
+        source_type="work_activity",
+        source_item_id="commit-123",
+        project_id="CGA123",
+        workspace_name="Context Graph Agent",
+        event_type="code_change",
+        title="Updated memory context",
+        summary="Added a read-only memory context tool.",
+        body_text="RAW_BODY_MUST_NOT_BE_EXPORTED",
+        status="done",
+        priority=None,
+        owner=None,
+        source_url=(
+            "https://user:pass@github.com/example/cga/commit/"
+            "abcdef0123456789abcdef0123456789abcdef01?token=RAW_URL_SECRET#details"
+        ),
+        tags=("memory", "read-only"),
+        occurred_at=datetime(2026, 10, 13, tzinfo=timezone.utc),
+        synced_at=datetime(2026, 10, 13, tzinfo=timezone.utc),
+        content_hash="hash",
+        raw_metadata={"access_token": "RAW_METADATA_MUST_NOT_BE_EXPORTED"},
+        embedding_text="RAW_EMBEDDING_MUST_NOT_BE_EXPORTED",
+    )
+    service = WorkBriefingService()
+    service.list_recent = AsyncMock(return_value=[activity])
+
+    context = await service.get_memory_context(project_id="CGA123", limit=10)
+
+    assert context["project_id"] == "CGA123"
+    assert context["count"] == 1
+    memory = context["memories"][0]
+    assert memory["summary"] == "Added a read-only memory context tool."
+    assert memory["event_type"] == "code_change"
+    assert memory["tags"] == ["memory", "read-only"]
+    assert memory["confidence"] is None
+    assert memory["provenance"]["source_item_id"] == "commit-123"
+    assert memory["provenance"]["project_id"] == "CGA123"
+    assert memory["provenance"]["source_url"].endswith("/commit/abcdef0123456789abcdef0123456789abcdef01")
+    assert memory["provenance"]["commit_sha"] == "abcdef0123456789abcdef0123456789abcdef01"
+    assert "RAW_BODY_MUST_NOT_BE_EXPORTED" not in str(context)
+    assert "RAW_METADATA_MUST_NOT_BE_EXPORTED" not in str(context)
+    assert "RAW_EMBEDDING_MUST_NOT_BE_EXPORTED" not in str(context)
+    assert "RAW_URL_SECRET" not in str(context)
+    assert "raw_metadata" not in memory
+    assert "embedding_text" not in memory
 
 
 @pytest.mark.asyncio

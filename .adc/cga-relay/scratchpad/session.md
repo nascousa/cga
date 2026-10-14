@@ -1,5 +1,16 @@
 # Agent Session State / Brain Dump
 
+## 2026-10-06 ADC authority CPMD
+
+- Scope: check in the existing CGA-managed ADC authority changes, the approved ADC 1.1.23/project revision 2 provenance lock, and its empty baseline sample skill. All 44 manifest paths exist and match their recorded SHA256 hashes. The original project overrides remain intact.
+- Created `dev/adc-authority-checkin-20261006` from freshly fetched main `a7b2178`; PRs #46 and #48 are already merged. SSH fetch failed because the configured identity is missing and host verification failed; HTTPS Git access succeeds without changing SSH security settings.
+- Updated README, backend and Relay release metadata consistently to 1.30.128 and documented the immutable adoption snapshot. No application behavior, credentials, CI configuration, branch protections, or runtime containers were changed.
+- Validation: 13 focused template/release/health tests passed with the existing Python environment; `cargo check --locked --offline`, Cargo metadata, four-way version alignment, all 44 ADC document hashes, credential-pattern checks on the provenance lock, and whitespace checks passed. VS Code's test tool did not discover these tests, so the existing pytest runner was used. Cargo was not on PATH; the installed user toolchain succeeded.
+- Official indexing was submitted through the existing Relay at port 17860 for project `J4BE9NUG2A`, job `dfa8c8c5-a9ff-4535-a177-c64319366993`; the last observed state was processing, not completed. The running tray owns the single-instance mutex, so a second CLI/MCP process was not started; official WorkAssist change aggregation remains unverified.
+- Next: commit and push this branch, open a reviewed PR, and check CI. The live main ruleset requires one approving review. Do not bypass that requirement or publish an unsigned Windows release. The existing healthy internal deployment remains on 1.30.127 until a reviewed deployment is authorized.
+- Check-in completed as `ef252b1`. Push is blocked: HTTPS has no available noninteractive credentials, the configured SSH identity is missing, GitKraken uses that same broken SSH configuration, and the repository's existing deploy key was rejected with `Permission denied (publickey)`. The deploy-key attempt used strict host verification against public host keys obtained from GitHub's HTTPS metadata endpoint; no verification bypass or permanent Git/SSH configuration change was made.
+- No PR can be opened for the unpushed branch. Merge and deployment remain blocked by push authentication, followed by required CI/review. Restore an authorized write credential, push `dev/adc-authority-checkin-20261006`, open the PR against main, and follow the normal reviewed deployment path. Do not treat the local commit as pushed or the version metadata as a deployed release.
+
 ## 2026-10-06 Consolidation review follow-up
 
 - Addressed all five initial PR #48 inline comments: recovered startup now uses the existing graph-persistence guard; start/stop/logs/open share deployment selection; recovered Admin links use the actual published port; Relay accepts stored account sessions and configured optional credential names without overwriting inherited values; native failure codes are preserved.
