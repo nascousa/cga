@@ -108,6 +108,7 @@ class SymbolResolver:
     def __init__(self, snapshots: list[FileSnapshot], root: Path) -> None:
         self.root = root
         self.files = {Path(s.parsed.path).resolve(): s for s in snapshots}
+        self._module_files: dict[tuple[str, str, str], Path | None] = {}
         self.symbols: dict[str, ParsedSymbol] = {}
         self.by_name: dict[str, list[ParsedSymbol]] = {}
         for snapshot in snapshots:
@@ -119,6 +120,12 @@ class SymbolResolver:
                 self.by_name.setdefault(symbol.name, []).append(symbol)
 
     def module_file(self, source: str, module: str, language: str) -> Path | None:
+        key = (source, module, language)
+        if key not in self._module_files:
+            self._module_files[key] = self._find_module_file(source, module, language)
+        return self._module_files[key]
+
+    def _find_module_file(self, source: str, module: str, language: str) -> Path | None:
         if language == "python":
             level = len(module) - len(module.lstrip("."))
             relative = Path(*module.lstrip(".").split(".")) if module.lstrip(".") else Path()

@@ -62,6 +62,18 @@ not a source-control replacement.
 
 ## Backup and deployment boundary
 
+Cross-function parameter lookup starts from the `Symbol.qualified_name` index
+and traverses `USES_VARIABLE` edges only for the requested scopes. Avoid an
+`UNWIND`-driven Variable label scan here: on larger graphs it can exceed the
+query timeout during generation rebuilds. The live graph regression checks the
+execution plan, parameter order, and lookup under a 1,000 ms query timeout with
+10,000 unrelated variables. Raising the global graph timeout is not required.
+
+Module-to-file resolution also caches successful and missing lookups inside each
+generation's `SymbolResolver`, keyed by source file, module, and language.
+Repeated calls do not repeat filesystem path resolution. A new resolver starts
+with an empty cache, so later generations can discover added or removed modules.
+
 Graph atomicity is not storage durability. Follow
 [runtime backup and deployment guidance](runtime-operations.md) for persistent
 volumes, snapshots, and restoration. A recently created archive is not proof
