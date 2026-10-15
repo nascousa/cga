@@ -55,6 +55,50 @@ def _write_sample_repo(repo_root: Path) -> Path:
     return file_path
 
 
+def test_scope_parameter_lookup_uses_symbol_index_and_preserves_argument_order():
+    client = _connect_live_graph()
+    try:
+        client.ensure_indexes()
+        client.query("""
+            UNWIND range(1, 10000) AS i
+            CREATE (:Variable {qualified_name: 'noise:' + toString(i), role: 'local'})
+        """)
+        client.query("""
+            UNWIND range(1, 100) AS i
+            CREATE (s:Symbol {qualified_name: 'scope.' + toString(i)})
+            CREATE (first:Variable {qualified_name: 'arg.' + toString(i) + ':first',
+                role: 'parameter', parameter_index: 0, line_number: 7, name: 'z'})
+            CREATE (second:Variable {qualified_name: 'arg.' + toString(i) + ':second',
+                role: 'parameter', parameter_index: 1, line_number: 7, name: 'a'})
+            CREATE (local:Variable {qualified_name: 'local.' + toString(i), role: 'local'})
+            CREATE (s)-[:USES_VARIABLE]->(first)
+            CREATE (s)-[:USES_VARIABLE]->(second)
+            CREATE (s)-[:USES_VARIABLE]->(local)
+        """)
+        scopes = [f"scope.{i}" for i in range(1, 51)] + ["missing"]
+        plan = client._graph.explain(
+            S.BATCH_QUERY_SCOPE_PARAMETERS, {"scope_qnames": scopes}
+        )
+        assert "Node By Index Scan" in str(plan)
+        assert "Node By Label Scan" not in str(plan)
+        rows = client.query(
+            S.BATCH_QUERY_SCOPE_PARAMETERS, {"scope_qnames": scopes}, timeout=1000
+        ).result_set
+        expected = {
+            scope: [f"arg.{scope.split('.')[1]}:first", f"arg.{scope.split('.')[1]}:second"]
+            for scope in scopes if scope != "missing"
+        }
+        actual = {}
+        for scope, qualified_name, _, _ in rows:
+            actual.setdefault(scope, []).append(qualified_name)
+        assert actual == expected
+        assert IndexPipeline(client)._get_scope_parameters_batch(scopes) == expected
+        assert IndexPipeline(client)._get_scope_parameters_batch([]) == {}
+    finally:
+        client.delete()
+        client.close()
+
+
 def test_live_graph_captures_cross_function_variable_propagation(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     file_path = _write_sample_repo(repo_root)
