@@ -12,7 +12,7 @@ import pytest
 from backend import runtime_config
 from backend.auth.context import _current_project_external_id, ProjectScope, bind_project_scope
 import backend.tools.server as mcp_srv
-from backend.workbriefing.service import WorkBriefingService
+from backend.workbriefing.service import WorkActivityValidationError, WorkBriefingService
 from backend.workbriefing.store import PgVectorActivityStore
 
 
@@ -325,6 +325,14 @@ async def test_workassist_record_activity_uses_authenticated_project_context(pg_
             title="Synced work item",
             summary="imported progress",
         )
+        with pytest.raises(WorkActivityValidationError, match="dedicated learning endpoint"):
+            await mcp_srv.workassist_record_activity(
+                event_type="agent_learning",
+                title="Unvalidated learning",
+                external_id="learning:existing",
+                summary="Caller-controlled learning",
+                metadata={"learning": {"lifecycle": "approved"}},
+            )
     finally:
         _current_project_external_id.reset(token)
 

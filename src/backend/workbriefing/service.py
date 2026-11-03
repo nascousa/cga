@@ -31,8 +31,21 @@ class WorkBriefingService:
         self._store: ActivityStore = store or PgVectorActivityStore()
 
     async def record_activity(self, payload: dict[str, Any]) -> ActivityUpsertResult:
-        project_id = self._required_string(payload, "project_id")
+        event_type = self._optional_string(payload, "event_type")
+        external_id = self._optional_string(payload, "external_id")
+        if event_type == "agent_learning" or (external_id and external_id.startswith("learning:")):
+            raise WorkActivityValidationError("learning records must use the dedicated learning endpoint")
+        return await self._upsert_activity(payload)
+
+    async def _upsert_activity(self, payload: dict[str, Any]) -> ActivityUpsertResult:
         event_type = self._required_string(payload, "event_type")
+        external_id = self._optional_string(payload, "external_id")
+        if event_type == "agent_learning":
+            self._validate_learning_payload(payload)
+        elif external_id and external_id.startswith("learning:"):
+            raise WorkActivityValidationError("learning identity namespace is reserved")
+
+        project_id = self._required_string(payload, "project_id")
         title = self._required_string(payload, "title")
         occurred_at = parse_utc_datetime(payload.get("occurred_at"), "occurred_at")
         synced_at = datetime.now(timezone.utc)
@@ -64,7 +77,7 @@ class WorkBriefingService:
                 "metadata": raw_metadata,
             }
         )
-        requested_source_item_id = self._optional_string(payload, "external_id") or f"generated:{content_hash[:24]}"
+        requested_source_item_id = external_id or f"generated:{content_hash[:24]}"
         existing_by_content = await self._store.find_by_content_hash(
             plugin_id=PLUGIN_ID,
             project_id=project_id,
@@ -117,16 +130,74 @@ class WorkBriefingService:
         session_id: str | None = None,
         evidence_activity_ids: list[str] | None = None,
     ) -> ActivityUpsertResult:
-        project_id = self._required_string({"project_id": project_id}, "project_id")
-        title = self._required_string({"title": title}, "title")
-        lesson = self._required_string({"lesson": lesson}, "lesson")
-        category = self._required_string({"category": category}, "category")
-        outcome = self._required_string({"outcome": outcome}, "outcome")
+        normalized = self._normalize_learning_fields(
+            project_id=project_id,
+            title=title,
+            lesson=lesson,
+            category=category,
+            outcome=outcome,
+            external_id=external_id,
+            harness=harness,
+            task_id=task_id,
+            session_id=session_id,
+            evidence_activity_ids=evidence_activity_ids,
+        )
+
+        metadata_learning = {
+            "schema_version": 1,
+            "category": normalized["category"],
+            "outcome": normalized["outcome"],
+            "harness": normalized["harness"],
+            "task_id": normalized["task_id"],
+            "session_id": normalized["session_id"],
+            "evidence_activity_ids": normalized["evidence_activity_ids"],
+            "lifecycle": "candidate",
+        }
+        return await self._upsert_activity(
+            {
+                "project_id": normalized["project_id"],
+                "event_type": "agent_learning",
+                "external_id": f"learning:{normalized['learning_identity']}",
+                "title": normalized["title"],
+                "summary": normalized["lesson"],
+                "body_text": "",
+                "status": "candidate",
+                "tags": [
+                    "learning",
+                    f"category:{normalized['category']}",
+                    f"outcome:{normalized['outcome']}",
+                ],
+                "metadata": {"learning": metadata_learning},
+            }
+        )
+
+    @classmethod
+    def _normalize_learning_fields(
+        cls,
+        *,
+        project_id: str,
+        title: str,
+        lesson: str,
+        category: str,
+        outcome: str,
+        external_id: str | None,
+        harness: str | None,
+        task_id: str | None,
+        session_id: str | None,
+        evidence_activity_ids: list[str] | None,
+    ) -> dict[str, Any]:
+        project_id = cls._required_string({"project_id": project_id}, "project_id")
+        title = cls._required_string({"title": title}, "title")
+        lesson = cls._required_string({"lesson": lesson}, "lesson")
+        category = cls._required_string({"category": category}, "category")
+        outcome = cls._required_string({"outcome": outcome}, "outcome")
+        if len(project_id) > 200:
+            raise WorkActivityValidationError("project_id must be at most 200 characters")
         if len(title) > 200:
             raise WorkActivityValidationError("title must be at most 200 characters")
         if len(lesson) > 2000:
             raise WorkActivityValidationError("lesson must be at most 2000 characters")
-        if _LEARNING_CREDENTIAL_RE.search(title) or _LEARNING_CREDENTIAL_RE.search(lesson):
+        if _LEARNING_CREDENTIAL_RE.search(project_id) or _LEARNING_CREDENTIAL_RE.search(title) or _LEARNING_CREDENTIAL_RE.search(lesson):
             raise WorkActivityValidationError("learning text appears to contain a credential")
         if category not in {"successful_pattern", "failure_correction", "preference", "decision", "environment_fact"}:
             raise WorkActivityValidationError("category is not supported")
@@ -140,7 +211,7 @@ class WorkBriefingService:
             ("task_id", task_id, 160),
             ("session_id", session_id, 160),
         ):
-            cleaned = self._optional_string({field_name: value}, field_name)
+            cleaned = cls._optional_string({field_name: value}, field_name)
             if cleaned and len(cleaned) > max_length:
                 raise WorkActivityValidationError(f"{field_name} must be at most {max_length} characters")
             if cleaned and _LEARNING_CREDENTIAL_RE.search(cleaned):
@@ -153,7 +224,9 @@ class WorkBriefingService:
                 raise WorkActivityValidationError("evidence_activity_ids must contain at most 20 activity IDs")
             for activity_id in evidence_activity_ids:
                 if not isinstance(activity_id, str) or not activity_id.strip() or len(activity_id.strip()) > 160:
-                    raise WorkActivityValidationError("evidence_activity_ids must contain non-empty strings up to 160 characters")
+                    raise WorkActivityValidationError(
+                        "evidence_activity_ids must contain non-empty strings up to 160 characters"
+                    )
                 if _LEARNING_CREDENTIAL_RE.search(activity_id):
                     raise WorkActivityValidationError("evidence_activity_ids appears to contain a credential")
                 if activity_id.strip() not in evidence:
@@ -174,32 +247,133 @@ class WorkBriefingService:
             )
             learning_identity = hashlib.sha256(identity_payload.encode("utf-8")).hexdigest()[:32]
 
-        metadata_learning = {
-            "schema_version": 1,
+        return {
+            "project_id": project_id,
+            "title": title,
+            "lesson": lesson,
             "category": category,
             "outcome": outcome,
             "harness": normalized["harness"],
             "task_id": normalized["task_id"],
             "session_id": normalized["session_id"],
             "evidence_activity_ids": evidence,
-            "lifecycle": "candidate",
+            "learning_identity": learning_identity,
         }
-        return await self.record_activity(
-            {
-                "project_id": project_id,
-                "event_type": "agent_learning",
-                "external_id": f"learning:{learning_identity}",
-                "title": title,
-                "summary": lesson,
-                "body_text": "",
-                "status": "candidate",
-                "tags": ["learning", f"category:{category}", f"outcome:{outcome}"],
-                "metadata": {"learning": metadata_learning},
-            }
+
+    @classmethod
+    def _validate_learning_payload(cls, payload: dict[str, Any]) -> None:
+        expected_fields = {
+            "project_id",
+            "event_type",
+            "external_id",
+            "title",
+            "summary",
+            "body_text",
+            "status",
+            "tags",
+            "metadata",
+        }
+        if set(payload) != expected_fields:
+            raise WorkActivityValidationError("learning record fields do not match the supported schema")
+        if payload.get("event_type") != "agent_learning":
+            raise WorkActivityValidationError("event_type is not a learning record")
+        if payload.get("status") != "candidate" or payload.get("body_text") != "":
+            raise WorkActivityValidationError("learning records must remain bounded candidates")
+
+        external_id = cls._required_string(payload, "external_id")
+        if not external_id.startswith("learning:") or not external_id[len("learning:"):]:
+            raise WorkActivityValidationError("learning identity is invalid")
+        learning_id = external_id[len("learning:"):]
+        metadata = payload.get("metadata")
+        learning = metadata.get("learning") if isinstance(metadata, dict) else None
+        expected_learning_fields = {
+            "schema_version",
+            "category",
+            "outcome",
+            "harness",
+            "task_id",
+            "session_id",
+            "evidence_activity_ids",
+            "lifecycle",
+        }
+        if (
+            not isinstance(metadata, dict)
+            or set(metadata) != {"learning"}
+            or not isinstance(learning, dict)
+            or set(learning) != expected_learning_fields
+            or type(learning.get("schema_version")) is not int
+            or learning["schema_version"] != 1
+            or learning.get("lifecycle") != "candidate"
+        ):
+            raise WorkActivityValidationError("learning metadata does not match the supported candidate schema")
+
+        normalized = cls._normalize_learning_fields(
+            project_id=payload.get("project_id"),
+            title=payload.get("title"),
+            lesson=payload.get("summary"),
+            category=learning.get("category"),
+            outcome=learning.get("outcome"),
+            external_id=learning_id,
+            harness=learning.get("harness"),
+            task_id=learning.get("task_id"),
+            session_id=learning.get("session_id"),
+            evidence_activity_ids=learning.get("evidence_activity_ids"),
         )
+        if (
+            normalized["learning_identity"] != learning_id
+            or payload.get("tags")
+            != [
+                "learning",
+                f"category:{normalized['category']}",
+                f"outcome:{normalized['outcome']}",
+            ]
+            or learning
+            != {
+                "schema_version": 1,
+                "category": normalized["category"],
+                "outcome": normalized["outcome"],
+                "harness": normalized["harness"],
+                "task_id": normalized["task_id"],
+                "session_id": normalized["session_id"],
+                "evidence_activity_ids": normalized["evidence_activity_ids"],
+                "lifecycle": "candidate",
+            }
+        ):
+            raise WorkActivityValidationError("learning metadata or provenance is invalid")
+
+    @classmethod
+    def _is_valid_learning_activity(cls, activity: WorkActivity) -> bool:
+        if activity.event_type != "agent_learning" or activity.workspace_name is not None:
+            return False
+        if activity.owner is not None or activity.priority is not None or activity.source_url is not None:
+            return False
+        try:
+            cls._validate_learning_payload(
+                {
+                    "project_id": activity.project_id,
+                    "event_type": activity.event_type,
+                    "external_id": activity.source_item_id,
+                    "title": activity.title,
+                    "summary": activity.summary,
+                    "body_text": activity.body_text,
+                    "status": activity.status,
+                    "tags": list(activity.tags),
+                    "metadata": activity.raw_metadata,
+                }
+            )
+        except WorkActivityValidationError:
+            return False
+        return True
+
+    @classmethod
+    def _is_safe_activity(cls, activity: WorkActivity) -> bool:
+        if activity.event_type == "agent_learning" or activity.source_item_id.startswith("learning:"):
+            return cls._is_valid_learning_activity(activity)
+        return True
 
     async def list_recent(self, project_id: str | None = None, limit: int = 25) -> list[WorkActivity]:
-        return await self._store.list_recent(project_id=project_id, limit=limit)
+        activities = await self._store.list_recent(project_id=project_id, limit=limit)
+        return [activity for activity in activities if self._is_safe_activity(activity)]
 
     async def get_learning_context(self, project_id: str, limit: int = 25) -> dict[str, Any]:
         activities = await self._store.list_recent(
@@ -209,6 +383,8 @@ class WorkBriefingService:
         )
         learnings = []
         for activity in activities:
+            if not self._is_valid_learning_activity(activity):
+                continue
             item = self._to_memory_item(activity)
             learning = activity.raw_metadata.get("learning")
             if isinstance(learning, dict):
@@ -286,7 +462,11 @@ class WorkBriefingService:
             query=cleaned_query[:200],
             limit=max(1, min(int(limit), 100)),
         )
-        memories = [self._to_memory_item(activity) for activity in result.activities]
+        memories = [
+            self._to_memory_item(activity)
+            for activity in result.activities
+            if self._is_safe_activity(activity)
+        ]
         return {
             "project_id": project_id,
             "query": cleaned_query[:200],

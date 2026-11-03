@@ -9,7 +9,7 @@ import pytest
 
 from backend.workbriefing.models import WorkActivity
 from backend.workbriefing.service import WorkActivityValidationError, WorkBriefingService
-from backend.workbriefing.store import ActivitySearchResult, PgVectorActivityStore
+from backend.workbriefing.store import ActivitySearchResult, ActivityUpsertResult, PgVectorActivityStore
 
 
 def _activity(
@@ -124,7 +124,7 @@ async def test_search_memory_rejects_blank_query() -> None:
 @pytest.mark.asyncio
 async def test_record_learning_persists_bounded_candidate_with_harness_provenance() -> None:
     service = WorkBriefingService()
-    service.record_activity = AsyncMock(return_value="stored")
+    service._upsert_activity = AsyncMock(return_value="stored")
 
     result = await service.record_learning(
         project_id="CGA123",
@@ -140,8 +140,8 @@ async def test_record_learning_persists_bounded_candidate_with_harness_provenanc
     )
 
     assert result == "stored"
-    service.record_activity.assert_awaited_once()
-    payload = service.record_activity.await_args.args[0]
+    service._upsert_activity.assert_awaited_once()
+    payload = service._upsert_activity.await_args.args[0]
     assert payload["project_id"] == "CGA123"
     assert payload["event_type"] == "agent_learning"
     assert payload["external_id"] == "learning:task-42:reflection"
@@ -201,30 +201,89 @@ async def test_record_learning_rejects_invalid_or_unbounded_input() -> None:
 
 
 @pytest.mark.asyncio
+async def test_learning_write_and_read_share_candidate_validation() -> None:
+    class MemoryStore:
+        def __init__(self) -> None:
+            self.activities: list[WorkActivity] = []
+
+        async def find_by_content_hash(self, **_kwargs):
+            return None
+
+        async def upsert(self, activity: WorkActivity):
+            self.activities = [
+                stored for stored in self.activities if stored.source_item_id != activity.source_item_id
+            ]
+            self.activities.append(activity)
+            return ActivityUpsertResult(operation="created", activity=activity)
+
+        async def list_recent(self, **kwargs):
+            activities = self.activities
+            if kwargs.get("event_type"):
+                activities = [item for item in activities if item.event_type == kwargs["event_type"]]
+            return activities
+
+    store = MemoryStore()
+    service = WorkBriefingService(store=store)
+    written = await service.record_learning(
+        project_id="CGA123",
+        title="Validate before persistence",
+        lesson="Keep learning data bounded and candidate-only.",
+        category="successful_pattern",
+        outcome="success",
+    )
+
+    assert written.operation == "created"
+    assert written.activity.status == "candidate"
+    assert (await service.get_learning_context("CGA123"))["count"] == 1
+
+    store.activities[0] = replace(
+        store.activities[0],
+        raw_metadata={"learning": {**store.activities[0].raw_metadata["learning"], "lifecycle": "approved"}},
+    )
+    assert (await service.get_learning_context("CGA123"))["count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_get_learning_context_only_returns_learning_provenance() -> None:
     service = WorkBriefingService()
     store = AsyncMock()
-    store.list_recent = AsyncMock(
-        return_value=[
-            replace(
-                _activity("lesson-1", event_type="agent_learning", summary="Check callers before editing"),
-                raw_metadata={
-                    "learning": {
-                        "schema_version": 1,
-                        "category": "failure_correction",
-                        "outcome": "corrected",
-                        "harness": "copilot",
-                        "task_id": "TASK-1",
-                        "session_id": "SESSION-1",
-                        "evidence_activity_ids": ["activity-1"],
-                        "lifecycle": "candidate",
-                        "untrusted_extra": "not exported",
-                    },
-                    "sensitive_value": "not exported",
-                },
-            )
-        ]
+    valid_learning = replace(
+        _activity("lesson-1", event_type="agent_learning", summary="Check callers before editing"),
+        source_item_id="learning:lesson-1",
+        body_text="",
+        status="candidate",
+        tags=("learning", "category:failure_correction", "outcome:corrected"),
+        raw_metadata={
+            "learning": {
+                "schema_version": 1,
+                "category": "failure_correction",
+                "outcome": "corrected",
+                "harness": "copilot",
+                "task_id": "TASK-1",
+                "session_id": "SESSION-1",
+                "evidence_activity_ids": ["activity-1"],
+                "lifecycle": "candidate",
+            }
+        },
     )
+    approved_learning = replace(
+        valid_learning,
+        activity_id="lesson-approved",
+        source_item_id="learning:lesson-approved",
+        raw_metadata={"learning": {**valid_learning.raw_metadata["learning"], "lifecycle": "approved"}},
+    )
+    oversized_provenance = replace(
+        valid_learning,
+        activity_id="lesson-oversized",
+        source_item_id="learning:lesson-oversized",
+        raw_metadata={
+            "learning": {
+                **valid_learning.raw_metadata["learning"],
+                "task_id": "x" * 161,
+            }
+        },
+    )
+    store.list_recent = AsyncMock(return_value=[valid_learning, approved_learning, oversized_provenance])
     service._store = store
 
     context = await service.get_learning_context(project_id="CGA123", limit=500)
@@ -245,7 +304,33 @@ async def test_get_learning_context_only_returns_learning_provenance() -> None:
         "evidence_activity_ids": ["activity-1"],
         "lifecycle": "candidate",
     }
-    assert "sensitive_value" not in str(context)
+    assert "approved" not in str(context)
+    assert "x" * 161 not in str(context)
+
+
+@pytest.mark.asyncio
+async def test_generic_activity_cannot_write_or_overwrite_learning_records() -> None:
+    service = WorkBriefingService()
+
+    for payload in (
+        {
+            "project_id": "CGA123",
+            "event_type": "agent_learning",
+            "external_id": "learning:existing",
+            "title": "Override",
+            "summary": "lifecycle approved",
+            "status": "approved",
+            "metadata": {"learning": {"lifecycle": "approved"}},
+        },
+        {
+            "project_id": "CGA123",
+            "event_type": "code_change",
+            "external_id": "learning:existing",
+            "title": "Override",
+        },
+    ):
+        with pytest.raises(WorkActivityValidationError, match="dedicated learning endpoint"):
+            await service.record_activity(payload)
 
 
 @pytest.mark.asyncio

@@ -442,6 +442,17 @@ def _redact_sensitive(data):
     return data
 
 
+def _audit_payload_placeholder(path: str) -> str | None:
+    if path.startswith("/mcp/"):
+        return "<mcp-request-body-omitted>"
+    if path in {
+        "/api/project/work-briefing/activity",
+        "/api/project/work-briefing/learning",
+    }:
+        return "<work-briefing-payload-omitted>"
+    return None
+
+
 def _parse_json_text(value: str | bytes | None):
     if value is None:
         return None
@@ -611,6 +622,7 @@ async def audit_request_middleware(request: Request, call_next):
 
     request_body = None
     request_obj = None
+    audit_payload_placeholder = _audit_payload_placeholder(path)
     if method in {"POST", "PUT", "PATCH", "DELETE"}:
         try:
             body_bytes = await request.body()
@@ -618,11 +630,14 @@ async def audit_request_middleware(request: Request, call_next):
                 content_type = request.headers.get("content-type", "")
                 if "application/json" in content_type:
                     request_obj = _parse_json_text(body_bytes)
-                    request_body = json.dumps(_redact_sensitive(request_obj), ensure_ascii=True)
+                    request_body = (
+                        audit_payload_placeholder
+                        or json.dumps(_redact_sensitive(request_obj), ensure_ascii=True)
+                    )
                 else:
-                    request_body = "<non-json-body>"
+                    request_body = audit_payload_placeholder or "<non-json-body>"
         except Exception:
-            request_body = "<body-unavailable>"
+            request_body = audit_payload_placeholder or "<body-unavailable>"
 
     response = None
     status_code = 500
