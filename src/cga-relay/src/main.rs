@@ -618,6 +618,14 @@ fn tray_login_menu_label(login: &TrayLoginStatus) -> String {
     }
 }
 
+fn tray_account_action_label(login: &TrayLoginStatus) -> &'static str {
+    if login.logged_in {
+        "Sign out"
+    } else {
+        "Sign in"
+    }
+}
+
 fn tray_user_group_labels(config: &AgentConfig, login: &TrayLoginStatus) -> Vec<String> {
     if !login.logged_in {
         return Vec::new();
@@ -680,8 +688,9 @@ fn tray_icon_variant(login: &TrayLoginStatus, backend_available: bool) -> &'stat
 
 fn tray_menu_json(login: &TrayLoginStatus) -> String {
     format!(
-        "[\"{}\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]",
-        json_escape(&tray_login_menu_label(login))
+        "[\"{}\",\"Open CGA Web\",\"{}\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]",
+        json_escape(&tray_login_menu_label(login)),
+        tray_account_action_label(login)
     )
 }
 
@@ -1151,6 +1160,25 @@ fn account_groups_path(config: &AgentConfig) -> PathBuf {
     config.state_dir.join("account-groups.tsv")
 }
 
+fn clear_account_session(config: &AgentConfig) -> AgentResult<()> {
+    for (path, description) in [
+        (account_session_path(config), "account session"),
+        (account_projects_path(config), "cached account projects"),
+        (account_groups_path(config), "cached account groups"),
+    ] {
+        match fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(AgentError(format!(
+                    "cannot remove {description}: {error}"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn settings_url_path(config: &AgentConfig) -> PathBuf {
     config.state_dir.join("settings-url.txt")
 }
@@ -1371,12 +1399,10 @@ fn handle_settings_connection(config: &AgentConfig, mut stream: TcpStream) -> Ag
                 Ok(message) => html_response(&settings_page_html(config, Some((&message, false)))),
                 Err(error) => html_response(&settings_page_html(config, Some((&error.0, true)))),
             },
-            ("POST", "/logout") => {
-                let _ = fs::remove_file(account_session_path(config));
-                let _ = fs::remove_file(account_projects_path(config));
-                let _ = fs::remove_file(account_groups_path(config));
-                html_response(&settings_page_html(config, Some(("Signed out.", false))))
-            }
+            ("POST", "/logout") => match clear_account_session(config) {
+                Ok(()) => html_response(&settings_page_html(config, Some(("Signed out.", false)))),
+                Err(error) => html_response(&settings_page_html(config, Some((&error.0, true)))),
+            },
             ("GET", "/status.json") => json_response(&settings_status_json(config)),
             ("POST", "/api/index-git-incremental") => {
                 let arguments = if request.body.trim().is_empty() {
@@ -2394,6 +2420,65 @@ mod tests {
         assert!(!can_replay_http_request("POST", "/api/project/cga-relay/mcp-tool"));
         assert!(!can_replay_http_request("POST", "/api/auth/cga-relay/mcp-tool"));
         assert!(!can_replay_http_request("POST", "/api/auth/login"));
+    }
+
+    #[test]
+    fn tray_account_action_tracks_login_state() {
+        assert_eq!(
+            tray_account_action_label(&TrayLoginStatus {
+                logged_in: false,
+                username: String::new(),
+            }),
+            "Sign in"
+        );
+        assert_eq!(
+            tray_account_action_label(&TrayLoginStatus {
+                logged_in: true,
+                username: "dev@example.com".to_string(),
+            }),
+            "Sign out"
+        );
+    }
+
+    #[test]
+    fn clearing_account_session_removes_session_and_cached_account_data() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "cga-relay-logout-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&state_dir).unwrap();
+        let config = AgentConfig {
+            agent_id: "agent".to_string(),
+            api_base_url: "http://127.0.0.1:18001".to_string(),
+            control_api_base_url: "http://127.0.0.1:18001".to_string(),
+            api_key_env: "CGA_TEST_API_KEY".to_string(),
+            account_email: String::new(),
+            account_token_env: "CGA_TEST_DEVELOPER_TOKEN".to_string(),
+            project_id: "PROJECT123".to_string(),
+            project_root: PathBuf::from("repo"),
+            state_dir: state_dir.clone(),
+            log_dir: state_dir.join("logs"),
+            include_globs: Vec::new(),
+            exclude_globs: Vec::new(),
+            max_file_bytes: 1024,
+            max_batch_bytes: DEFAULT_MAX_BATCH_BYTES,
+            browser_allowed_origins: Vec::new(),
+        };
+        fs::write(account_session_path(&config), "{}").unwrap();
+        fs::write(account_projects_path(&config), "projects").unwrap();
+        fs::write(account_groups_path(&config), "groups").unwrap();
+
+        clear_account_session(&config).unwrap();
+
+        assert!(!account_session_path(&config).exists());
+        assert!(!account_projects_path(&config).exists());
+        assert!(!account_groups_path(&config).exists());
+        clear_account_session(&config).unwrap();
+        fs::remove_dir_all(state_dir).unwrap();
     }
 
     #[test]
@@ -4169,11 +4254,12 @@ fn unescape_field(value: &str) -> String {
 #[cfg(windows)]
 mod windows_tray {
     use super::{
-        cga_admin_web_url, tray_backend_check, tray_icon_resource_id, tray_login_menu_label,
-        tray_login_status, tray_tooltip, tray_user_group_summary, AgentConfig, AgentError,
-        AgentResult, TrayLoginStatus, BACKEND_NOTIFICATION_MESSAGE, BACKEND_NOTIFICATION_TITLE,
-        PROJECT_AUTHOR, PROJECT_DISPLAY_NAME, PROJECT_LICENSE, PROJECT_REPOSITORY, PROJECT_SUPPORT,
-        SERVER_NAME, TRAY_ICON_LOGGED_IN_RESOURCE_ID, TRAY_ICON_WARNING_RESOURCE_ID, VERSION,
+        cga_admin_web_url, clear_account_session, tray_account_action_label, tray_backend_check,
+        tray_icon_resource_id, tray_login_menu_label, tray_login_status, tray_tooltip,
+        tray_user_group_summary, AgentConfig, AgentError, AgentResult, TrayLoginStatus,
+        BACKEND_NOTIFICATION_MESSAGE, BACKEND_NOTIFICATION_TITLE, PROJECT_AUTHOR,
+        PROJECT_DISPLAY_NAME, PROJECT_LICENSE, PROJECT_REPOSITORY, PROJECT_SUPPORT, SERVER_NAME,
+        TRAY_ICON_LOGGED_IN_RESOURCE_ID, TRAY_ICON_WARNING_RESOURCE_ID, VERSION,
     };
     use std::ffi::c_void;
     use std::mem::{size_of, zeroed};
@@ -4208,11 +4294,13 @@ mod windows_tray {
     const ID_MENU_EXIT: usize = 1004;
     const ID_MENU_OPEN_CGA_WEB: usize = 1005;
     const ID_MENU_RELAUNCH: usize = 1006;
+    const ID_MENU_ACCOUNT: usize = 1007;
     const MF_DISABLED: Uint = 0x00000002;
     const MF_GRAYED: Uint = 0x00000001;
     const MF_SEPARATOR: Uint = 0x00000800;
     const MF_STRING: Uint = 0x00000000;
     const MB_ICONINFORMATION: Uint = 0x00000040;
+    const MB_ICONERROR: Uint = 0x00000010;
     const MB_OK: Uint = 0x00000000;
     const NIF_ICON: Uint = 0x00000002;
     const NIF_INFO: Uint = 0x00000010;
@@ -4574,7 +4662,13 @@ mod windows_tray {
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
         }
         append_menu_item(menu, ID_MENU_OPEN_CGA_WEB, "Open CGA Web");
-        append_menu_item(menu, ID_MENU_SETTINGS, "Settings");
+        if let Some(state) = tray_state_from_hwnd(hwnd) {
+            append_menu_item(
+                menu,
+                ID_MENU_ACCOUNT,
+                tray_account_action_label(&state.login),
+            );
+        }
         append_menu_item(menu, ID_MENU_LOGS, "Logs");
         append_menu_item(menu, ID_MENU_ABOUT, "About");
         append_menu_item(menu, ID_MENU_RELAUNCH, "Relaunch");
@@ -4740,6 +4834,22 @@ mod windows_tray {
                     open_shell_target(hwnd, state.settings_url.as_ptr());
                 }
             }
+            ID_MENU_ACCOUNT => {
+                let signed_in =
+                    tray_state_from_hwnd(hwnd).is_some_and(|state| state.login.logged_in);
+                if signed_in {
+                    let Some(config) = tray_state_from_hwnd(hwnd).map(|state| state.config.clone())
+                    else {
+                        return;
+                    };
+                    match clear_account_session(&config) {
+                        Ok(()) => refresh_login_state(hwnd),
+                        Err(error) => show_account_action_error(hwnd, &error.0),
+                    }
+                } else if let Some(state) = tray_state_from_hwnd(hwnd) {
+                    open_shell_target(hwnd, state.settings_url.as_ptr());
+                }
+            }
             ID_MENU_ABOUT => {
                 if let Some(state) = tray_state_from_hwnd(hwnd) {
                     let caption = wide_null("About CGA-Relay");
@@ -4804,6 +4914,12 @@ mod windows_tray {
             caption.as_ptr(),
             MB_OK | MB_ICONINFORMATION,
         );
+    }
+
+    unsafe fn show_account_action_error(hwnd: Hwnd, message: &str) {
+        let text = wide_null(&format!("CGA-Relay could not sign out: {message}"));
+        let caption = wide_null("CGA-Relay");
+        MessageBoxW(hwnd, text.as_ptr(), caption.as_ptr(), MB_OK | MB_ICONERROR);
     }
 
     unsafe fn open_shell_target(hwnd: Hwnd, target: *const u16) {
