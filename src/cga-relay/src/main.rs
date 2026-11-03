@@ -618,14 +618,6 @@ fn tray_login_menu_label(login: &TrayLoginStatus) -> String {
     }
 }
 
-fn tray_account_action_label(logged_in: bool) -> &'static str {
-    if logged_in {
-        "Sign out"
-    } else {
-        "Sign in"
-    }
-}
-
 fn tray_user_group_labels(config: &AgentConfig, login: &TrayLoginStatus) -> Vec<String> {
     if !login.logged_in {
         return Vec::new();
@@ -1160,6 +1152,7 @@ fn account_groups_path(config: &AgentConfig) -> PathBuf {
 }
 
 fn clear_account_session(config: &AgentConfig) -> AgentResult<()> {
+    let mut errors = Vec::new();
     for (path, description) in [
         (account_session_path(config), "account session"),
         (account_projects_path(config), "cached account projects"),
@@ -1169,13 +1162,15 @@ fn clear_account_session(config: &AgentConfig) -> AgentResult<()> {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(error) => {
-                return Err(AgentError(format!(
-                    "cannot remove {description}: {error}"
-                )));
+                errors.push(format!("cannot remove {description}: {error}"));
             }
         }
     }
-    Ok(())
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(AgentError(errors.join("; ")))
+    }
 }
 
 fn settings_url_path(config: &AgentConfig) -> PathBuf {
@@ -2422,18 +2417,6 @@ mod tests {
     }
 
     #[test]
-    fn tray_account_action_tracks_login_state() {
-        assert_eq!(
-            tray_account_action_label(false),
-            "Sign in"
-        );
-        assert_eq!(
-            tray_account_action_label(true),
-            "Sign out"
-        );
-    }
-
-    #[test]
     fn clearing_account_session_removes_session_and_cached_account_data() {
         let state_dir = std::env::temp_dir().join(format!(
             "cga-relay-logout-test-{}-{}",
@@ -2471,6 +2454,47 @@ mod tests {
         assert!(!account_projects_path(&config).exists());
         assert!(!account_groups_path(&config).exists());
         clear_account_session(&config).unwrap();
+        fs::remove_dir_all(state_dir).unwrap();
+    }
+
+    #[test]
+    fn clearing_account_session_attempts_every_cache_removal() {
+        let state_dir = std::env::temp_dir().join(format!(
+            "cga-relay-logout-partial-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&state_dir).unwrap();
+        let config = AgentConfig {
+            agent_id: "agent".to_string(),
+            api_base_url: "http://127.0.0.1:18001".to_string(),
+            control_api_base_url: "http://127.0.0.1:18001".to_string(),
+            api_key_env: "CGA_TEST_API_KEY".to_string(),
+            account_email: String::new(),
+            account_token_env: "CGA_TEST_DEVELOPER_TOKEN".to_string(),
+            project_id: "PROJECT123".to_string(),
+            project_root: PathBuf::from("repo"),
+            state_dir: state_dir.clone(),
+            log_dir: state_dir.join("logs"),
+            include_globs: Vec::new(),
+            exclude_globs: Vec::new(),
+            max_file_bytes: 1024,
+            max_batch_bytes: DEFAULT_MAX_BATCH_BYTES,
+            browser_allowed_origins: Vec::new(),
+        };
+        fs::write(account_session_path(&config), "{}").unwrap();
+        fs::create_dir(account_projects_path(&config)).unwrap();
+        fs::write(account_groups_path(&config), "groups").unwrap();
+
+        let error = clear_account_session(&config).unwrap_err();
+
+        assert!(error.0.contains("cached account projects"));
+        assert!(!account_session_path(&config).exists());
+        assert!(account_projects_path(&config).is_dir());
+        assert!(!account_groups_path(&config).exists());
         fs::remove_dir_all(state_dir).unwrap();
     }
 
@@ -4247,8 +4271,8 @@ fn unescape_field(value: &str) -> String {
 #[cfg(windows)]
 mod windows_tray {
     use super::{
-        cga_admin_web_url, clear_account_session, tray_account_action_label, tray_backend_check,
-        tray_icon_resource_id, tray_login_menu_label, tray_login_status, tray_tooltip,
+        cga_admin_web_url, clear_account_session, tray_backend_check, tray_icon_resource_id,
+        tray_login_menu_label, tray_login_status, tray_tooltip,
         tray_user_group_summary, AgentConfig, AgentError, AgentResult, TrayLoginStatus,
         BACKEND_NOTIFICATION_MESSAGE, BACKEND_NOTIFICATION_TITLE, PROJECT_AUTHOR,
         PROJECT_DISPLAY_NAME, PROJECT_LICENSE, PROJECT_REPOSITORY, PROJECT_SUPPORT, SERVER_NAME,
@@ -4287,7 +4311,8 @@ mod windows_tray {
     const ID_MENU_EXIT: usize = 1004;
     const ID_MENU_OPEN_CGA_WEB: usize = 1005;
     const ID_MENU_RELAUNCH: usize = 1006;
-    const ID_MENU_ACCOUNT: usize = 1007;
+    const ID_MENU_SIGN_IN: usize = 1007;
+    const ID_MENU_SIGN_OUT: usize = 1008;
     const MF_DISABLED: Uint = 0x00000002;
     const MF_GRAYED: Uint = 0x00000001;
     const MF_SEPARATOR: Uint = 0x00000800;
@@ -4655,11 +4680,13 @@ mod windows_tray {
             AppendMenuW(menu, MF_SEPARATOR, 0, null());
         }
         append_menu_item(menu, ID_MENU_OPEN_CGA_WEB, "Open CGA Web");
+        append_menu_item(menu, ID_MENU_SETTINGS, "Settings");
         if let Some(state) = tray_state_from_hwnd(hwnd) {
+            let (command_id, label) = account_menu_action(state.login.logged_in);
             append_menu_item(
                 menu,
-                ID_MENU_ACCOUNT,
-                tray_account_action_label(state.login.logged_in),
+                command_id,
+                label,
             );
         }
         append_menu_item(menu, ID_MENU_LOGS, "Logs");
@@ -4815,6 +4842,14 @@ mod windows_tray {
         label.replace('&', "&&")
     }
 
+    fn account_menu_action(logged_in: bool) -> (usize, &'static str) {
+        if logged_in {
+            (ID_MENU_SIGN_OUT, "Sign out")
+        } else {
+            (ID_MENU_SIGN_IN, "Sign in")
+        }
+    }
+
     unsafe fn handle_menu_command(hwnd: Hwnd, command: usize) {
         match command {
             ID_MENU_OPEN_CGA_WEB => {
@@ -4827,20 +4862,19 @@ mod windows_tray {
                     open_shell_target(hwnd, state.settings_url.as_ptr());
                 }
             }
-            ID_MENU_ACCOUNT => {
-                let signed_in =
-                    tray_state_from_hwnd(hwnd).is_some_and(|state| state.login.logged_in);
-                if signed_in {
-                    let Some(config) = tray_state_from_hwnd(hwnd).map(|state| state.config.clone())
-                    else {
-                        return;
-                    };
-                    match clear_account_session(&config) {
-                        Ok(()) => refresh_login_state(hwnd),
-                        Err(error) => show_account_action_error(hwnd, &error.0),
-                    }
-                } else if let Some(state) = tray_state_from_hwnd(hwnd) {
+            ID_MENU_SIGN_IN => {
+                if let Some(state) = tray_state_from_hwnd(hwnd) {
                     open_shell_target(hwnd, state.settings_url.as_ptr());
+                }
+            }
+            ID_MENU_SIGN_OUT => {
+                let Some(config) = tray_state_from_hwnd(hwnd).map(|state| state.config.clone())
+                else {
+                    return;
+                };
+                match clear_account_session(&config) {
+                    Ok(()) => refresh_login_state(hwnd),
+                    Err(error) => show_account_action_error(hwnd, &error.0),
                 }
             }
             ID_MENU_ABOUT => {
@@ -5045,6 +5079,19 @@ mod windows_tray {
 
     fn wide_null(value: &str) -> Vec<u16> {
         value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn account_menu_command_is_bound_to_the_displayed_action() {
+            assert_eq!(account_menu_action(false), (ID_MENU_SIGN_IN, "Sign in"));
+            assert_eq!(account_menu_action(true), (ID_MENU_SIGN_OUT, "Sign out"));
+            assert_ne!(ID_MENU_SIGN_IN, ID_MENU_SIGN_OUT);
+            assert_eq!(ID_MENU_SETTINGS, 1001);
+        }
     }
 }
 
