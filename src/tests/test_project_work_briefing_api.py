@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 from httpx import ASGITransport, AsyncClient
+from starlette.requests import Request
 
 import backend.main as main_module
 from backend.auth.crystals import crystal_suite_headers
 from backend.auth.security import hash_token
 from backend.main import app
+from backend.workbriefing.models import AgentLearningRequest
 from backend.workbriefing.service import WorkBriefingService
 from backend.workbriefing.store import PgVectorActivityStore
 
@@ -45,6 +49,62 @@ def _project_headers() -> dict[str, str]:
     headers = crystal_suite_headers()
     headers["Authorization"] = "Bearer mcp-token"
     return headers
+
+
+@pytest.mark.asyncio
+async def test_project_learning_ingest_passes_only_authenticated_scope(monkeypatch) -> None:
+    class FakeWorkBriefingService:
+        def __init__(self) -> None:
+            self.kwargs: dict | None = None
+
+        async def record_learning(self, **kwargs):
+            self.kwargs = kwargs
+            return SimpleNamespace(
+                operation="created",
+                activity=SimpleNamespace(to_dict=lambda: {"project_id": kwargs["project_id"]}),
+            )
+
+        async def get_learning_context(self, *, project_id: str, limit: int) -> dict:
+            return {"project_id": project_id, "limit": limit, "learnings": []}
+
+    service = FakeWorkBriefingService()
+    monkeypatch.setattr(main_module, "_work_briefing_service", service)
+    monkeypatch.setattr(
+        main_module,
+        "_require_project_token_context",
+        lambda request: {"project_id": "CGA123", "project_name": "contextgraphagent"},
+    )
+    request = Request({"type": "http"})
+
+    result = await main_module.api_project_work_briefing_record_learning(
+        AgentLearningRequest(
+            title="Learning",
+            lesson="Keep the validation command with the outcome.",
+            category="successful_pattern",
+            outcome="success",
+            harness="aider",
+            task_id="TASK-2",
+        ),
+        request,
+    )
+
+    assert result == {"operation": "created", "activity": {"project_id": "CGA123"}}
+    assert service.kwargs == {
+        "project_id": "CGA123",
+        "title": "Learning",
+        "lesson": "Keep the validation command with the outcome.",
+        "category": "successful_pattern",
+        "outcome": "success",
+        "external_id": None,
+        "harness": "aider",
+        "task_id": "TASK-2",
+        "session_id": None,
+        "evidence_activity_ids": None,
+    }
+    assert await main_module.api_project_work_briefing_learning_context(
+        request,
+        limit=50,
+    ) == {"project_id": "CGA123", "limit": 50, "learnings": []}
 
 
 @pytest.mark.asyncio

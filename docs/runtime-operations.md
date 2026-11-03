@@ -140,7 +140,7 @@ CGA includes a built-in work activity domain adapted from WorkAssist so cross-pr
 - Project-scoped ingest API: `POST /api/project/work-briefing/activity`
 - Project-scoped summary APIs: `GET /api/project/work-briefing`, `GET /api/project/work-briefing/activities`
 - MCP tools: `workassist_record_activity`, `workassist_list_recent_activity`, `workassist_get_activity_briefing`
-- Read-only agent memory MCP tools: `workassist_get_memory_context` (sanitized summaries, provenance, governance and a scenario layer) and `workassist_search_memory` (full-text search with a `fts_available` health flag and substring fallback). See [Agent Memory Layer](agent-memory-design.md).
+- Agent memory MCP tools: `workassist_get_memory_context` and `workassist_search_memory` provide project-scoped retrieval; `workassist_record_learning` writes bounded, unapproved learning candidates and `workassist_get_learning_context` reads them. Harnesses without MCP support can use authenticated `POST` / `GET /api/project/work-briefing/learning`. See [Agent Memory Layer](agent-memory-design.md) and [Harness Memory Integration](harness-memory-integration.md).
 - Cold-start document import: `python src/scripts/memory_cold_start.py --project-id <id> --root .` prints a dry-run plan; add `--apply` to upsert summaries using `WORKBRIEFING_POSTGRES_DSN`.
 - Skill validation: `python src/scripts/validate_skills.py .adc` checks every `SKILL.md` for frontmatter, SemVer version and the When to Use / Steps / Validation sections.
 

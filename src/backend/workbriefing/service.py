@@ -15,6 +15,11 @@ from backend.workbriefing.store import ActivityStore, ActivityUpsertResult, PgVe
 PLUGIN_ID = "workassist.mcp.activity"
 SOURCE_SYSTEM = "workassist_mcp"
 SOURCE_TYPE = "work_activity"
+_LEARNING_CREDENTIAL_RE = re.compile(
+    r"(?i)(?:password|passwd|secret|token|api[_-]?key|access[_-]?key)\s*[:=]\s*\S{4,}"
+    r"|-----BEGIN [A-Z ]*PRIVATE KEY-----"
+    r"|\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9]{20,})\b"
+)
 
 
 class WorkActivityValidationError(ValueError):
@@ -98,8 +103,130 @@ class WorkBriefingService:
             return ActivityUpsertResult(operation="deduplicated", activity=result.activity)
         return result
 
+    async def record_learning(
+        self,
+        *,
+        project_id: str,
+        title: str,
+        lesson: str,
+        category: str,
+        outcome: str,
+        external_id: str | None = None,
+        harness: str | None = None,
+        task_id: str | None = None,
+        session_id: str | None = None,
+        evidence_activity_ids: list[str] | None = None,
+    ) -> ActivityUpsertResult:
+        project_id = self._required_string({"project_id": project_id}, "project_id")
+        title = self._required_string({"title": title}, "title")
+        lesson = self._required_string({"lesson": lesson}, "lesson")
+        category = self._required_string({"category": category}, "category")
+        outcome = self._required_string({"outcome": outcome}, "outcome")
+        if len(title) > 200:
+            raise WorkActivityValidationError("title must be at most 200 characters")
+        if len(lesson) > 2000:
+            raise WorkActivityValidationError("lesson must be at most 2000 characters")
+        if _LEARNING_CREDENTIAL_RE.search(title) or _LEARNING_CREDENTIAL_RE.search(lesson):
+            raise WorkActivityValidationError("learning text appears to contain a credential")
+        if category not in {"successful_pattern", "failure_correction", "preference", "decision", "environment_fact"}:
+            raise WorkActivityValidationError("category is not supported")
+        if outcome not in {"success", "failure", "corrected", "neutral"}:
+            raise WorkActivityValidationError("outcome is not supported")
+
+        normalized: dict[str, str | None] = {}
+        for field_name, value, max_length in (
+            ("external_id", external_id, 200),
+            ("harness", harness, 80),
+            ("task_id", task_id, 160),
+            ("session_id", session_id, 160),
+        ):
+            cleaned = self._optional_string({field_name: value}, field_name)
+            if cleaned and len(cleaned) > max_length:
+                raise WorkActivityValidationError(f"{field_name} must be at most {max_length} characters")
+            if cleaned and _LEARNING_CREDENTIAL_RE.search(cleaned):
+                raise WorkActivityValidationError(f"{field_name} appears to contain a credential")
+            normalized[field_name] = cleaned
+
+        evidence: list[str] = []
+        if evidence_activity_ids is not None:
+            if not isinstance(evidence_activity_ids, list) or len(evidence_activity_ids) > 20:
+                raise WorkActivityValidationError("evidence_activity_ids must contain at most 20 activity IDs")
+            for activity_id in evidence_activity_ids:
+                if not isinstance(activity_id, str) or not activity_id.strip() or len(activity_id.strip()) > 160:
+                    raise WorkActivityValidationError("evidence_activity_ids must contain non-empty strings up to 160 characters")
+                if _LEARNING_CREDENTIAL_RE.search(activity_id):
+                    raise WorkActivityValidationError("evidence_activity_ids appears to contain a credential")
+                if activity_id.strip() not in evidence:
+                    evidence.append(activity_id.strip())
+
+        learning_identity = normalized["external_id"]
+        if learning_identity is None:
+            identity_payload = json.dumps(
+                [
+                    project_id,
+                    category,
+                    title.casefold(),
+                    normalized["harness"],
+                    normalized["task_id"],
+                    normalized["session_id"],
+                ],
+                separators=(",", ":"),
+            )
+            learning_identity = hashlib.sha256(identity_payload.encode("utf-8")).hexdigest()[:32]
+
+        metadata_learning = {
+            "schema_version": 1,
+            "category": category,
+            "outcome": outcome,
+            "harness": normalized["harness"],
+            "task_id": normalized["task_id"],
+            "session_id": normalized["session_id"],
+            "evidence_activity_ids": evidence,
+            "lifecycle": "candidate",
+        }
+        return await self.record_activity(
+            {
+                "project_id": project_id,
+                "event_type": "agent_learning",
+                "external_id": f"learning:{learning_identity}",
+                "title": title,
+                "summary": lesson,
+                "body_text": "",
+                "status": "candidate",
+                "tags": ["learning", f"category:{category}", f"outcome:{outcome}"],
+                "metadata": {"learning": metadata_learning},
+            }
+        )
+
     async def list_recent(self, project_id: str | None = None, limit: int = 25) -> list[WorkActivity]:
         return await self._store.list_recent(project_id=project_id, limit=limit)
+
+    async def get_learning_context(self, project_id: str, limit: int = 25) -> dict[str, Any]:
+        activities = await self._store.list_recent(
+            project_id=project_id,
+            limit=max(1, min(int(limit), 100)),
+            event_type="agent_learning",
+        )
+        learnings = []
+        for activity in activities:
+            item = self._to_memory_item(activity)
+            learning = activity.raw_metadata.get("learning")
+            if isinstance(learning, dict):
+                item["learning"] = {
+                    key: learning.get(key)
+                    for key in (
+                        "schema_version",
+                        "category",
+                        "outcome",
+                        "harness",
+                        "task_id",
+                        "session_id",
+                        "evidence_activity_ids",
+                        "lifecycle",
+                    )
+                }
+            learnings.append(item)
+        return {"project_id": project_id, "count": len(learnings), "learnings": learnings}
 
     async def count_recent(self, project_id: str | None = None) -> int:
         return await self._store.count_recent(project_id=project_id)

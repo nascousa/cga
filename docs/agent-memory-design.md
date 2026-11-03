@@ -1,6 +1,6 @@
 # Agent Memory Layer: Borrowed Design Ideas
 
-Status: Phases 1-3 implemented; the transparent proxy remains deferred.
+Status: Phases 1-4 implemented; autonomous extraction, promotion, and the transparent proxy remain deferred.
 Reference studied: TencentDB Agent Memory (`TencentCloud/tencentdb-agent-memory`, v2.0.3-beta.1).
 Licensing note: the upstream license metadata was `NOASSERTION` when reviewed. Only architectural ideas are adopted here; no upstream code, schemas, or prompts are copied.
 
@@ -49,9 +49,17 @@ A memory layer is an optional, derived view on top of those records. It must nev
 - Skill library (idea 4): `backend.adc.skills` validates `SKILL.md` files: frontmatter `name` (kebab-case, matching the folder), `description`, SemVer `version`, and non-empty "When to Use", "Steps" and "Validation" sections. Run `python src/scripts/validate_skills.py .adc`. The two existing ADC sample skills are empty placeholders pinned by `.adc/adc-lock.json`; they are reported as invalid but were not modified.
 - Cold start (idea 7): `python src/scripts/memory_cold_start.py --project-id <id> --root .` builds a dry-run plan from `docs/**/*.md` and `.adc/knowledge/**/*.md`. Each document contributes only its title, a first-paragraph summary capped at 400 characters (frontmatter, code, lists, tables and metadata lines skipped), and provenance (`path`, SHA-256). Documents with no summary, or whose summary looks like a credential, are skipped. `--apply` upserts with external ID `doc:<path>`, so reruns update instead of duplicating.
 
+### Phase 4: Harness-neutral learning capture (implemented)
+- A shared MCP contract is available through `workassist_record_learning` and `workassist_get_learning_context`; authenticated project REST clients can use `POST` and `GET /api/project/work-briefing/learning`.
+- A learning record captures a short lesson, category, observed outcome, optional harness/task/session identifiers, and up to 20 activity references. The title and lesson are bounded, the lesson is stored as a summary with an empty body, and credential-like text is rejected. No conversation transcript or raw code is needed.
+- Records are idempotent by caller-provided `external_id`; when omitted, a deterministic identity is derived from project/category/title/harness/task/session. Reusing an explicit ID updates that candidate, so callers should use a new ID when they need a separate historical observation.
+- All entries remain `candidate`, and retrieval includes a narrow provenance projection. A model cannot mark its own observation validated or promote it to canonical project policy. Evidence references are supplied by the caller and are not verified by the service.
+- This creates an explicit cross-harness feedback loop, not automatic self-training: harness instructions/hooks must decide when to reflect and call CGA. Search remains PostgreSQL full-text over title/summary/tags with substring fallback; the pgvector column is not yet populated or used for semantic retrieval. No ranking by outcome, feedback aggregation, conflict resolution, retention policy, or review UI is implemented.
+- Harness-specific setup and the recommended MCP-first / authenticated-HTTP fallback are documented in [Harness Memory Integration](harness-memory-integration.md).
+
 ### Deferred
 - Transparent proxy (idea 9).
-- Numeric confidence scores, persisted review workflow, and team-level sharing. These need a product decision before implementation.
+- Autonomous extraction from conversations, numeric confidence scores, persisted review/promotion workflow, team-level sharing, vector retrieval, and outcome-driven evolution. These require explicit product and governance decisions before implementation.
 
 ## Guardrails
 

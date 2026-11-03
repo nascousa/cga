@@ -77,6 +77,7 @@ from backend.schedules.router import router as schedules_router
 from backend.schedules.service import ScheduledTaskWorker
 from backend.viewer.router import router as viewer_router
 from backend.workbriefing.service import WorkActivityValidationError, WorkBriefingService
+from backend.workbriefing.models import AgentLearningRequest
 from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
@@ -1167,6 +1168,48 @@ async def api_project_work_briefing_record_activity(
         "operation": result.operation,
         "activity": result.activity.to_dict(),
     }
+
+
+@app.post("/api/project/work-briefing/learning", status_code=201)
+async def api_project_work_briefing_record_learning(
+    payload: AgentLearningRequest,
+    request: Request,
+) -> dict:
+    project = _require_project_token_context(request)
+    body = payload.model_dump(exclude_none=True)
+    resolved_project_id = _resolve_project_scope_id(body.get("project_id"), project)
+    try:
+        result = await _work_briefing_service.record_learning(
+            project_id=resolved_project_id,
+            title=body.get("title"),
+            lesson=body.get("lesson"),
+            category=body.get("category"),
+            outcome=body.get("outcome"),
+            external_id=body.get("external_id"),
+            harness=body.get("harness"),
+            task_id=body.get("task_id"),
+            session_id=body.get("session_id"),
+            evidence_activity_ids=body.get("evidence_activity_ids"),
+        )
+    except WorkActivityValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {
+        "operation": result.operation,
+        "activity": result.activity.to_dict(),
+    }
+
+
+@app.get("/api/project/work-briefing/learning")
+async def api_project_work_briefing_learning_context(
+    request: Request,
+    limit: int = Query(default=25, ge=1, le=100),
+) -> dict:
+    project = _require_project_token_context(request)
+    return await _work_briefing_service.get_learning_context(
+        project_id=project["project_id"],
+        limit=limit,
+    )
 
 
 @app.get("/api/project/work-briefing")

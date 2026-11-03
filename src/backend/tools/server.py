@@ -25,6 +25,7 @@ import asyncio
 import os
 import time
 from pathlib import Path
+from typing import Literal
 
 import structlog
 from fastapi import HTTPException
@@ -1577,6 +1578,52 @@ async def workassist_get_memory_context(project_id: str | None = None, limit: in
     resolved_project_id = _resolve_project_external_id(project_id)
     safe_limit = max(1, min(int(limit), 100))
     return await service.get_memory_context(project_id=resolved_project_id, limit=safe_limit)
+
+
+@mcp.tool()
+async def workassist_record_learning(
+    title: str,
+    lesson: str,
+    category: Literal[
+        "successful_pattern",
+        "failure_correction",
+        "preference",
+        "decision",
+        "environment_fact",
+    ],
+    outcome: Literal["success", "failure", "corrected", "neutral"],
+    project_id: str | None = None,
+    external_id: str | None = None,
+    harness: str | None = None,
+    task_id: str | None = None,
+    session_id: str | None = None,
+    evidence_activity_ids: list[str] | None = None,
+) -> dict:
+    """Persist a bounded learning candidate with evidence references; candidates are never auto-approved."""
+    service = _require_work_briefing_service()
+    resolved_project_id = _resolve_project_external_id(project_id)
+    result = await service.record_learning(
+        project_id=resolved_project_id,
+        title=title,
+        lesson=lesson,
+        category=category,
+        outcome=outcome,
+        external_id=external_id,
+        harness=harness,
+        task_id=task_id,
+        session_id=session_id,
+        evidence_activity_ids=evidence_activity_ids,
+    )
+    return {"operation": result.operation, "activity": result.activity.to_dict()}
+
+
+@mcp.tool()
+async def workassist_get_learning_context(project_id: str | None = None, limit: int = 25) -> dict:
+    """Read project-scoped learning candidates and their harness/task provenance."""
+    service = _require_work_briefing_service()
+    resolved_project_id = _resolve_project_external_id(project_id)
+    safe_limit = max(1, min(int(limit), 100))
+    return await service.get_learning_context(project_id=resolved_project_id, limit=safe_limit)
 
 
 @mcp.tool()
