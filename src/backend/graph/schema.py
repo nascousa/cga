@@ -405,8 +405,8 @@ MERGE (src)-[:IMPORTS]->(tgt)
 """
 
 BATCH_QUERY_SCOPE_PARAMETERS = """
-UNWIND $scope_qnames AS sq
-MATCH (:Symbol {qualified_name: sq})-[:USES_VARIABLE]->(v:Variable {role: 'parameter'})
-RETURN sq, v.qualified_name, v.line_number, v.name
-ORDER BY sq, v.parameter_index, v.line_number, v.name
+MATCH (s:Symbol)-[:USES_VARIABLE]->(v:Variable)
+WHERE s.qualified_name IN $scope_qnames AND v.role = 'parameter'
+RETURN s.qualified_name, v.qualified_name, v.line_number, v.name
+ORDER BY s.qualified_name, v.parameter_index, v.line_number, v.name
 """
