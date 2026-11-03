@@ -96,6 +96,7 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 - **MCP-compatible API:** agent-facing retrieval tools for symbols, files, dependencies, imports, variable flow, and architecture queries.
 - **CGA-Relay:** one developer-machine `cga-relay`, enforced by a machine-wide OS mutex, with backend health alerts, stdio MCP gateway, local scan/sync, branch/ref graph routing and promotion, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
 - **Work Briefing Aggregation:** WA-compatible activity capture and briefing summaries inside CGA.
+- **Harness-neutral agent memory:** project-scoped MCP and authenticated HTTP interfaces for retrieving memory and recording bounded, evidence-referenced learning candidates. See [harness integration](docs/harness-memory-integration.md).
 - **AI-First Readiness And Evidence:** Admin APIs for readiness snapshots, GitHub/Azure DevOps/verification signals, evidence packs, PR evidence links, and policy-derived gates that combine graph, indexing, ADC, governance, and work activity signals.
 - **Schedule Automation:** admin-defined recurring jobs for BrowserAgent page tests, agent activation calls, generic HTTP tasks, and project extensions.
 - **Project Extensions:** project-scoped extension pages and runs, starting with Azure Policy Change Monitor for cloud parity, GUID/version consistency, risky-effect scans, and Docker Desktop `/repos` path mapping.
@@ -223,6 +224,7 @@ The run is intentionally reported with nuance: one project's HPS increased under
 - [AI-first correlation contract](docs/ai-first-correlation-contract.md) - standard task, issue, PR, and activity ids for evidence packs and traces.
 - [How CGA works](docs/how-it-works.md) - compact deep dive on graph-first retrieval, agent flow, LSPs, AST-Grep, and quality controls.
 - [MCP query quickstart](docs/mcp-agent-query-quickstart.md) - endpoint discovery, query clients, batch mode, and CG-first strategy.
+- [Harness memory integration](docs/harness-memory-integration.md) - shared learning contract, harness adaptation, authenticated MCP and HTTP usage, and current limitations.
 - [FAQ](docs/faq.md) - short answers on knowledge graphs, RAG, token reduction, MCP, and benchmarks.
 - [Benchmark guide](docs/benchmarks/README.md) - deterministic context-quality benchmark model and commands.
 - [Live benchmark report](docs/benchmarks/live-context-quality.md) - current live multi-project benchmark summary.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,7 +12,7 @@ import pytest
 from backend import runtime_config
 from backend.auth.context import _current_project_external_id, ProjectScope, bind_project_scope
 import backend.tools.server as mcp_srv
-from backend.workbriefing.service import WorkBriefingService
+from backend.workbriefing.service import WorkActivityValidationError, WorkBriefingService
 from backend.workbriefing.store import PgVectorActivityStore
 
 
@@ -324,6 +325,14 @@ async def test_workassist_record_activity_uses_authenticated_project_context(pg_
             title="Synced work item",
             summary="imported progress",
         )
+        with pytest.raises(WorkActivityValidationError, match="dedicated learning endpoint"):
+            await mcp_srv.workassist_record_activity(
+                event_type="agent_learning",
+                title="Unvalidated learning",
+                external_id="learning:existing",
+                summary="Caller-controlled learning",
+                metadata={"learning": {"lifecycle": "approved"}},
+            )
     finally:
         _current_project_external_id.reset(token)
 
@@ -339,6 +348,8 @@ def test_workassist_tools_are_registered_in_existing_cga_mcp_server():
     assert "workassist_list_recent_activity" in tools_by_name
     assert "workassist_get_activity_briefing" in tools_by_name
     assert "workassist_get_memory_context" in tools_by_name
+    assert "workassist_record_learning" in tools_by_name
+    assert "workassist_get_learning_context" in tools_by_name
 
     record_tool = tools_by_name["workassist_record_activity"]
     assert "project work event" in record_tool.description.lower()
@@ -359,6 +370,16 @@ def test_workassist_tools_are_registered_in_existing_cga_mcp_server():
     memory_tool = tools_by_name["workassist_get_memory_context"]
     assert "read-only" in memory_tool.description.lower()
     assert memory_tool.parameters["properties"]["limit"]["default"] == 25
+    learning_tool = tools_by_name["workassist_record_learning"]
+    assert "never auto-approved" in learning_tool.description.lower()
+    assert {"lesson", "category", "outcome"} <= set(learning_tool.parameters["required"])
+    assert learning_tool.parameters["properties"]["category"]["enum"] == [
+        "successful_pattern",
+        "failure_correction",
+        "preference",
+        "decision",
+        "environment_fact",
+    ]
 
 
 @pytest.mark.asyncio
@@ -518,6 +539,63 @@ async def test_workassist_get_memory_context_rejects_project_spoof(monkeypatch):
             await mcp_srv.workassist_get_memory_context(project_id="WA999", limit=10)
     finally:
         _current_project_external_id.reset(token)
+
+
+@pytest.mark.asyncio
+async def test_workassist_learning_tools_use_authenticated_project_context(monkeypatch):
+    class FakeWorkBriefingService:
+        def __init__(self) -> None:
+            self.recorded: dict | None = None
+
+        async def record_learning(self, **kwargs):
+            self.recorded = kwargs
+            return SimpleNamespace(
+                operation="created",
+                activity=SimpleNamespace(to_dict=lambda: {"project_id": kwargs["project_id"]}),
+            )
+
+        async def get_learning_context(self, *, project_id: str, limit: int) -> dict:
+            return {"project_id": project_id, "limit": limit, "learnings": []}
+
+    service = FakeWorkBriefingService()
+    monkeypatch.setattr(mcp_srv, "_work_briefing_service", service)
+    token = _current_project_external_id.set("CGA123")
+    try:
+        result = await mcp_srv.workassist_record_learning(
+            title="Lessons learned",
+            lesson="Capture the validation result.",
+            category="successful_pattern",
+            outcome="success",
+            harness="claude-code",
+            task_id="task-1",
+            evidence_activity_ids=["activity-1"],
+        )
+        context = await mcp_srv.workassist_get_learning_context(limit=500)
+        with pytest.raises(Exception, match="project_id must match"):
+            await mcp_srv.workassist_record_learning(
+                title="Spoof",
+                lesson="Must not cross project boundaries.",
+                category="decision",
+                outcome="neutral",
+                project_id="WA999",
+            )
+    finally:
+        _current_project_external_id.reset(token)
+
+    assert result == {"operation": "created", "activity": {"project_id": "CGA123"}}
+    assert service.recorded == {
+        "project_id": "CGA123",
+        "title": "Lessons learned",
+        "lesson": "Capture the validation result.",
+        "category": "successful_pattern",
+        "outcome": "success",
+        "external_id": None,
+        "harness": "claude-code",
+        "task_id": "task-1",
+        "session_id": None,
+        "evidence_activity_ids": ["activity-1"],
+    }
+    assert context == {"project_id": "CGA123", "limit": 100, "learnings": []}
 
 
 @pytest.mark.asyncio

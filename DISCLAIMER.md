@@ -46,6 +46,15 @@ Do not include real secrets, production tokens, private keys, credentials, or
 confidential third-party data in public issues, logs, support bundles, example
 repositories, screenshots, or generated release artifacts.
 
+CGA's harness-learning feature stores bounded project-scoped lesson summaries,
+outcomes, optional harness/task/session identifiers, and caller-supplied
+activity references. New lessons remain unapproved candidates, and CGA does
+not verify that referenced activities exist or belong to the project. Common
+credential patterns are rejected, but this is not a substitute for review:
+never submit raw prompts, completions, source files, or unredacted tool
+arguments, and verify retrieved lessons against current project evidence before
+relying on them.
+
 ## Automation And AI-Assisted Output
 
 CGA can support AI-assisted development workflows by indexing project context

@@ -43,7 +43,12 @@ class ActivityStore(Protocol):
     async def upsert(self, activity: WorkActivity) -> ActivityUpsertResult:
         ...
 
-    async def list_recent(self, project_id: str | None = None, limit: int = 25) -> list[WorkActivity]:
+    async def list_recent(
+        self,
+        project_id: str | None = None,
+        limit: int = 25,
+        event_type: str | None = None,
+    ) -> list[WorkActivity]:
         ...
 
     async def count_recent(self, project_id: str | None = None) -> int:
@@ -305,6 +310,7 @@ class PgVectorActivityStore:
         self,
         project_id: str | None = None,
         limit: int = 25,
+        event_type: str | None = None,
     ) -> list[WorkActivity]:
         await self.ensure_schema()
         pool = await self._get_pool()
@@ -336,12 +342,21 @@ class PgVectorActivityStore:
         FROM {self._qualified("work_activities")}
         """
 
+        filters: list[str] = []
+        params: list[Any] = []
         if project_id:
-            sql = base_sql + " WHERE project_id = $1 ORDER BY occurred_at DESC, synced_at DESC, source_item_id DESC LIMIT $2"
-            params: tuple[Any, ...] = (project_id, safe_limit)
-        else:
-            sql = base_sql + " ORDER BY occurred_at DESC, synced_at DESC, source_item_id DESC LIMIT $1"
-            params = (safe_limit,)
+            params.append(project_id)
+            filters.append(f"project_id = ${len(params)}")
+        if event_type:
+            params.append(event_type)
+            filters.append(f"event_type = ${len(params)}")
+        where = f" WHERE {' AND '.join(filters)}" if filters else ""
+        params.append(safe_limit)
+        sql = (
+            base_sql
+            + where
+            + f" ORDER BY occurred_at DESC, synced_at DESC, source_item_id DESC LIMIT ${len(params)}"
+        )
 
         async with pool.acquire() as conn:
             rows = await conn.fetch(sql, *params)

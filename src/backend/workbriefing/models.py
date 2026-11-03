@@ -2,7 +2,30 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class AgentLearningRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str | None = None
+    title: str = Field(min_length=1, max_length=200)
+    lesson: str = Field(min_length=1, max_length=2000)
+    category: Literal[
+        "successful_pattern",
+        "failure_correction",
+        "preference",
+        "decision",
+        "environment_fact",
+    ]
+    outcome: Literal["success", "failure", "corrected", "neutral"]
+    external_id: str | None = Field(default=None, max_length=200)
+    harness: str | None = Field(default=None, max_length=80)
+    task_id: str | None = Field(default=None, max_length=160)
+    session_id: str | None = Field(default=None, max_length=160)
+    evidence_activity_ids: list[str] | None = Field(default=None, max_length=20)
 
 
 @dataclass(frozen=True)
