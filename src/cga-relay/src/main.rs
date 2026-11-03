@@ -618,8 +618,8 @@ fn tray_login_menu_label(login: &TrayLoginStatus) -> String {
     }
 }
 
-fn tray_account_action_label(login: &TrayLoginStatus) -> &'static str {
-    if login.logged_in {
+fn tray_account_action_label(logged_in: bool) -> &'static str {
+    if logged_in {
         "Sign out"
     } else {
         "Sign in"
@@ -690,7 +690,7 @@ fn tray_menu_json(login: &TrayLoginStatus) -> String {
     format!(
         "[\"{}\",\"Open CGA Web\",\"{}\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]",
         json_escape(&tray_login_menu_label(login)),
-        tray_account_action_label(login)
+        tray_account_action_label(login.logged_in)
     )
 }
 
@@ -2425,17 +2425,11 @@ mod tests {
     #[test]
     fn tray_account_action_tracks_login_state() {
         assert_eq!(
-            tray_account_action_label(&TrayLoginStatus {
-                logged_in: false,
-                username: String::new(),
-            }),
+            tray_account_action_label(false),
             "Sign in"
         );
         assert_eq!(
-            tray_account_action_label(&TrayLoginStatus {
-                logged_in: true,
-                username: "dev@example.com".to_string(),
-            }),
+            tray_account_action_label(true),
             "Sign out"
         );
     }
@@ -4666,7 +4660,7 @@ mod windows_tray {
             append_menu_item(
                 menu,
                 ID_MENU_ACCOUNT,
-                tray_account_action_label(&state.login),
+                tray_account_action_label(state.login.logged_in),
             );
         }
         append_menu_item(menu, ID_MENU_LOGS, "Logs");
