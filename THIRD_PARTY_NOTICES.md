@@ -54,10 +54,14 @@ resolved packages in `src/viewer/package-lock.json`.
 | --- | --- | --- |
 | Graphology | Graph data structure | MIT |
 | Sigma.js | WebGL graph renderer | MIT |
-| Vite | Viewer build tooling | MIT |
+| Vite (8.1.6 minimum) | Viewer build tooling | MIT |
 
 The viewer lockfile also includes transitive build dependencies. Preserve any
 required transitive notices when redistributing bundled assets.
+
+Vite 8.1.6 is the security baseline for the viewer tooling, including the
+bundled launch-editor fixes and development-server filesystem and origin
+protections. Keep the resolved lockfile at or above this baseline.
 
 ## Browser-Delivered Assets, CDNs, Fonts, And Icons
 
