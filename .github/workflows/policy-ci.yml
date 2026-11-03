@@ -10,6 +10,27 @@ permissions:
   contents: read
 
 jobs:
+  viewer-security:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src/viewer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: src/viewer/package-lock.json
+      - name: Install locked viewer dependencies
+        run: npm ci
+      - name: Audit viewer dependencies including build tooling
+        run: npm audit
+      - name: Build viewer
+        run: npm run build
+
   relay-reliability:
     strategy:
       fail-fast: false
