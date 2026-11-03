@@ -688,9 +688,8 @@ fn tray_icon_variant(login: &TrayLoginStatus, backend_available: bool) -> &'stat
 
 fn tray_menu_json(login: &TrayLoginStatus) -> String {
     format!(
-        "[\"{}\",\"Open CGA Web\",\"{}\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]",
-        json_escape(&tray_login_menu_label(login)),
-        tray_account_action_label(login.logged_in)
+        "[\"{}\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]",
+        json_escape(&tray_login_menu_label(login))
     )
 }
 
