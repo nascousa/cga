@@ -443,9 +443,10 @@ def _redact_sensitive(data):
 
 
 def _audit_payload_placeholder(path: str) -> str | None:
-    if path.startswith("/mcp/"):
+    normalized_path = path.rstrip("/") or "/"
+    if normalized_path == "/mcp" or normalized_path.startswith("/mcp/"):
         return "<mcp-request-body-omitted>"
-    if path in {
+    if normalized_path in {
         "/api/project/work-briefing/activity",
         "/api/project/work-briefing/learning",
     }:

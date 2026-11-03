@@ -367,6 +367,8 @@ class WorkBriefingService:
 
     @classmethod
     def _is_safe_activity(cls, activity: WorkActivity) -> bool:
+        if not isinstance(activity.source_item_id, str):
+            return False
         if activity.event_type == "agent_learning" or activity.source_item_id.startswith("learning:"):
             return cls._is_valid_learning_activity(activity)
         return True

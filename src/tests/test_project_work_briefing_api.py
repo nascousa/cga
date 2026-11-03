@@ -58,6 +58,7 @@ def _project_headers() -> dict[str, str]:
     [
         ("/api/project/work-briefing/learning", "<work-briefing-payload-omitted>"),
         ("/api/project/work-briefing/activity", "<work-briefing-payload-omitted>"),
+        ("/api/project/work-briefing/learning/", "<work-briefing-payload-omitted>"),
         ("/mcp/messages", "<mcp-request-body-omitted>"),
     ],
 )
