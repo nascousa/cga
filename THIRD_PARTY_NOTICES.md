@@ -132,6 +132,17 @@ alongside this hand-maintained summary. Recommended artifacts include:
 This file should remain the human-readable map; generated SBOM/license outputs
 should provide exact resolved package versions and transitive dependency data.
 
+## Design Research Acknowledgement
+
+The semantic-contract and controlled relationship-query design references
+[NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology), reviewed at
+revision `c447003f72a822301e927196a4ecb5b597c308d5` under Apache-2.0.
+CGA's ontology tools are independently implemented; this adoption does not vendor
+upstream source, models, assets or SDKs, add an NVIDIA runtime dependency, or
+send repository content to NVIDIA services. Attribution does not imply
+endorsement. See [the adoption report](docs/Auto-Ontology-Adoption-v1.0.0-zh.md)
+for the research scope and sources.
+
 ## Notice Maintenance
 
 When a direct dependency, browser asset, icon/font package, model, image,

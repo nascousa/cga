@@ -64,6 +64,7 @@ from backend.ai_first.service import save_evidence_pack
 from backend.ai_first.service import update_policy_profile
 from backend.backup import BackupError, BackupService
 from backend.graph.registry import GraphRegistry
+from backend.graph.query_policy import recent_query_decisions
 from backend.integrations.azure_devops import AzureDevOpsEnricher, AZURE_DEVOPS_RESOURCE_SCOPE
 from backend.indexer.consumer import IndexerConsumer
 from backend.cga_relay.router import account_router as cga_relay_account_router
@@ -790,6 +791,11 @@ async def api_admin_runtime_config(_: dict = Depends(require_admin)) -> dict:
 @app.get("/api/admin/upgrade/status")
 async def api_admin_upgrade_status(_: dict = Depends(require_admin)) -> dict:
     return _upgrade_status_payload()
+
+
+@app.get("/api/admin/query-routing/recent")
+async def api_admin_query_routing_recent(_: dict = Depends(require_admin)) -> dict:
+    return recent_query_decisions()
 
 
 @app.get("/api/indexing/settings")

@@ -142,6 +142,50 @@ function Get-RecoveredAdminUrl {
     return "http://${hostName}:$($Matches.port)/admin"
 }
 
+function Wait-CgaDesktopHealth {
+    param(
+        [string]$AdminUrl,
+        [int]$TimeoutSeconds = 60
+    )
+
+    $healthUri = [System.UriBuilder]::new($AdminUrl)
+    $healthUri.Path = '/health'
+    $healthUri.Query = ''
+    $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $lastFailure = 'No response'
+    do {
+        $response = $null
+        $reader = $null
+        try {
+            $request = [System.Net.HttpWebRequest]::Create($healthUri.Uri)
+            $request.Proxy = $null
+            $request.AllowAutoRedirect = $false
+            $request.Timeout = 4000
+            $request.ReadWriteTimeout = 4000
+            $response = $request.GetResponse()
+            $reader = [System.IO.StreamReader]::new($response.GetResponseStream())
+            $payload = $reader.ReadToEnd() | ConvertFrom-Json -ErrorAction Stop
+            if ([int]$response.StatusCode -eq 200 -and $null -ne $payload -and
+                $payload.PSObject.Properties['status'] -and $payload.status -eq 'ok' -and
+                $payload.PSObject.Properties['service'] -and $payload.service -eq 'cga') {
+                return
+            }
+            $lastFailure = "HTTP $([int]$response.StatusCode) did not report a healthy CGA service"
+        }
+        catch [System.Net.WebException], [System.IO.IOException], [System.ArgumentException] {
+            $lastFailure = $_.Exception.Message
+        }
+        finally {
+            if ($null -ne $reader) { $reader.Dispose() }
+            if ($null -ne $response) { $response.Dispose() }
+        }
+        if ([DateTime]::UtcNow -lt $deadline) {
+            Start-Sleep -Seconds 2
+        }
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "CGA host HTTP check failed at $($healthUri.Uri): $lastFailure. Container health alone does not verify Docker's published port. Check Docker forwarding and container addresses; see docs/runtime-operations.md."
+}
+
 Set-Location $repoRoot
 
 if ($useRecoveredDeployment) {
@@ -153,7 +197,14 @@ if ($useRecoveredDeployment) {
                 $upArgs += @('-d', '--wait', '--wait-timeout', '180')
             }
             Invoke-Compose $upArgs
+            if (-not $Detached -and $Command -eq 'start') {
+                return
+            }
+            if ($Command -eq 'restart') {
+                Invoke-Compose @('restart', 'cga')
+            }
             $adminUrl = Get-RecoveredAdminUrl
+            Wait-CgaDesktopHealth -AdminUrl $adminUrl
             Write-Host "Admin UI: $adminUrl"
             if ($OpenBrowser) {
                 Start-Process $adminUrl
@@ -169,7 +220,9 @@ if ($useRecoveredDeployment) {
         }
         'status' {
             Invoke-Compose @('ps')
-            Write-Host "Admin UI: $(Get-RecoveredAdminUrl)"
+            $adminUrl = Get-RecoveredAdminUrl
+            Wait-CgaDesktopHealth -AdminUrl $adminUrl -TimeoutSeconds 0
+            Write-Host "Admin UI: $adminUrl"
         }
         'open' { Start-Process (Get-RecoveredAdminUrl) }
         'config' { Invoke-Compose @('config') }
@@ -213,7 +266,9 @@ switch ($Command) {
         }
         else {
             Invoke-Compose @('up', '--build')
+            return
         }
+        Wait-CgaDesktopHealth -AdminUrl "http://localhost:$apiPreferred/admin"
         Save-DesktopRuntimeState -ApiPort $apiPreferred -GraphPort $graphPreferred -BrowserPort $browserPreferred
         Write-Host "Admin UI: http://localhost:$apiPreferred/admin"
         Write-Host "FalkorDB Browser: http://localhost:$browserPreferred"
@@ -227,6 +282,8 @@ switch ($Command) {
     }
     'restart' {
         Invoke-Compose @('up', '-d', '--build')
+        Invoke-Compose @('restart', 'cga')
+        Wait-CgaDesktopHealth -AdminUrl "http://localhost:$apiPreferred/admin"
         Save-DesktopRuntimeState -ApiPort $apiPreferred -GraphPort $graphPreferred -BrowserPort $browserPreferred
         Write-Host "Admin UI: http://localhost:$apiPreferred/admin"
         Write-Host "Backups: $backupLocation"
@@ -244,6 +301,7 @@ switch ($Command) {
     }
     'status' {
         Invoke-Compose @('ps')
+        Wait-CgaDesktopHealth -AdminUrl "http://localhost:$apiPreferred/admin" -TimeoutSeconds 0
         Write-Host "Admin UI: http://localhost:$apiPreferred/admin"
         Write-Host "FalkorDB Browser: http://localhost:$browserPreferred"
         Write-Host "Backups: $backupLocation"

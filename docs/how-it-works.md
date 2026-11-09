@@ -22,6 +22,41 @@ CGA indexes source code into a graph of repository facts:
 
 The graph is stored in the configured CGA runtime and exposed through MCP-compatible tools.
 
+### Semantic Contract
+
+CGA adopts the semantic-first tool design of
+[NVIDIA Auto Ontology](https://github.com/NVIDIA/auto-ontology), without embedding
+its NL-to-SQL service or sending repository data to model endpoints.
+`get_graph_ontology` explains the entities and relationships the indexer actually
+writes. `query_graph_relation` compiles an allow-listed relationship and exact
+identity into a parameterized one-hop query, returning indexed locations,
+query provenance and explicit coverage limits.
+
+For normal one-hop queries, agents should call `query_graph`: the administrator's
+persisted **Settings > Query Strategy** policy selects a bounded lightweight
+CALLS/IMPORTS read or typed evidence. Agents declare lookup/impact/audit intent
+and explicit evidence needs; CGA applies deterministic routing rules and returns
+the decision, observed cache status, handling time, canonical byte count and
+truncation. Audit intent retains full provenance. The default is lightweight-first
+with a 16 KiB result cap. Explicit older tools remain compatible and bypass this
+router. See the [query quickstart](mcp-agent-query-quickstart.md#who-decides-when-to-use-ontology).
+
+```mermaid
+flowchart LR
+    A["Agent: intent and evidence needs"] --> R["query_graph"]
+    P["Administrator: persisted query policy"] --> R
+    R -->|"Lightweight CALLS / IMPORTS"| L["Bounded legacy read"]
+    R -->|"Evidence / audit / no legacy equivalent"| T["Typed indexed evidence"]
+    L --> B["Canonical byte budget and decision metadata"]
+    T --> B
+    B --> D["Admin recent decisions: last 100 successful calls, process-local"]
+```
+
+These are additive backend MCP and Desktop Relay tools; existing retrieval
+behavior and graph storage are unchanged. The contract describes supported
+semantics, not actual project readiness or certified runtime behavior.
+See the [adoption report](Auto-Ontology-Adoption-v1.0.0-zh.md).
+
 ## Agent Flow
 
 The intended agent workflow is CG-first:

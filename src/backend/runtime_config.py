@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import asdict, dataclass
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -44,6 +46,54 @@ INDEXING_PARSING_STRATEGIES = {
 DEFAULT_INDEXING_INTELLIGENCE_STRATEGY = "auto"
 DEFAULT_INDEXING_PARSING_STRATEGY = "auto"
 DEFAULT_INDEXING_TOKEN_BUDGET = 1500
+MIN_QUERY_RESPONSE_BYTES = 2048
+MAX_QUERY_RESPONSE_BYTES = 262144
+
+
+class QueryMode(StrEnum):
+    LIGHTWEIGHT_FIRST = "lightweight_first"
+    AUTO = "auto"
+    EVIDENCE_FIRST = "evidence_first"
+
+
+class EvidenceDetail(StrEnum):
+    COMPACT = "compact"
+    FULL = "full"
+
+
+@dataclass(frozen=True)
+class QueryPolicy:
+    mode: QueryMode = QueryMode.LIGHTWEIGHT_FIRST
+    max_response_bytes: int = 16384
+    evidence_detail: EvidenceDetail = EvidenceDetail.COMPACT
+
+
+def _normalize_query_policy(value: Any) -> QueryPolicy:
+    if not isinstance(value, dict):
+        raise RuntimeConfigError("query_policy must be an object")
+    unknown = set(value) - {"mode", "max_response_bytes", "evidence_detail"}
+    if unknown:
+        raise RuntimeConfigError(f"unknown query_policy fields: {', '.join(sorted(unknown))}")
+    defaults = QueryPolicy()
+    try:
+        mode = QueryMode(value.get("mode", defaults.mode))
+        detail = EvidenceDetail(value.get("evidence_detail", defaults.evidence_detail))
+    except (ValueError, TypeError) as exc:
+        raise RuntimeConfigError("Invalid query_policy mode or evidence_detail") from exc
+    budget = value.get("max_response_bytes", defaults.max_response_bytes)
+    if type(budget) is not int or not MIN_QUERY_RESPONSE_BYTES <= budget <= MAX_QUERY_RESPONSE_BYTES:
+        raise RuntimeConfigError(
+            f"query_policy.max_response_bytes must be an integer from "
+            f"{MIN_QUERY_RESPONSE_BYTES} to {MAX_QUERY_RESPONSE_BYTES}"
+        )
+    return QueryPolicy(mode, budget, detail)
+
+
+def get_query_policy(raw: dict[str, Any] | None = None) -> QueryPolicy:
+    data = raw if raw is not None else _read_raw_config()
+    return _normalize_query_policy(data.get("query_policy", {}))
+
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _LOCAL_REPOS_ROOT = _REPO_ROOT.parent
 
@@ -362,6 +412,7 @@ def get_runtime_config(default_repos_root: str | Path | None = None) -> dict[str
             "parser_languages": parser_language_payload(disabled_parser_languages),
         },
         "modules": get_module_config(raw),
+        "query_policy": asdict(get_query_policy(raw)),
         "smtp": _public_smtp_config(raw),
         "runtime_config_path": str(RUNTIME_CONFIG_PATH),
     }
@@ -391,6 +442,13 @@ def update_runtime_config(patch: dict[str, Any] | None) -> dict[str, Any]:
         raise RuntimeConfigError("runtime config patch must be an object")
 
     raw = _read_raw_config()
+    if "query_policy" in patch:
+        value = patch["query_policy"]
+        if not isinstance(value, dict):
+            raise RuntimeConfigError("query_policy must be an object")
+        raw["query_policy"] = asdict(
+            _normalize_query_policy({**asdict(get_query_policy(raw)), **value})
+        )
     if "indexing" in patch:
         indexing_patch = patch.get("indexing")
         if not isinstance(indexing_patch, dict):

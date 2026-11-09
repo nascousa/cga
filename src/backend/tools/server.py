@@ -22,6 +22,8 @@ All read tool calls are trace-recorded for hallucination-proxy scoring.
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
+from copy import deepcopy
 import os
 import time
 from pathlib import Path
@@ -42,6 +44,19 @@ from backend.auth.context import (
 from backend.agent.query_strategy import decide_fallback, trim_items_to_budget
 from backend.graph.registry import GraphRegistry
 from backend.graph import schema as S
+from backend.graph.ontology import (
+    CONTRACT_VERSION,
+    Direction,
+    RelationName,
+    compile_relation_query,
+    graph_ontology,
+)
+from backend.graph.query_policy import (
+    QueryIntent,
+    fit_query_response,
+    record_query_decision,
+    select_query_tool,
+)
 from backend.indexer.paths import RepositoryPathError, resolve_changed_path
 from backend.perf.context_quality import benchmark_context_quality as run_context_quality_benchmark
 from backend.perf.token_efficiency import benchmark_token_efficiency as run_token_efficiency_benchmark
@@ -57,6 +72,15 @@ def _csv_env(name: str) -> list[str]:
 
 mcp = FastMCP(
     "cga-mcp-server",
+    instructions=(
+        "Use query_graph for policy-routed one-hop relationships: the admin policy "
+        "selects lightweight or evidence tools; declare intent and requires_evidence. "
+        "Explicit legacy tools and query_graph_relation remain available and bypass "
+        "that routing policy. Use CGA graph evidence before broad source reads. For typed relationship "
+        "queries, read get_graph_ontology, resolve an exact path or qualified_name, "
+        "then use query_graph_relation. Contract support does not guarantee indexed "
+        "coverage; no matches is not proof of absence. Inspect source and validate changes."
+    ),
     transport_security=TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=["127.0.0.1:*", "localhost:*"] + _csv_env("CGA_MCP_ALLOWED_HOSTS"),
@@ -71,6 +95,7 @@ _cache = None           # QueryCache | None  – set via init()
 _recorder = None        # TraceRecorder | None  – set via init()
 _work_briefing_service: WorkBriefingService | None = None
 _repo_root = Path(os.getenv("CONTEXTGRAPH_REPO_ROOT", ".")).resolve()
+_read_observation: ContextVar[dict[str, str] | None] = ContextVar("query_read_observation", default=None)
 
 from backend.adc.mcp import register as register_adc_tools
 
@@ -281,6 +306,9 @@ def _cached_read(tool: str, args: dict, fetch_fn, trace_args: dict | None = None
         "authorization_version": 2,
     }
     cache = None
+    observation = _read_observation.get()
+    if observation is not None:
+        observation["cache_status"] = "disabled"
     if _cache and _registry is not None:
         generation = getattr(_registry.get(graph_name), "cache_generation", None)
         if callable(generation):
@@ -289,8 +317,12 @@ def _cached_read(tool: str, args: dict, fetch_fn, trace_args: dict | None = None
                 cache_args["graph_generation"] = value
                 cache = _cache
     if cache is not None:
+        if observation is not None:
+            observation["cache_status"] = "miss"
         hit = cache.get(tool, cache_args)
         if hit is not None:
+            if observation is not None:
+                observation["cache_status"] = "hit"
             return hit
     t0 = time.perf_counter()
     result = fetch_fn()
@@ -1257,35 +1289,222 @@ def find_dependency_chain(source_path: str, target_path: str) -> dict:
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def get_file_imports(file_path: str) -> list[dict]:
+def query_graph(
+    relation: RelationName,
+    identity: str,
+    direction: Direction = "outbound",
+    limit: int = 20,
+    intent: QueryIntent = "lookup",
+    requires_evidence: bool = False,
+    max_response_bytes: int | None = None,
+) -> dict:
+    """Preferred one-hop query: obey the administrator's saved query policy.
+
+    Declare lookup, impact or audit intent. Explicit evidence needs always use
+    typed indexed evidence; audit keeps full provenance. Lightweight CALLS and
+    IMPORTS use bounded legacy reads. No empty-result retry or invented evidence.
+    A request may lower, never raise, the admin UTF-8 result-byte budget. Transport
+    envelopes are outside that budget. Explicit tools keep their original behavior.
+    Returns result plus decision, reason, cache state, timing and truncation.
+    """
+    started = time.perf_counter()
+    scope = require_project_scope()
+    _resolve_project_name()
+    if not _graph:
+        raise RuntimeError("MCP server not initialized")
+    compile_relation_query(relation, identity, direction, limit)
+    policy = runtime_config.get_query_policy()
+    budget = policy.max_response_bytes
+    if max_response_bytes is not None:
+        if (
+            type(max_response_bytes) is not int
+            or not runtime_config.MIN_QUERY_RESPONSE_BYTES <= max_response_bytes <= budget
+        ):
+            raise ValueError(
+                f"max_response_bytes must be an integer from "
+                f"{runtime_config.MIN_QUERY_RESPONSE_BYTES} to the admin budget {budget}"
+            )
+        budget = max_response_bytes
+    selected, reason = select_query_tool(policy, relation, direction, intent, requires_evidence)
+    observation: dict[str, str] = {}
+    token = _read_observation.set(observation)
+    detail = "none"
+    result: dict | list[dict]
+    try:
+        if selected == "query_graph_relation":
+            result = deepcopy(query_graph_relation(relation, identity, direction, limit))
+            detail = "full" if intent == "audit" else policy.evidence_detail.value
+            if detail == "compact":
+                result["provenance"] = {
+                    key: result["provenance"][key]
+                    for key in ("source", "graph_name", "contract_version")
+                }
+                result["limitations"] = [
+                    "Static indexed evidence; empty results are not proof of absence."
+                ]
+            has_more = result["has_more"]
+            status = result["status"]
+        else:
+            if selected == "find_callers":
+                rows = find_callers(identity, limit=limit + 1)
+            elif selected == "find_callees":
+                rows = find_callees(identity, limit=limit + 1)
+            elif selected == "get_file_imports":
+                rows = get_file_imports(identity, limit=limit + 1)
+            else:
+                rows = get_file_dependents(identity, limit=limit + 1)
+            has_more = len(rows) > limit
+            result = deepcopy(rows[:limit])
+            status = "ok" if result else "no_matches"
+    finally:
+        _read_observation.reset(token)
+    payload = fit_query_response(
+        {
+            "result": result,
+            "decision": {
+                "mode": policy.mode.value, "intent": intent,
+                "selected_tool": selected, "reason": reason, "relation": relation,
+                "evidence_detail": detail,
+                "cache_status": observation.get("cache_status", "not_observed"),
+                "duration_ms": round((time.perf_counter() - started) * 1000, 3),
+                "budget_bytes": budget, "status": status, "has_more": has_more,
+                "truncated": has_more,
+                "truncation_reason": "item_limit" if has_more else None,
+            },
+        },
+        budget,
+    )
+    record_query_decision(scope.project_id, payload["decision"])
+    return payload
+
+
+@mcp.tool()
+def get_graph_ontology() -> dict:
+    """Discover canonical graph entities, relation directions and coverage limits.
+
+    This is a static contract, not project indexing readiness or observed coverage.
+    Use it before query_graph_relation; identities must be exact indexed values.
+    """
+    _resolve_project_name()
+    return graph_ontology()
+
+
+@mcp.tool()
+def query_graph_relation(
+    relation: RelationName,
+    identity: str,
+    direction: Direction = "outbound",
+    limit: int = 20,
+) -> dict:
+    """Read one typed graph hop with parameterized Cypher and indexed provenance.
+
+    Outbound identity belongs to the relation source; inbound to its target.
+    Read get_graph_ontology for identity properties and meaning. Limit: 1..100.
+    Empty results are not proof that a dependency or runtime flow is absent.
+    """
+    graph_name = _resolve_project_name()
+    if not _graph:
+        raise RuntimeError("MCP server not initialized")
+    contract, cypher, params = compile_relation_query(relation, identity, direction, limit)
+
+    def _fetch():
+        rows = _graph.query(cypher, params).result_set
+        edges = [
+            {
+                "relation": contract.name,
+                "source": {
+                    "label": contract.source.label,
+                    "identity": row[0],
+                    "file_path": row[1],
+                    "line_start": row[2],
+                    "line_end": row[3],
+                },
+                "target": {
+                    "label": contract.target.label,
+                    "identity": row[4],
+                    "file_path": row[5],
+                    "line_start": row[6],
+                    "line_end": row[7],
+                },
+                "flow_evidence": {
+                    "scope_qname": row[8],
+                    "line_number": row[9],
+                    "flow_type": row[10],
+                },
+            }
+            for row in rows[:limit]
+        ]
+        return {
+            "status": "ok" if edges else "no_matches",
+            "relation": contract.name,
+            "direction": direction,
+            "identity": identity,
+            "edges": edges,
+            "has_more": len(rows) > limit,
+            "provenance": {
+                "source": "indexed_graph",
+                "graph_name": graph_name,
+                "contract_version": CONTRACT_VERSION,
+                "cypher": cypher,
+                "parameters": params,
+            },
+            "limitations": graph_ontology()["limitations"] + [contract.limitations],
+        }
+
+    return _cached_read(
+        "query_graph_relation",
+        {
+            "relation": relation, "identity": identity, "direction": direction,
+            "limit": limit, "contract_version": CONTRACT_VERSION,
+        },
+        _fetch,
+    )
+
+
+@mcp.tool()
+def get_file_imports(file_path: str, limit: int | None = None) -> list[dict]:
     """Get all local imports from a specific file."""
     if not _graph:
         raise RuntimeError("MCP server not initialized")
+    if limit is not None and (type(limit) is not int or not 1 <= limit <= 101):
+        raise ValueError("limit must be an integer from 1 to 101")
+    args = {"file_path": file_path}
+    cypher = S.QUERY_FILE_IMPORTS
+    if limit is not None:
+        args["limit"] = limit
+        cypher += "\nORDER BY target_file\nLIMIT $limit"
     
     def _fetch():
-        result = _graph.query(S.QUERY_FILE_IMPORTS, {"file_path": file_path})
+        result = _graph.query(cypher, args)
         return [
             {"target_file": row[0], "language": row[1]}
             for row in result.result_set
         ]
     
-    return _cached_read("get_file_imports", {"file_path": file_path}, _fetch)
+    return _cached_read("get_file_imports", args, _fetch)
 
 
 @mcp.tool()
-def get_file_dependents(file_path: str) -> list[dict]:
+def get_file_dependents(file_path: str, limit: int | None = None) -> list[dict]:
     """Get all files that import this file."""
     if not _graph:
         raise RuntimeError("MCP server not initialized")
+    if limit is not None and (type(limit) is not int or not 1 <= limit <= 101):
+        raise ValueError("limit must be an integer from 1 to 101")
+    args = {"file_path": file_path}
+    cypher = S.QUERY_IMPORT_DEPENDENTS
+    if limit is not None:
+        args["limit"] = limit
+        cypher += "\nORDER BY dependent_file\nLIMIT $limit"
     
     def _fetch():
-        result = _graph.query(S.QUERY_IMPORT_DEPENDENTS, {"file_path": file_path})
+        result = _graph.query(cypher, args)
         return [
             {"dependent_file": row[0], "language": row[1]}
             for row in result.result_set
         ]
     
-    return _cached_read("get_file_dependents", {"file_path": file_path}, _fetch)
+    return _cached_read("get_file_dependents", args, _fetch)
 
 
 @mcp.tool()

@@ -163,6 +163,97 @@ Output fields:
 
 ## 6) Architecture analysis tools
 
+### Typed semantic graph queries
+
+The backend MCP server and Desktop Relay both expose:
+
+- `query_graph(relation, identity, direction="outbound", limit=20,
+  intent="lookup", requires_evidence=false, max_response_bytes=null)` -
+  **Preferred policy-routed entry point**. Returns `result` plus a live `decision`
+  describing the chosen tool, rule, cache status, handling duration, byte count and
+  truncation. Use `intent="impact"` for change-impact work and `intent="audit"`
+  when full query provenance is required.
+- `get_graph_ontology()` - A versioned contract for four entity types and six
+  indexed relationships, including identity properties, direction and limitations.
+- `query_graph_relation(relation, identity, direction="outbound", limit=20)` -
+  A bounded, parameterized, one-hop query returning indexed source/target locations,
+  flow evidence where available, query provenance and `has_more`.
+
+Read the contract first, resolve an exact indexed identity using the existing
+retrieval tools, then query the relationship. For example:
+
+```json
+{
+  "name": "query_graph",
+  "arguments": {
+    "relation": "CALLS",
+    "identity": "<exact qualified_name from find_symbol>",
+    "direction": "inbound",
+    "limit": 20,
+    "intent": "impact",
+    "requires_evidence": true
+  }
+}
+```
+
+`outbound` anchors the relation source; `inbound` anchors its target. The allowed
+relations are `CONTAINS`, `DEFINES`, `IMPORTS`, `CALLS`, `USES_VARIABLE` and
+`FLOWS_TO`. Limits are integers from 1 to 100. `REFERENCES` is not an indexed
+relationship. No caller-supplied Cypher is accepted.
+
+Results use the authenticated project/ref graph and generation-aware query cache.
+The contract is not an indexing-readiness check. `no_matches` does not prove a
+dependency is absent, and indexed locations are not a source-freshness guarantee.
+Graph errors remain errors. Inspect source and validate before editing.
+
+#### Who decides when to use ontology?
+
+Administrators save the global policy under **Settings > Query Strategy**
+(`/admin/settings/query`); CGA executes the rules, and the agent supplies explicit
+task intent and evidence needs. Policy changes take effect on subsequent calls,
+without reindexing or restarting.
+
+| Mode | Lookup without explicit evidence | Impact without explicit evidence |
+|---|---|---|
+| `lightweight_first` (default) | Bounded legacy CALLS/IMPORTS | Bounded legacy CALLS/IMPORTS |
+| `auto` | Bounded legacy CALLS/IMPORTS | Typed evidence |
+| `evidence_first` | Typed evidence | Typed evidence |
+
+`requires_evidence=true` always selects typed evidence. `intent="audit"` selects
+typed evidence with **full** provenance, even if the configured detail is compact.
+Relations with no equivalent legacy tool always use typed evidence.
+Compact evidence retains indexed source/target locations and flow evidence;
+full detail also includes Cypher, parameters and the complete limitations.
+Empty results never cause automatic retries against the same indexed graph.
+
+The default cap is **16,384 UTF-8 bytes**, configurable from 2,048 to 262,144.
+`max_response_bytes` may only lower the administrator's cap for one call.
+The cap and `decision.response_bytes` cover canonical JSON
+(`ensure_ascii=False`, compact separators), including `result` and `decision`,
+not HTTP/MCP wrappers or Relay's duplicate text/data representations.
+`decision.truncation_reason` distinguishes `item_limit` and `byte_budget`;
+`budget_omitted_items` counts known items removed by the byte cap.
+If all available items are removed, the status is `budget_exhausted`, **not**
+`no_matches`. If required metadata cannot fit, the call fails explicitly rather
+than silently dropping required provenance. Increase the configured budget.
+
+`decision.cache_status` reports an observed `hit`, `miss` or `disabled`.
+`duration_ms` includes policy and graph/cache handling, excluding final response
+encoding and transport; it is not end-to-end latency.
+The settings page's **Recent Routed Queries** shows the last 100 successful calls
+in the current API process, without identities or source text. It is cleared on
+restart and is not a durable or multi-worker audit log. Errors still propagate
+through the normal tool error path.
+
+**Compatibility boundary:** explicit legacy tools and `query_graph_relation`
+retain their behavior and bypass the routing policy and its byte cap. Migrate
+clients to `query_graph` to use these controls; this is not a global enforcement
+mechanism for all graph access. `strategy_query` / Relay `query_impact_graph`
+remain the separate text/context retrieval strategy, not this one-hop router.
+
+See the [Auto Ontology adoption report](Auto-Ontology-Adoption-v1.0.0-zh.md)
+for the upstream research, implementation boundaries and validation evidence.
+
 These tools help agents understand project structure and dependencies:
 
 - `get_architecture_overview()` - High-level stats (total files, symbols, languages, interconnectedness)

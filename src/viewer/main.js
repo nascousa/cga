@@ -293,7 +293,9 @@ async function api(path) {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
     const detail = payload.detail || response.statusText
-    throw new Error(response.status === 401 ? `${detail}. Open Admin and sign in first.` : detail)
+    const error = new Error(response.status === 401 ? `${detail}. Open Admin and sign in first.` : detail)
+    error.status = response.status
+    throw error
   }
   return payload
 }
@@ -306,7 +308,9 @@ async function postJson(path) {
   const payload = await response.json().catch(() => ({}))
   if (!response.ok) {
     const detail = payload.detail || response.statusText
-    throw new Error(response.status === 401 ? `${detail}. Open Admin and sign in first.` : detail)
+    const error = new Error(response.status === 401 ? `${detail}. Open Admin and sign in first.` : detail)
+    error.status = response.status
+    throw error
   }
   return payload
 }
@@ -1889,6 +1893,7 @@ async function projectWithGraphStats(project) {
     const stats = await fetchProjectStats(project.project_name)
     return { ...project, viewerStats: stats, viewerTotalNodes: Number(stats.total_nodes || 0) }
   } catch (error) {
+    if (error.status === 401) throw error
     console.warn(`Skipping project without readable graph stats: ${project.project_name}`, error)
     return { ...project, viewerStats: null, viewerTotalNodes: 0 }
   }

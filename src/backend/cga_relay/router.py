@@ -530,6 +530,30 @@ async def dispatch_tool(tool: str, arguments: dict[str, Any], project_name: str)
                 pr_id=str(args.get("pr_id")) if args.get("pr_id") else None,
                 activity_id=str(args.get("activity_id")) if args.get("activity_id") else None,
             ))
+    elif tool in {"get_graph_ontology", "query_graph_relation", "query_graph"}:
+        backend_tool = tool
+        requested_graph_name, graph_name, fallback_graph_used = _query_graph_scope(
+            project_name, ref_id, fallback_ref
+        )
+        handler = {
+            "get_graph_ontology": mcp_server.get_graph_ontology,
+            "query_graph_relation": mcp_server.query_graph_relation,
+            "query_graph": mcp_server.query_graph,
+        }[tool]
+        allowed = {"relation", "identity", "direction", "limit"}
+        if tool == "query_graph":
+            allowed |= {"intent", "requires_evidence", "max_response_bytes"}
+        if tool == "get_graph_ontology":
+            allowed = set()
+        tool_args = {
+            key: value for key, value in args.items()
+            if key in allowed
+        }
+        try:
+            with bind_project_ref(fallback_ref if fallback_graph_used else ref_id):
+                result = await _maybe_await(_call_in_graph(graph_name, handler, **tool_args))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
     elif tool == "promote_ref":
         backend_tool = "index_full"
         result = await _promote_ref(args, project_name)
