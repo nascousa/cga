@@ -172,7 +172,11 @@ function Wait-CgaDesktopHealth {
             }
             $lastFailure = "HTTP $([int]$response.StatusCode) did not report a healthy CGA service"
         }
-        catch [System.Net.WebException], [System.IO.IOException], [System.ArgumentException] {
+        catch [System.Net.WebException] {
+            $response = $_.Exception.Response
+            $lastFailure = $_.Exception.Message
+        }
+        catch [System.IO.IOException], [System.ArgumentException] {
             $lastFailure = $_.Exception.Message
         }
         finally {
@@ -268,8 +272,8 @@ switch ($Command) {
             Invoke-Compose @('up', '--build')
             return
         }
-        Wait-CgaDesktopHealth -AdminUrl "http://localhost:$apiPreferred/admin"
         Save-DesktopRuntimeState -ApiPort $apiPreferred -GraphPort $graphPreferred -BrowserPort $browserPreferred
+        Wait-CgaDesktopHealth -AdminUrl "http://localhost:$apiPreferred/admin"
         Write-Host "Admin UI: http://localhost:$apiPreferred/admin"
         Write-Host "FalkorDB Browser: http://localhost:$browserPreferred"
         Write-Host "Backups: $backupLocation"
@@ -283,8 +287,8 @@ switch ($Command) {
     'restart' {
         Invoke-Compose @('up', '-d', '--build')
         Invoke-Compose @('restart', 'cga')
-        Wait-CgaDesktopHealth -AdminUrl "http://localhost:$apiPreferred/admin"
         Save-DesktopRuntimeState -ApiPort $apiPreferred -GraphPort $graphPreferred -BrowserPort $browserPreferred
+        Wait-CgaDesktopHealth -AdminUrl "http://localhost:$apiPreferred/admin"
         Write-Host "Admin UI: http://localhost:$apiPreferred/admin"
         Write-Host "Backups: $backupLocation"
         if ($OpenBrowser) {

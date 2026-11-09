@@ -274,6 +274,106 @@ def test_status_rejects_container_only_health(launcher_env):
     assert not any(event["kind"] == "browser" for event in events)
 
 
+@pytest.mark.parametrize("powershell_name", ["powershell", "pwsh"])
+def test_host_health_disposes_http_error_responses_before_retry(launcher_env, powershell_name):
+    powershell = shutil.which(powershell_name)
+    if not powershell:
+        pytest.skip(f"{powershell_name} is needed for this launcher regression")
+    _, _, env = launcher_env
+    script = str(SCRIPTS / "start-desktop.ps1").replace("'", "''")
+    driver = r"""
+$ErrorActionPreference = 'Stop'
+Add-Type -IgnoreWarnings -TypeDefinition @'
+using System;
+using System.IO;
+using System.Net;
+using System.Text;
+public class HealthTestResponse : WebResponse {
+    public static int Disposed;
+    public HttpStatusCode StatusCode { get { return HttpStatusCode.OK; } }
+    public override Stream GetResponseStream() {
+        return new MemoryStream(Encoding.UTF8.GetBytes("{\"status\":\"ok\",\"service\":\"cga\"}"));
+    }
+    public override void Close() { Disposed++; }
+}
+public class HealthTestRequest : WebRequest {
+    public static int Attempts;
+    public bool AllowAutoRedirect { get; set; }
+    public int ReadWriteTimeout { get; set; }
+    public override int Timeout { get; set; }
+    public override IWebProxy Proxy { get; set; }
+    public override WebResponse GetResponse() {
+        Attempts++;
+        if (Attempts <= 3)
+            throw new WebException("HTTP 503", null, WebExceptionStatus.ProtocolError, new HealthTestResponse());
+        return new HealthTestResponse();
+    }
+}
+public class HealthTestCreator : IWebRequestCreate {
+    public WebRequest Create(Uri uri) { return new HealthTestRequest(); }
+}
+'@
+[void][System.Net.WebRequest]::RegisterPrefix('cga-health:', [HealthTestCreator]::new())
+function Start-Sleep { param([int]$Seconds) }
+$ast = [System.Management.Automation.Language.Parser]::ParseFile('SCRIPT', [ref]$null, [ref]$null)
+$function = $ast.Find({param($node)
+    $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+    $node.Name -eq 'Wait-CgaDesktopHealth'
+}, $true)
+Invoke-Expression $function.Extent.Text
+Wait-CgaDesktopHealth -AdminUrl 'cga-health://localhost/admin'
+if ([HealthTestRequest]::Attempts -ne 4 -or [HealthTestResponse]::Disposed -ne 4) {
+    throw "Leaked responses: attempts=$([HealthTestRequest]::Attempts), disposed=$([HealthTestResponse]::Disposed)"
+}
+Write-Output 'ALL_RESPONSES_DISPOSED'
+""".replace("SCRIPT", script)
+    result, _ = _run(powershell, env, driver)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "ALL_RESPONSES_DISPOSED" in result.stdout
+
+
+@pytest.mark.parametrize("action", ["start", "restart"])
+@pytest.mark.parametrize("powershell_name", ["powershell", "pwsh"])
+def test_failed_host_health_keeps_new_port_mapping_for_fresh_shells(launcher_env, action, powershell_name):
+    powershell = shutil.which(powershell_name)
+    if not powershell:
+        pytest.skip(f"{powershell_name} is needed for this launcher regression")
+    _, root, env = launcher_env
+    launcher_env = powershell, root, env
+    script = root / "src" / "scripts" / "start-desktop.ps1"
+    script.write_text(
+        script.read_text(encoding="utf-8").replace(
+            "[int]$TimeoutSeconds = 60", "[int]$TimeoutSeconds = 0"
+        ),
+        encoding="utf-8",
+    )
+    state_path = root / "tmp" / "cga-desktop-runtime.json"
+    state_path.parent.mkdir()
+    state_path.write_text('{"apiPort":1,"graphPort":2,"browserPort":3}', encoding="utf-8")
+    with _health_endpoint([(503, b'{}')]) as port:
+        env["CGA_DESKTOP_API_PORT"] = str(port)
+        env["CGA_DESKTOP_FALKORDB_PORT"] = "29111"
+        env["CGA_DESKTOP_BROWSER_PORT"] = "29121"
+        result, events, _ = _desktop(launcher_env, False, action)
+        assert result.returncode != 0
+        assert "CGA host HTTP check failed" in result.stderr
+        assert not any(event["kind"] == "browser" for event in events)
+        state = json.loads(state_path.read_text(encoding="utf-8-sig"))
+        assert (state["apiPort"], state["graphPort"], state["browserPort"]) == (
+            port, 29111, 29121
+        )
+        for key in ("CGA_DESKTOP_API_PORT", "CGA_DESKTOP_FALKORDB_PORT", "CGA_DESKTOP_BROWSER_PORT"):
+            env.pop(key)
+        status, _, _ = _desktop(launcher_env, False, "status")
+        assert status.returncode != 0
+        assert f"http://localhost:{port}/health" in status.stderr
+        opened, events, _ = _desktop(launcher_env, False, "open")
+    assert opened.returncode == 0, opened.stdout + opened.stderr
+    assert [event["url"] for event in events if event["kind"] == "browser"] == [
+        f"http://localhost:{port}/admin"
+    ]
+
+
 @pytest.mark.parametrize("recovered", [False, True])
 def test_foreground_start_does_not_probe_after_compose_exits(launcher_env, recovered):
     env = launcher_env[2]

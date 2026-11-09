@@ -187,6 +187,10 @@ is unavailable or is not a healthy CGA service. Container-internal `healthy`
 does not prove that Docker Desktop is forwarding the host port correctly.
 The explicit `restart` action now actually restarts the API service (`cga`);
 an unchanged `compose up` alone does not restart an existing container.
+For the standard repository deployment, the selected API, graph, and Browser
+ports are saved after Compose succeeds, before the host health check. A failed
+health check still fails the command, but subsequent `status` and `open` commands
+in a fresh shell use the saved ports rather than defaults or stale mappings.
 
 #### Docker Desktop Stale Port Forwarding
 

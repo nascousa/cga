@@ -6186,6 +6186,7 @@ function logout() {
   _schedulePollInterval = null;
   _wsrAutoTimer = null;
   _msAdoPollTimer = null;
+  _msAdoPollId = '';
   document.getElementById('graph-viewer-frame')?.removeAttribute('src');
   adcState = null;
   document.getElementById('adc-manager').replaceChildren();
@@ -9619,10 +9620,13 @@ async function connectMicrosoftAdo() {
 
 function pollMicrosoftAdoDevice(intervalSeconds = 5) {
   if (_msAdoPollTimer) clearTimeout(_msAdoPollTimer);
-  if (!_msAdoPollId) return;
+  const pollId = _msAdoPollId;
+  if (!pollId) return;
   _msAdoPollTimer = setTimeout(async () => {
+    if (_msAdoPollId !== pollId) return;
     try {
-      const result = await api('POST', '/auth/microsoft/device/poll', { poll_id: _msAdoPollId });
+      const result = await api('POST', '/auth/microsoft/device/poll', { poll_id: pollId });
+      if (_msAdoPollId !== pollId) return;
       if (result.status === 'pending') {
         pollMicrosoftAdoDevice(result.interval || intervalSeconds);
         return;
@@ -9633,6 +9637,7 @@ function pollMicrosoftAdoDevice(intervalSeconds = 5) {
       toast('Microsoft account connected');
       generateWorkReport();
     } catch (e) {
+      if (_msAdoPollId !== pollId) return;
       _msAdoPollId = '';
       setMicrosoftAdoStatus('Connect failed: ' + (e?.message || e), 'error');
     }

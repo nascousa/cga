@@ -19,7 +19,10 @@ def _run(script: str) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is needed to execute frontend JavaScript")
-    subprocess.run([node, "-e", script], check=True, capture_output=True, text=True, timeout=10)
+    result = subprocess.run(
+        [node, "-e", script], check=False, capture_output=True, text=True, timeout=10
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def test_authenticated_401_expires_session_once_without_logging_out_new_session() -> None:
@@ -63,7 +66,7 @@ def test_logout_stops_authenticated_polling_and_unloads_viewer() -> None:
 const assert = require('node:assert/strict');
 let adcState={}, _jwt='expired', _me={};
 let _indexStatusPollInterval=1, _auditPollInterval=2, _briefingPollInterval=3;
-let _schedulePollInterval=4, _wsrAutoTimer=5, _msAdoPollTimer=6;
+let _schedulePollInterval=4, _wsrAutoTimer=5, _msAdoPollTimer=6, _msAdoPollId='pending-device';
 const stopped=[];
 function clearInterval(id) { stopped.push(id); }
 function clearTimeout(id) { stopped.push(id); }
@@ -80,10 +83,54 @@ assert.deepEqual(stopped,[1,2,3,4,5,6]);
 assert.equal(_indexStatusPollInterval,null);
 assert.equal(_schedulePollInterval,null);
 assert.equal(_msAdoPollTimer,null);
+assert.equal(_msAdoPollId,'');
 assert.equal(els.get('graph-viewer-frame').removed,'src');
 assert.equal(_jwt,'');
 assert.equal(_me,null);
 """)
+
+
+@pytest.mark.parametrize("response", ["pending", "connected"])
+def test_logout_invalidates_inflight_device_poll(response: str) -> None:
+    markup = (SOURCE / "frontend" / "index.html").read_text(encoding="utf-8")
+    functions = "\n".join(_function(markup, name) for name in ("logout", "pollMicrosoftAdoDevice"))
+    _run(functions + """
+const assert = require('node:assert/strict');
+let adcState={}, _jwt='authenticated', _me={role:'admin'};
+let _indexStatusPollInterval=null, _auditPollInterval=null, _briefingPollInterval=null;
+let _schedulePollInterval=null, _wsrAutoTimer=null, _msAdoPollTimer=null, _msAdoPollId='device-before-logout';
+const scheduled=[];
+function setTimeout(callback) { scheduled.push(callback); return scheduled.length; }
+function clearTimeout() {}
+function clearInterval() {}
+const document={getElementById:()=>({style:{},replaceChildren(){},removeAttribute(){}})};
+const localStorage={removeItem(){}};
+function destroyLoginBackground() {}
+function initLoginBackground() {}
+let respond, requests=0;
+function api(method,path,body) {
+  requests++;
+  assert.equal(body.poll_id,'device-before-logout');
+  return new Promise(resolve=>{respond=resolve;});
+}
+function setMicrosoftAdoDeviceMessage() { throw new Error('Stale device response updated the UI'); }
+function setMicrosoftAdoStatus() { throw new Error('Stale device response updated the UI'); }
+function loadMicrosoftAdoStatus() { throw new Error('Unauthenticated status request'); }
+function generateWorkReport() { throw new Error('Unauthenticated report request'); }
+function toast() {}
+(async()=>{
+  pollMicrosoftAdoDevice();
+  const pending=scheduled[0]();
+  assert.equal(requests,1);
+  logout();
+  respond({status:RESPONSE});
+  await pending;
+  assert.equal(_msAdoPollId,'');
+  assert.equal(_msAdoPollTimer,null);
+  assert.equal(scheduled.length,1);
+  assert.equal(requests,1);
+})().catch(error=>{console.error(error);process.exitCode=1;});
+""".replace("RESPONSE", repr(response)))
 
 
 def test_viewer_does_not_hide_authentication_failure_as_empty_project() -> None:
