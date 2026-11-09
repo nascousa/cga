@@ -1,4 +1,4 @@
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/nascousa/cga)
+[Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/nascousa/cga)
 
 # CGA (Context Graph Agent)
 
