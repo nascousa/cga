@@ -1,12 +1,12 @@
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Output};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const TEST_SECRET: &str = "TEST_SECRET_VALUE_SHOULD_NEVER_LEAK";
 const RESPONSE_HEADER_MARKER: &str = "PRIVATE_RESPONSE_HEADER_MARKER";
@@ -560,12 +560,91 @@ fn copied_agent_executable_runs_without_source_tree_runtime_dependencies() {
     });
     fs::copy(agent_bin(), &copied).expect("agent executable should be copyable");
 
-    let output = Command::new(&copied)
-        .current_dir(tmp.path())
-        .arg("--version")
-        .output()
+    let mut command = Command::new(&copied);
+    command.current_dir(tmp.path()).arg("--version");
+    let output = retry_executable_busy(Duration::from_secs(2), || command.output())
         .expect("copied agent executable should run");
 
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("cga-relay"));
+}
+
+fn retry_executable_busy<T>(
+    timeout: Duration,
+    mut launch: impl FnMut() -> io::Result<T>,
+) -> io::Result<T> {
+    let started = Instant::now();
+    loop {
+        match launch() {
+            // Parallel Linux children can briefly retain the copy's writable descriptor.
+            Err(error)
+                if error.kind() == io::ErrorKind::ExecutableFileBusy
+                    && started.elapsed() < timeout =>
+            {
+                thread::sleep(Duration::from_millis(10));
+            }
+            result => return result,
+        }
+    }
+}
+
+#[test]
+fn copied_executable_launch_retries_transient_busy_error() {
+    let mut attempts = 0;
+    let result = retry_executable_busy(Duration::from_secs(2), || {
+        attempts += 1;
+        if attempts == 1 {
+            Err(io::Error::from(io::ErrorKind::ExecutableFileBusy))
+        } else {
+            Ok(42)
+        }
+    });
+    assert_eq!(result.unwrap(), 42);
+    assert_eq!(attempts, 2);
+}
+
+#[test]
+fn copied_executable_launch_preserves_other_errors() {
+    let mut attempts = 0;
+    let error = retry_executable_busy::<()>(Duration::from_secs(2), || {
+        attempts += 1;
+        Err(io::Error::from(io::ErrorKind::PermissionDenied))
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(attempts, 1);
+}
+
+#[test]
+fn copied_executable_launch_stops_at_retry_deadline() {
+    let mut attempts = 0;
+    let error = retry_executable_busy::<()>(Duration::ZERO, || {
+        attempts += 1;
+        Err(io::Error::from(io::ErrorKind::ExecutableFileBusy))
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::ExecutableFileBusy);
+    assert_eq!(attempts, 1);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn copied_executable_launch_waits_for_writable_descriptor_to_close() {
+    let tmp = TestDir::new("standalone-busy-copy");
+    let copied = tmp.path().join("cga-relay");
+    fs::copy(agent_bin(), &copied).expect("agent executable should be copyable");
+    let writer = fs::OpenOptions::new().write(true).open(&copied).unwrap();
+    let mut command = Command::new(&copied);
+    command.current_dir(tmp.path()).arg("--version");
+    let error = command.output().expect_err("an open writer must prevent exec");
+    assert_eq!(error.kind(), io::ErrorKind::ExecutableFileBusy);
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(100));
+        drop(writer);
+    });
+    let output = retry_executable_busy(Duration::from_secs(2), || command.output());
+    release.join().unwrap();
+    let output = output.expect("copied executable should run after the writer closes");
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert!(stdout(&output).contains("cga-relay"));
 }
@@ -2256,6 +2335,9 @@ fn mcp_tools_list_exposes_expected_tools() {
         "query_impact_graph",
         "fetch_minimal_code",
         "get_optimized_context",
+        "get_graph_ontology",
+        "query_graph_relation",
+        "query_graph",
         "promote_ref",
         "adc_catalog",
         "adc_release",
@@ -2333,6 +2415,59 @@ fn adc_tool_rejects_cross_project_and_unknown_arguments_locally() {
             &[("CGA_TEST_API_KEY", TEST_SECRET)]);
     assert!(stdout(&output).contains("cannot be overridden"));
 }
+#[test]
+fn mcp_ontology_tools_forward_authenticated_typed_requests() {
+    for tool in ["get_graph_ontology", "query_graph_relation", "query_graph"] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = thread::spawn(move || {
+            let mut stream = listener.accept().unwrap().0;
+            let request = read_http_request(&mut stream);
+            assert!(request.contains("POST /api/project/cga-relay/mcp-tool HTTP/1.1"));
+            assert!(request.contains("X-Project-ID: PROJECT123"));
+            assert!(request_body(&request).contains(tool));
+            if tool != "get_graph_ontology" {
+                for value in ["CALLS", "mod.run", "inbound", "feature/ontology"] {
+                    assert!(request_body(&request).contains(value));
+                }
+                if tool == "query_graph" {
+                    for value in ["audit", "requires_evidence", "max_response_bytes", "4096"] {
+                        assert!(request_body(&request).contains(value));
+                    }
+                }
+            }
+            let body = "{\"ok\":true,\"result\":{\"contract_version\":\"1.0.0\"}}";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                body.len(), body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+        });
+        let tmp = TestDir::new("mcp-ontology");
+        let repo = tmp.path().join("repo");
+        fs::create_dir_all(&repo).unwrap();
+        let config = write_safe_config(
+            tmp.path(), &repo,
+            &[("API_BASE_URL", format!("http://127.0.0.1:{port}"))],
+        );
+        let args = if tool == "query_graph" {
+            r#"{"relation":"CALLS","identity":"mod.run","direction":"inbound","limit":5,"ref_id":"feature/ontology","intent":"audit","requires_evidence":true,"max_response_bytes":4096}"#
+        } else if tool == "query_graph_relation" {
+            r#"{"relation":"CALLS","identity":"mod.run","direction":"inbound","limit":5,"ref_id":"feature/ontology"}"#
+        } else {
+            "{}"
+        };
+        let input = format!(
+            "{{\"jsonrpc\":\"2.0\",\"id\":35,\"method\":\"tools/call\",\"params\":{{\"name\":\"{tool}\",\"arguments\":{args}}}}}\n"
+        );
+        let output = run_mcp(&config, &input, &[("CGA_TEST_API_KEY", TEST_SECRET)]);
+        assert!(output.status.success(), "stderr: {}", stderr(&output));
+        assert!(stdout(&output).contains("contract_version"));
+        assert!(!stdout(&output).contains(TEST_SECRET));
+        server.join().unwrap();
+    }
+}
+
 #[test]
 fn mcp_promote_ref_forwards_branch_arguments() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();

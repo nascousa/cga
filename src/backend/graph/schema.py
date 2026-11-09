@@ -1,7 +1,7 @@
 """Cypher MERGE/MATCH templates for the ContextGraph schema.
 
-Node labels   : Repository, File, Symbol
-Edge types    : CONTAINS, DEFINES, IMPORTS, CALLS, REFERENCES
+Node labels   : Repository, File, Symbol, Variable
+Edge types    : CONTAINS, DEFINES, IMPORTS, CALLS, USES_VARIABLE, FLOWS_TO
 
 All write queries use MERGE to guarantee idempotency on re-index.
 """

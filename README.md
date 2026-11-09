@@ -93,6 +93,7 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 
 - **Admin Dashboard:** project registration, user access groups, indexing status, settings, schedules, and operational views.
 - **3D Graph Viewer:** visual exploration of repository relationships and graph layout controls.
+- **Expired login sessions:** an authenticated API response of HTTP 401 returns Admin to sign-in and stops authenticated polling. An empty graph project list with an authentication error requires signing in again; it does not mean the registered projects have been deleted.
 - **MCP-compatible API:** agent-facing retrieval tools for symbols, files, dependencies, imports, variable flow, and architecture queries.
 - **CGA-Relay:** one developer-machine `cga-relay`, enforced by a machine-wide OS mutex, with backend health alerts, stdio MCP gateway, local scan/sync, branch/ref graph routing and promotion, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
 - **Work Briefing Aggregation:** WA-compatible activity capture and briefing summaries inside CGA.

@@ -64,6 +64,15 @@ may be incomplete, outdated, or inaccurate. Human review remains required for
 security decisions, production deployment, compliance review, release approval,
 legal review, and other high-impact actions.
 
+The ontology contract describes supported static relationships, not indexing
+readiness, source freshness, runtime behavior, or proof that an absent result
+means no dependency exists. Administrator query policies apply only to the
+`query_graph` entry point; explicit older tools bypass those routing and byte
+controls. Response budgets exclude HTTP/MCP transport envelopes. Recent routing
+diagnostics are process-local successful-call summaries, not a durable audit
+record. Performance samples are not capacity, answer-quality, or token-savings
+guarantees.
+
 ## Third-Party Services And Dependencies
 
 CGA may rely on third-party packages, container images, browser-delivered

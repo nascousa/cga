@@ -4018,6 +4018,7 @@
           <button class="subtab-btn active" data-subtab="general"      onclick="switchSettingsSubtab('general',this)">General</button>
           <button class="subtab-btn"        data-subtab="graphdb"      onclick="switchSettingsSubtab('graphdb',this)">Graph Database</button>
           <button class="subtab-btn"        data-subtab="indexing"     onclick="switchSettingsSubtab('indexing',this)">Indexing</button>
+          <button class="subtab-btn"        data-subtab="query"        onclick="switchSettingsSubtab('query',this)">Query Strategy</button>
           <button class="subtab-btn"        data-subtab="integrations" onclick="switchSettingsSubtab('integrations',this)">Integrations</button>
           <button class="subtab-btn"        data-subtab="delegation"   onclick="switchSettingsSubtab('delegation',this)">Delegation</button>
           <button class="subtab-btn"        data-subtab="security"     onclick="switchSettingsSubtab('security',this)">Security</button>
@@ -4124,6 +4125,56 @@
             </div>
             <div class="settings-actions settings-actions-indexing">
               <button class="btn btn-primary" onclick="saveIndexingSettings()">Save Settings</button>
+            </div>
+          </section>
+
+          <section class="settings-section" id="settings-section-query">
+            <h2>Query Strategy</h2>
+            <p class="settings-hint">Administrators set the policy; CGA applies deterministic rules; agents declare their task needs through <code>query_graph</code>. Changes apply to subsequent queries without restarting.</p>
+            <div class="settings-card">
+              <div class="settings-row">
+                <label for="settings-query-mode">Routing mode</label>
+                <select id="settings-query-mode" disabled>
+                  <option value="lightweight_first">Lightweight first (default)</option>
+                  <option value="auto">Automatic</option>
+                  <option value="evidence_first">Evidence first</option>
+                </select>
+              </div>
+              <div class="settings-row">
+                <label for="settings-query-budget">Maximum response bytes</label>
+                <input id="settings-query-budget" type="number" min="2048" max="262144" step="1" disabled>
+              </div>
+              <div class="settings-row">
+                <label for="settings-query-evidence">Evidence detail</label>
+                <select id="settings-query-evidence" disabled>
+                  <option value="compact">Compact: indexed source locations</option>
+                  <option value="full">Full: locations, Cypher and parameters</option>
+                </select>
+              </div>
+              <p id="settings-query-status" class="settings-hint" role="status">Loading query policy...</p>
+            </div>
+            <ul class="settings-hint">
+              <li>Lightweight first: CALLS and IMPORTS use bounded legacy queries unless evidence is required.</li>
+              <li>Automatic: lookup uses lightweight queries; impact analysis uses typed evidence.</li>
+              <li>Evidence first: all supported relations use typed evidence.</li>
+              <li>Explicit evidence requirements always use typed evidence. Audit intent always keeps full provenance, regardless of the detail setting.</li>
+              <li>Relations without an equivalent lightweight tool use typed evidence. Empty results never trigger a blind retry and do not prove absence; check index coverage and freshness.</li>
+              <li>The byte cap includes the canonical UTF-8 query_graph result and decision, not HTTP/MCP envelopes. Item limits or byte limits are reported explicitly. Insufficient space for required metadata produces an error.</li>
+              <li>Existing explicit tools remain compatible and bypass this routing policy and byte cap. This is not a global ban on direct tools.</li>
+            </ul>
+            <div class="settings-actions">
+              <button id="settings-query-save" class="btn btn-primary" onclick="saveQueryPolicySettings()" disabled>Save Query Policy</button>
+              <button class="btn btn-outline" onclick="loadSettings()">Reload Policy</button>
+            </div>
+            <h3>Recent Routed Queries</h3>
+            <p class="settings-hint">Last 100 successful routed calls in this API process; cleared on restart and not a durable audit log. Query identities and source contents are not stored here. Duration covers policy and graph/cache handling, excluding final response encoding and transport.</p>
+            <button id="settings-query-refresh" class="btn btn-outline" onclick="loadQueryDecisions()">Refresh Decisions</button>
+            <p id="settings-query-decisions-status" class="settings-hint" role="status">Refresh to load recent decisions.</p>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Time (UTC)</th><th>Project</th><th>Relation / Intent</th><th>Mode</th><th>Selected tool</th><th>Reason</th><th>Cache</th><th>ms</th><th>Bytes / Budget</th><th>Items / Truncation</th></tr></thead>
+                <tbody id="settings-query-decisions"></tbody>
+              </table>
             </div>
           </section>
 
@@ -4656,6 +4707,7 @@ const SETTINGS_SUBTAB_ROUTES = Object.freeze({
   general: '/admin/settings',
   graphdb: '/admin/settings/graphdb',
   indexing: '/admin/settings/indexing',
+  query: '/admin/settings/query',
   integrations: '/admin/settings/integrations',
   delegation: '/admin/settings/delegation',
   security: '/admin/settings/security',
@@ -4882,10 +4934,14 @@ function onAuditFiltersChanged() {
 }
 
 async function api(method, path, body) {
+  const requestToken = _jwt;
   const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (_jwt) opts.headers['Authorization'] = 'Bearer ' + _jwt;
+  if (requestToken) opts.headers['Authorization'] = 'Bearer ' + requestToken;
   if (body !== undefined) opts.body = JSON.stringify(body);
   const r = await fetch('/api' + path, opts);
+  if (r.status === 401 && path !== '/auth/login' && requestToken && requestToken === _jwt) {
+    expireSession();
+  }
   if (r.status === 204) return null;
   const data = await r.json();
   if (!r.ok) throw new Error(data.detail || r.statusText);
@@ -5435,6 +5491,7 @@ async function loadIndexingSummary(options = {}) {
 
 async function loadSettings() {
   if (_me?.role !== 'admin') return;
+  setQueryPolicyAvailability('Loading query policy...', false);
   const userEl = document.getElementById('settings-current-user');
   const roleEl = document.getElementById('settings-current-role');
   const verEl  = document.getElementById('settings-app-version');
@@ -5452,7 +5509,92 @@ async function loadSettings() {
     }
     renderIndexingSettings(cfg);
     renderIndexingSummary(cfg);
-  } catch {}
+    renderQueryPolicySettings(cfg);
+  } catch (e) {
+    setQueryPolicyAvailability('Unable to load query policy: ' + e.message, false);
+    toast('Unable to load settings: ' + e.message, 'error');
+  }
+}
+
+let _queryPolicyReady = false;
+
+function setQueryPolicyAvailability(message, ready) {
+  _queryPolicyReady = ready;
+  document.getElementById('settings-query-status').textContent = message;
+  ['mode', 'budget', 'evidence', 'save'].forEach(name => {
+    document.getElementById('settings-query-' + name).disabled = !ready;
+  });
+}
+
+function renderQueryPolicySettings(cfg) {
+  const policy = cfg?.query_policy;
+  if (!policy) {
+    setQueryPolicyAvailability('Query policy is unavailable on this backend.', false);
+    return;
+  }
+  document.getElementById('settings-query-mode').value = policy.mode;
+  document.getElementById('settings-query-budget').value = policy.max_response_bytes;
+  document.getElementById('settings-query-evidence').value = policy.evidence_detail;
+  setQueryPolicyAvailability(
+    `Active: ${policy.mode}; ${policy.max_response_bytes} UTF-8 bytes; ${policy.evidence_detail} evidence. Applies to query_graph only.`,
+    true,
+  );
+}
+
+async function saveQueryPolicySettings() {
+  if (!_queryPolicyReady) { toast('Load the query policy before saving.', 'error'); return; }
+  const budget = Number(document.getElementById('settings-query-budget').value);
+  if (!Number.isInteger(budget) || budget < 2048 || budget > 262144) {
+    toast('Response budget must be an integer from 2048 to 262144 bytes.', 'error');
+    return;
+  }
+  const button = document.getElementById('settings-query-save');
+  button.disabled = true;
+  try {
+    const cfg = await api('PATCH', '/admin/runtime-config', {
+      query_policy: {
+        mode: document.getElementById('settings-query-mode').value,
+        max_response_bytes: budget,
+        evidence_detail: document.getElementById('settings-query-evidence').value,
+      },
+    });
+    _runtimeConfig = cfg;
+    renderQueryPolicySettings(cfg);
+    toast('Query policy saved; applies to subsequent routed queries.');
+  } catch (e) {
+    document.getElementById('settings-query-status').textContent = 'Save failed; the displayed draft is not confirmed active: ' + e.message;
+    toast('Query policy save failed: ' + e.message, 'error');
+  } finally {
+    button.disabled = !_queryPolicyReady;
+  }
+}
+
+async function loadQueryDecisions() {
+  const status = document.getElementById('settings-query-decisions-status');
+  const body = document.getElementById('settings-query-decisions');
+  const button = document.getElementById('settings-query-refresh');
+  button.disabled = true;
+  status.textContent = 'Loading decisions...';
+  body.replaceChildren();
+  try {
+    const data = await api('GET', '/admin/query-routing/recent');
+    if (!Array.isArray(data.records)) throw new Error('Invalid query diagnostics response');
+    body.innerHTML = data.records.map(record => {
+      const cells = [
+        record.timestamp, record.project_id, `${record.relation} / ${record.intent}`,
+        record.mode, record.selected_tool, record.reason, record.cache_status,
+        record.duration_ms, `${record.response_bytes} / ${record.budget_bytes}`,
+        `${record.returned_items} / ${record.truncation_reason || 'none'}`,
+      ];
+      return '<tr>' + cells.map(value => '<td>' + esc(String(value ?? '')) + '</td>').join('') + '</tr>';
+    }).join('');
+    status.textContent = `${data.records.length} successful routed calls in this process. Refresh to see new calls.`;
+  } catch (e) {
+    status.textContent = 'Unable to load decisions: ' + e.message;
+    toast('Unable to load query decisions: ' + e.message, 'error');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function renderIndexingSettings(cfg) {
@@ -5725,6 +5867,7 @@ function switchSettingsSubtab(name, btn, options = {}) {
   if (nextName === 'backup') loadBackups();
   if (nextName === 'delegation') loadMicrosoftAdoStatus();
   if (nextName === 'report') initWsrTemplateEditor();
+  if (nextName === 'query') loadQueryDecisions();
 }
 
 function settingsCollapseStorageKey() {
@@ -6022,7 +6165,29 @@ function refreshGraphViewer() {
   frame.contentWindow?.location.reload();
 }
 
+function expireSession() {
+  if (!_jwt) return;
+  logout();
+  const error = document.getElementById('login-err');
+  error.textContent = 'Your session has expired or is no longer valid. Sign in again to load projects.';
+  error.style.display = 'block';
+}
+
 function logout() {
+  clearInterval(_indexStatusPollInterval);
+  clearInterval(_auditPollInterval);
+  clearInterval(_briefingPollInterval);
+  clearInterval(_schedulePollInterval);
+  clearInterval(_wsrAutoTimer);
+  clearTimeout(_msAdoPollTimer);
+  _indexStatusPollInterval = null;
+  _auditPollInterval = null;
+  _briefingPollInterval = null;
+  _schedulePollInterval = null;
+  _wsrAutoTimer = null;
+  _msAdoPollTimer = null;
+  _msAdoPollId = '';
+  document.getElementById('graph-viewer-frame')?.removeAttribute('src');
   adcState = null;
   document.getElementById('adc-manager').replaceChildren();
   document.getElementById('tab-adc-btn').style.display = 'none';
@@ -6073,6 +6238,7 @@ async function submitProfile() {
 }
 
 function switchTab(name, btn, options = {}) {
+  if (!_jwt || !_me) return;
   const requestedName = ADMIN_TAB_ROUTES[name] ? name : 'projects';
   const nextName = canOpenAdminTab(requestedName) ? requestedName : 'projects';
   const pane = document.getElementById('pane-' + nextName);
@@ -6769,7 +6935,7 @@ async function loadProjects() {
   await updateIndexStatus();
   // Start polling for index status updates
   if (_indexStatusPollInterval) clearInterval(_indexStatusPollInterval);
-  _indexStatusPollInterval = setInterval(updateIndexStatus, 5000);  // Poll every 5 seconds
+  if (_jwt && _me) _indexStatusPollInterval = setInterval(updateIndexStatus, 5000);
   filterProjects(document.getElementById('project-search')?.value || '');
 }
 
@@ -9454,10 +9620,13 @@ async function connectMicrosoftAdo() {
 
 function pollMicrosoftAdoDevice(intervalSeconds = 5) {
   if (_msAdoPollTimer) clearTimeout(_msAdoPollTimer);
-  if (!_msAdoPollId) return;
+  const pollId = _msAdoPollId;
+  if (!pollId) return;
   _msAdoPollTimer = setTimeout(async () => {
+    if (_msAdoPollId !== pollId) return;
     try {
-      const result = await api('POST', '/auth/microsoft/device/poll', { poll_id: _msAdoPollId });
+      const result = await api('POST', '/auth/microsoft/device/poll', { poll_id: pollId });
+      if (_msAdoPollId !== pollId) return;
       if (result.status === 'pending') {
         pollMicrosoftAdoDevice(result.interval || intervalSeconds);
         return;
@@ -9468,6 +9637,7 @@ function pollMicrosoftAdoDevice(intervalSeconds = 5) {
       toast('Microsoft account connected');
       generateWorkReport();
     } catch (e) {
+      if (_msAdoPollId !== pollId) return;
       _msAdoPollId = '';
       setMicrosoftAdoStatus('Connect failed: ' + (e?.message || e), 'error');
     }

@@ -4,6 +4,87 @@ This guide keeps operational details out of the README while preserving the setu
 
 ## Supported Local Runtimes
 
+### Query Routing Policy
+
+Open **Settings > Query Strategy** (`/admin/settings/query`) to choose
+lightweight-first (default), automatic, or evidence-first routing, set a canonical
+UTF-8 response-byte cap, and select compact/full evidence detail. Both reads and
+writes use the existing admin-only runtime configuration API; the policy is
+persisted under `query_policy` in `RUNTIME_CONFIG_PATH` (normally
+`/app/data/runtime-config.json` in the persistent runtime-data volume).
+Updates apply on subsequent `query_graph` calls, without restarting.
+
+The same page exposes admin-only `GET /api/admin/query-routing/recent`.
+This is a bounded, process-local list of the last 100 successful routed calls:
+selected tool and reason, project, relation/intent, actual cache status,
+handling duration, canonical result bytes/budget and truncation. It omits query
+identities and source contents, resets on restart, and is not a durable audit log.
+Refresh the page's decision table after issuing a query.
+
+Only the recommended `query_graph` tool uses this policy. Explicit legacy tools,
+`query_graph_relation` and the separate text/context `strategy_query` remain
+compatible and are not globally intercepted. Audit intent always retains full
+provenance; a budget too small for required metadata produces an explicit error.
+See [the query quickstart](mcp-agent-query-quickstart.md#who-decides-when-to-use-ontology)
+for the routing matrix and exact budget boundary.
+
+#### Verified Local Query-Policy Cutover (2026-11-09)
+
+- Live settings: `http://127.0.0.1:18001/admin/settings/query`.
+- API overlay: `cga-local:1.30.128-query-policy-20261109`, image
+  `sha256:651d3ede2b85cdf72bdfafd0d7f97630fadcdd697c809a175f2e61bbb2a69388`.
+  This is a local feature variant, not a new public application release.
+- Only policy-related backend/UI hunks were applied to the already-running image.
+  Existing worktree session-expiry, learning and audit changes were excluded.
+  Only the API container was recreated/restarted; database containers, volumes,
+  network settings and credentials were preserved.
+- The configured administrator's normal login successfully saved each policy
+  through the real admin API. Authenticated project calls verified all three
+  modes, required evidence, full audit provenance, an observed cache hit, exact
+  canonical UTF-8 byte counts, request rejection, recent-decision visibility and
+  explicit-tool compatibility. Unauthenticated admin reads/writes were denied.
+- Final saved defaults are `lightweight_first`, `16384` bytes and `compact`
+  evidence. The policy survived an API restart; unrelated runtime settings were
+  unchanged. The settings deep link serves the new controls and requires login.
+- Installed Relay discovery and an authenticated audit query passed through
+  the new `query_graph` tool. Its hardened internal candidate SHA256 is
+  `bf5d58a631ce4cfc0b1481098d0bfeed7e7ebd0b0b2914a54a9d4ae11ea66c66`.
+  Authenticode remains **NotSigned**, because signing credentials are unavailable;
+  this is not a signed public release. The single-instance gate was respected
+  during stdio checks, then the tray was restored and `/status.json` returned 200.
+- Before/after inventory matched exactly: 24 projects, 21 graphs, all node/edge
+  counts unchanged. API and graph browser were healthy.
+- Rollback image: `cga-local:rollback-query-policy-20261109`.
+  Preserved materials under
+  `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-query-policy-20261109`
+  include the original Compose file and Relay, plus
+  `auth-20261109T192230Z-5012-0.sql.gz` and
+  `falkordb-20261109T192237Z-5012-0.tgz`. Archive integrity passed `gzip -t`
+  and `tar -tzf`; a full restore rehearsal was not performed. There was no
+  pre-existing runtime-config file (recorded by `runtime-config.absent`).
+  Preserve subsequent administrator edits when rolling back; do not blindly
+  remove the now-persistent runtime configuration.
+
+Validation:
+
+```powershell
+$env:FALKORDB_PORT = '26381'
+.\.venv\Scripts\python.exe -m pytest src\tests\test_query_policy.py src\tests\test_query_policy_ui.py src\tests\test_runtime_config.py src\tests\test_graph_ontology.py src\tests\test_cga_relay_router.py src\tests\test_admin_settings_ui.py src\tests\test_session_expiry_ui.py --no-cov -o addopts= -q
+# Passed: 328 tests, including all six relations in both directions on an isolated real graph.
+
+& "$env:USERPROFILE\.cargo\bin\cargo.exe" test --manifest-path src\cga-relay\Cargo.toml -- --test-threads=1
+# Passed: 16 unit + 59 CLI + 4 icon tests.
+.\src\cga-relay\scripts\tests\release-process.Tests.ps1
+# PASS. The subsequently extended policy schema unit assertion also passed.
+```
+
+Changed Python files passed Ruff with the already-existing server initialization
+`E402` ignored. The new policy module passed mypy; a broader runtime-config check
+reported the same 13 pre-existing typing errors reproduced from unchanged HEAD.
+`git diff --check` passed. The scoped frontend candidate also passed executable
+Node tests for loading, saving, failures, escaping and diagnostics; browser
+rendering and save/reload handlers were exercised with isolated mock data.
+
 ### Docker Desktop Bundle
 
 The Docker Desktop bundle is the recommended local distribution for non-developer Windows usage.
@@ -98,6 +179,58 @@ deployment.
 When that deployment configuration is absent, all workspace launcher actions
 retain the standard repository deployment. Neither path falls back after a
 startup failure; Docker's failure exit code is preserved.
+
+The workspace launcher also checks `/health` from the Windows host, without
+using an HTTP proxy, before reporting a detached start/restart as ready.
+`status` performs the same host check once and fails if the published endpoint
+is unavailable or is not a healthy CGA service. Container-internal `healthy`
+does not prove that Docker Desktop is forwarding the host port correctly.
+The explicit `restart` action now actually restarts the API service (`cga`);
+an unchanged `compose up` alone does not restart an existing container.
+For the standard repository deployment, the selected API, graph, and Browser
+ports are saved after Compose succeeds, before the host health check. A failed
+health check still fails the command, but subsequent `status` and `open` commands
+in a fresh shell use the saved ports rather than defaults or stale mappings.
+
+#### Docker Desktop Stale Port Forwarding
+
+On 2026-11-04, Docker Desktop restored the API's published port to
+`172.23.0.4:8000` after engine startup, but the live API had received
+`172.23.0.5`. FalkorDB had received `.4`, while its host Browser/Redis forwards
+still targeted `.5`. Both containers passed their internal health checks, but
+the host endpoints returned empty replies. The Docker backend log recorded
+the stale targets; restarting the API replaced its forwarding target with the
+live address. This was a forwarding/address mismatch, not an API crash.
+
+The recovered local deployment now pins each service to its existing address:
+Redis `.2`, PostgreSQL `.3`, FalkorDB `.4`, API `.5`, and backup `.6`, on the
+existing `172.23.0.0/16` network. Its Compose default network is explicitly
+external (`cga-dev_default`), preserving the existing subnet and network rather
+than replacing it. All existing services on that dedicated network are pinned
+to avoid startup-order address swaps. Keep application connections on service
+DNS names; do not put these local deployment addresses into shared application
+configuration or use this subnet blindly on another machine.
+
+Before applying network changes, preserve a copy of the active deployment
+configuration, verify PostgreSQL/FalkorDB persistent mounts and current backups,
+and compare project/graph inventories before and after. Recreate only this
+Compose project's services without rebuilding/pulling images or removing
+volumes; never run `down -v` or restart the shared Docker engine as a repair.
+Verify both host `/health` and the FalkorDB Browser, as well as the configured
+static addresses, after applying the configuration.
+
+Static addresses prevent the observed startup-order mismatch, but do not
+guarantee immunity to unrelated Docker Desktop defects. If it recurs, capture
+the backend `vpnkitcontrol` forwarding targets and `docker network inspect`
+before restarting anything. Do not mask failures with periodic unconditional
+restarts or disable health/security checks.
+
+The local backup sidecar also waits for API health during Compose startup.
+Otherwise its initial `pg_dump` can hold relation locks while API initialization
+waits to ensure tables exist. This ordering avoids that startup race; Docker
+Engine's automatic container restart policy does not itself enforce Compose
+dependency ordering.
+
 `start-cga-relay.cmd` launches the verified standalone executable installed at
 `%USERPROFILE%\.cga\bin\cga-relay.exe`, with the existing account state and
 credential environment-variable configuration. It does not require a checkout
@@ -111,6 +244,41 @@ retained for rollback.
 `Dockerfile.dev` accepts a `PIP_INDEX_URL` build argument for environments that
 require an alternative HTTPS package index. The default remains PyPI; do not
 disable TLS verification to work around download failures.
+
+#### Auto Ontology Local Cutover (2026-11-09)
+
+The recovered local deployment now pins
+`cga-local:1.30.128-ontology-20261109` in its existing Compose configuration.
+This is a local feature build, not a new public version: `/health` still reports
+1.30.128. The image ID is
+`sha256:5350ea378a0d49dad6ee342cfe6fbc2e398d5f87493e61b79fa86ec2e1187ad7`.
+It layers only the ontology module, graph schema comments, MCP tools and Relay
+bridge onto the previously running image, preserving other deployed code rather
+than publishing unrelated workspace changes.
+
+The backend and installed Relay expose `get_graph_ontology` and
+`query_graph_relation` with contract version 1.0.0. Host health, Admin HTTP,
+FalkorDB Browser, installed Relay discovery, authenticated inbound/outbound
+queries over existing call evidence and rejection of unsupported relations were
+verified. The cutover preserved all 24 registered projects and 21 graph
+inventories, including their node/edge counts. Preflight passed 107 targeted
+Python tests, all 79 Relay tests, and the release replacement checks.
+
+Rollback material is retained under the local deployment's
+`backups\pre-ontology-20261109`: the previous Compose configuration and Relay,
+project/graph inventory, and fresh PostgreSQL/FalkorDB archives. Archive integrity
+was checked; this cutover did not perform a full restore rehearsal. The previous
+API image is retained as `cga-local:rollback-ontology-20261109`. An application
+rollback must recreate only `cga` against that retained image; do not restore
+databases or remove volumes for this additive, migration-free change.
+
+The installed Relay passed the hardened release binary checks and matches
+SHA-256 `7c64a0cf3eb539b8f4b9d48498d4e5d40be4a12cac08b30980c2a76581d2bd64`.
+It remains an **internal unsigned candidate**, not a formal signed release.
+No signing certificate was available and no signing gate was bypassed.
+The existing tray was restored after the exclusive stdio smoke test; the
+machine-wide single-instance lock remains enforced. Restart/reconnect an
+already-open MCP client to refresh its process and tool list.
 
 For CGA local development, the default supported single-machine runtime is:
 

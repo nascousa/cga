@@ -2404,6 +2404,21 @@ fn glob_match_chars(pattern: &[u8], value: &[u8]) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn ontology_tools_are_discoverable_with_typed_arguments() {
+        let text = super::mcp_tools_json();
+        let parsed = super::json::parse(&format!("[{text}]")).unwrap();
+        let encoded = parsed.encode();
+        assert!(encoded.contains("\"get_graph_ontology\""));
+        assert!(encoded.contains("\"query_graph_relation\""));
+        assert!(encoded.contains("\"query_graph\""));
+        assert!(encoded.contains("\"requires_evidence\""));
+        assert!(encoded.contains("\"audit\""));
+        assert!(encoded.contains("\"maximum\":262144"));
+        assert!(encoded.contains("\"FLOWS_TO\""));
+        assert!(encoded.contains("\"maximum\":100"));
+    }
+
     use super::*;
 
     #[test]
@@ -3418,7 +3433,12 @@ fn mcp_tools_json() -> String {
     })
     .collect::<Vec<_>>()
     .join(",");
-    format!("{existing},{}", adc::schemas())
+    let ontology = concat!(
+        r#"{"name":"query_graph","description":"Preferred one-hop query: administrator policy selects lightweight or evidence tools. Declare lookup, impact or audit intent; evidence requirements are honored. Returns routing reason, cache status, timing and a bounded result. Explicit tools bypass this policy.","inputSchema":{"type":"object","required":["relation","identity"],"properties":{"relation":{"type":"string","enum":["CONTAINS","DEFINES","IMPORTS","CALLS","USES_VARIABLE","FLOWS_TO"]},"identity":{"type":"string","minLength":1,"maxLength":4096},"direction":{"type":"string","enum":["outbound","inbound"],"default":"outbound"},"limit":{"type":"integer","minimum":1,"maximum":100,"default":20},"intent":{"type":"string","enum":["lookup","impact","audit"],"default":"lookup"},"requires_evidence":{"type":"boolean","default":false},"max_response_bytes":{"type":"integer","minimum":2048,"maximum":262144}}}},"#,
+        r#"{"name":"get_graph_ontology","description":"Read the CGA entity and relation contract before query_graph_relation; not indexing readiness.","inputSchema":{"type":"object","properties":{}}},"#,
+        r#"{"name":"query_graph_relation","description":"Read one typed graph hop with exact indexed identity and provenance. Outbound anchors the source; inbound anchors the target. No matches is not proof of absence.","inputSchema":{"type":"object","required":["relation","identity"],"properties":{"relation":{"type":"string","enum":["CONTAINS","DEFINES","IMPORTS","CALLS","USES_VARIABLE","FLOWS_TO"]},"identity":{"type":"string","minLength":1,"maxLength":4096},"direction":{"type":"string","enum":["outbound","inbound"],"default":"outbound"},"limit":{"type":"integer","minimum":1,"maximum":100,"default":20}}}}"#
+    );
+    format!("{existing},{ontology},{}", adc::schemas())
 }
 
 #[derive(Debug, Default)]
@@ -3640,6 +3660,9 @@ fn handle_mcp_tool_call(config: &AgentConfig, message: &str, id: &str) -> String
         "query_impact_graph",
         "fetch_minimal_code",
         "get_optimized_context",
+        "get_graph_ontology",
+        "query_graph_relation",
+        "query_graph",
         "promote_ref",
     ]
     .into_iter()

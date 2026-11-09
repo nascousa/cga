@@ -20,6 +20,47 @@ def bound_project(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool", ["get_graph_ontology", "query_graph_relation", "query_graph"])
+async def test_dispatch_ontology_tools_keep_ref_scope(monkeypatch, tool):
+    captured = {}
+
+    def handler(**kwargs):
+        captured.update(kwargs)
+        return {"graph_name": _current_project_name.get()}
+
+    monkeypatch.setattr(cga_relay_router.mcp_server, tool, handler)
+    arguments = {"ref_id": "feature/ontology"}
+    if tool != "get_graph_ontology":
+        arguments.update(relation="CALLS", identity="mod.run", limit=4)
+    if tool == "query_graph":
+        arguments.update(intent="audit", requires_evidence=True, max_response_bytes=4096)
+    result = await cga_relay_router.dispatch_tool(tool, arguments, "demo")
+    assert result["result"]["graph_name"] == branch_graph_name("PROJECT123", "feature/ontology")
+    assert result["backend_tool"] == tool
+    assert "ref_id" not in captured
+    if tool == "query_graph_relation":
+        assert captured == {"relation": "CALLS", "identity": "mod.run", "limit": 4}
+    if tool == "query_graph":
+        assert captured == {
+            "relation": "CALLS", "identity": "mod.run", "limit": 4,
+            "intent": "audit", "requires_evidence": True, "max_response_bytes": 4096,
+        }
+
+
+@pytest.mark.asyncio
+async def test_dispatch_ontology_invalid_limit_is_explicit(monkeypatch):
+    def reject(**kwargs):
+        raise ValueError("limit must be an integer between 1 and 100")
+
+    monkeypatch.setattr(cga_relay_router.mcp_server, "query_graph_relation", reject)
+    with pytest.raises(HTTPException) as exc:
+        await cga_relay_router.dispatch_tool(
+            "query_graph_relation", {"relation": "CALLS", "identity": "x", "limit": 0}, "demo"
+        )
+    assert exc.value.status_code == 422
+
+
+@pytest.mark.asyncio
 async def test_dispatch_query_impact_graph_uses_strategy_query(monkeypatch):
     captured = {}
 
