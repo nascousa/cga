@@ -251,7 +251,7 @@ clients to `query_graph` to use these controls; this is not a global enforcement
 mechanism for all graph access. `strategy_query` / Relay `query_impact_graph`
 remain the separate text/context retrieval strategy, not this one-hop router.
 
-See the [Auto Ontology adoption report](Auto-Ontology-Adoption-v1.0.0-zh.md)
+See the [Auto Ontology adoption report](Auto-Ontology-Adoption-v1.0.0-en.md)
 for the upstream research, implementation boundaries and validation evidence.
 
 These tools help agents understand project structure and dependencies:

@@ -55,7 +55,7 @@ flowchart LR
 These are additive backend MCP and Desktop Relay tools; existing retrieval
 behavior and graph storage are unchanged. The contract describes supported
 semantics, not actual project readiness or certified runtime behavior.
-See the [adoption report](Auto-Ontology-Adoption-v1.0.0-zh.md).
+See the [adoption report](Auto-Ontology-Adoption-v1.0.0-en.md).
 
 ## Agent Flow
 

@@ -23,6 +23,17 @@ contribute the work and license it under Apache-2.0.
 6. Update `THIRD_PARTY_NOTICES.md` when dependencies or base images change.
 7. Open a pull request with a concise summary and validation notes.
 
+## Documentation Language and Filenames
+
+All repository documentation must be written in English, including reports,
+deployment records, internal notes, and documentation templates. Use English
+titles and filenames as well; do not add translated document variants.
+
+Versioned deliverables use `<English-Title>-v<MAJOR.MINOR.PATCH>-en.<ext>`.
+Keep the filename and document version consistent. Stable entry/control files
+such as `README.md`, `CONTRIBUTING.md`, `AGENTS.md`, and `SKILL.md` retain their
+established names. Do not overwrite released document versions.
+
 ## Dependency Changes
 
 New dependencies should be justified in the pull request and checked for:

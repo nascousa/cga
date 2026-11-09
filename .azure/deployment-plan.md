@@ -110,7 +110,7 @@ Deployed: 2026-07-27T16:11:18-07:00
 - [x] Scan codebase
 - [x] Select Bicep recipe
 - [x] Plan architecture
-- [x] User approved reuse and deployment: "确认复用并部署"
+- [x] User approved reuse and deployment (translated): "Confirm reuse and deploy"
 
 ### Phase 2: Execution
 

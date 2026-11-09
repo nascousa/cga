@@ -140,7 +140,7 @@ revision `c447003f72a822301e927196a4ecb5b597c308d5` under Apache-2.0.
 CGA's ontology tools are independently implemented; this adoption does not vendor
 upstream source, models, assets or SDKs, add an NVIDIA runtime dependency, or
 send repository content to NVIDIA services. Attribution does not imply
-endorsement. See [the adoption report](docs/Auto-Ontology-Adoption-v1.0.0-zh.md)
+endorsement. See [the adoption report](docs/Auto-Ontology-Adoption-v1.0.0-en.md)
 for the research scope and sources.
 
 ## Notice Maintenance

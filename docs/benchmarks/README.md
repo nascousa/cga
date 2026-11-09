@@ -6,7 +6,7 @@ For the current live multi-project benchmark summary, full result table, caveats
 
 ## Deployed Auto Ontology Performance
 
-The [2026-11-09 evaluation](Auto-Ontology-Performance-v1.0.0-zh.md) measures the
+The [2026-11-09 evaluation](Auto-Ontology-Performance-v1.0.0-en.md) measures the
 deployed semantic graph contract and typed one-hop queries: 97 real-graph cases,
 verified Redis hits, paired legacy tools, authenticated HTTP at 1/4/8 concurrency,
 and the installed Windows Relay stdio path. It records latency, throughput,
