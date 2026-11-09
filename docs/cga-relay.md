@@ -65,6 +65,14 @@ Pop-Location
 
 Policy CI runs the Relay tests on Windows and Linux, plus Windows PE hardening and isolated replacement/rollback checks. Run Cargo from the crate directory so its `.cargo/config.toml` mitigation flags are loaded; `--manifest-path` from the repository root alone does not load that configuration. CI candidates are unsigned and are never installed or published by these checks; formal release signing remains mandatory.
 
+The standalone-copy test tolerates only transient `ExecutableFileBusy` (`ETXTBSY`)
+launch errors for up to two seconds: parallel Linux child processes can briefly
+retain a writable descriptor for the copied executable. Other launch errors and
+nonzero child exits still fail the test. A Linux regression holds a real writable
+descriptor, verifies that execution is blocked, then confirms launch succeeds
+after it closes; separate tests cover error propagation and the retry deadline.
+This handling is confined to the test harness, not production Relay startup.
+
 The crate has no third-party Rust dependencies. The release build produces a standalone `cga-relay.exe` at `src/cga-relay/target/release/cga-relay.exe`; install or copy that executable onto the developer machine and launch it directly. Project MCP config must call that installed executable, not `cargo`, Python, PowerShell scripts, or a per-project MCP server.
 
 On Windows MSVC targets, the crate config enables static CRT linking, fat LTO, symbol stripping, panic abort, Control Flow Guard, ASLR, high-entropy ASLR, DEP/NX, CET compatibility, and reproducible linker metadata. Build formal artifacts through the secure release script:

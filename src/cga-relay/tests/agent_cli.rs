@@ -1,12 +1,12 @@
 use std::ffi::OsStr;
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
 use std::process::{Command as ProcessCommand, Output};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const TEST_SECRET: &str = "TEST_SECRET_VALUE_SHOULD_NEVER_LEAK";
 const RESPONSE_HEADER_MARKER: &str = "PRIVATE_RESPONSE_HEADER_MARKER";
@@ -560,12 +560,91 @@ fn copied_agent_executable_runs_without_source_tree_runtime_dependencies() {
     });
     fs::copy(agent_bin(), &copied).expect("agent executable should be copyable");
 
-    let output = Command::new(&copied)
-        .current_dir(tmp.path())
-        .arg("--version")
-        .output()
+    let mut command = Command::new(&copied);
+    command.current_dir(tmp.path()).arg("--version");
+    let output = retry_executable_busy(Duration::from_secs(2), || command.output())
         .expect("copied agent executable should run");
 
+    assert!(output.status.success(), "stderr: {}", stderr(&output));
+    assert!(stdout(&output).contains("cga-relay"));
+}
+
+fn retry_executable_busy<T>(
+    timeout: Duration,
+    mut launch: impl FnMut() -> io::Result<T>,
+) -> io::Result<T> {
+    let started = Instant::now();
+    loop {
+        match launch() {
+            // Parallel Linux children can briefly retain the copy's writable descriptor.
+            Err(error)
+                if error.kind() == io::ErrorKind::ExecutableFileBusy
+                    && started.elapsed() < timeout =>
+            {
+                thread::sleep(Duration::from_millis(10));
+            }
+            result => return result,
+        }
+    }
+}
+
+#[test]
+fn copied_executable_launch_retries_transient_busy_error() {
+    let mut attempts = 0;
+    let result = retry_executable_busy(Duration::from_secs(2), || {
+        attempts += 1;
+        if attempts == 1 {
+            Err(io::Error::from(io::ErrorKind::ExecutableFileBusy))
+        } else {
+            Ok(42)
+        }
+    });
+    assert_eq!(result.unwrap(), 42);
+    assert_eq!(attempts, 2);
+}
+
+#[test]
+fn copied_executable_launch_preserves_other_errors() {
+    let mut attempts = 0;
+    let error = retry_executable_busy::<()>(Duration::from_secs(2), || {
+        attempts += 1;
+        Err(io::Error::from(io::ErrorKind::PermissionDenied))
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::PermissionDenied);
+    assert_eq!(attempts, 1);
+}
+
+#[test]
+fn copied_executable_launch_stops_at_retry_deadline() {
+    let mut attempts = 0;
+    let error = retry_executable_busy::<()>(Duration::ZERO, || {
+        attempts += 1;
+        Err(io::Error::from(io::ErrorKind::ExecutableFileBusy))
+    })
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::ExecutableFileBusy);
+    assert_eq!(attempts, 1);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn copied_executable_launch_waits_for_writable_descriptor_to_close() {
+    let tmp = TestDir::new("standalone-busy-copy");
+    let copied = tmp.path().join("cga-relay");
+    fs::copy(agent_bin(), &copied).expect("agent executable should be copyable");
+    let writer = fs::OpenOptions::new().write(true).open(&copied).unwrap();
+    let mut command = Command::new(&copied);
+    command.current_dir(tmp.path()).arg("--version");
+    let error = command.output().expect_err("an open writer must prevent exec");
+    assert_eq!(error.kind(), io::ErrorKind::ExecutableFileBusy);
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(100));
+        drop(writer);
+    });
+    let output = retry_executable_busy(Duration::from_secs(2), || command.output());
+    release.join().unwrap();
+    let output = output.expect("copied executable should run after the writer closes");
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     assert!(stdout(&output).contains("cga-relay"));
 }
