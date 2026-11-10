@@ -3,8 +3,6 @@
 const TOPBAR_NAV_ICONS = Object.freeze({
   'tab-briefing-btn':'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
   'tab-adc-btn':'M4 3h11l5 5v13H4z M14 3v6h6 M8 13h8 M8 17h6',
-  'tab-report-btn':'M4 3v18h17 M8 16v-5 M13 16V7 M18 16v-8',
-  'tab-ai-first-btn':'M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z',
   'tab-projects-btn':'M3 7V4h7l2 3h9v13H3z',
   'tab-extensions-btn':'M4 4h6a2 2 0 1 1 4 0h6v6a2 2 0 1 0 0 4v6h-6a2 2 0 1 0-4 0H4v-6a2 2 0 1 0 0-4z',
   'tab-schedule-btn':'M3 5h18v16H3z M7 2v6 M17 2v6 M3 10h18 M7 14h3 M14 14h3 M7 18h3',

@@ -8,8 +8,12 @@ This MVP starts the CGA AI-first control-plane work with two admin-only APIs. Th
 Admin UI:
 
 ```text
-http://localhost:18001/admin/ai-first
+http://localhost:18001/admin/audit/ai-first
 ```
+
+Open **Audit > AI-First**. Audit groups request logs, AI-first readiness/evidence
+and status reports in separate subtabs. The previous `/admin/ai-first` and
+`/admin/aifirst` links remain compatible and select the same AI-First subtab.
 
 The cross-project readiness view renders project cards collapsed by default so the page stays scan-friendly when many projects are active. Expanding a project is remembered per browser session as an explicit expanded-project preference.
 

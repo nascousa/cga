@@ -243,17 +243,23 @@
       background: var(--panel); border: 1px solid var(--border);
       border-radius: 8px; padding: 8px;
     }
-    .settings-subnav .subtab-btn {
+    .audit-subnav {
+      display: flex; gap: 4px; margin-bottom: 20px; padding: 6px;
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 8px; overflow-x: auto;
+    }
+    .audit-subnav .subtab-btn { flex: 0 0 auto; white-space: nowrap; }
+    .settings-subnav .subtab-btn, .audit-subnav .subtab-btn {
       text-align: left; padding: 10px 14px;
       background: transparent; color: var(--muted);
       border: 0; border-radius: 6px;
       font-size: 13px; font-weight: 500; cursor: pointer;
       transition: background .15s, color .15s;
     }
-    .settings-subnav .subtab-btn:hover:not(.active) {
+    .settings-subnav .subtab-btn:hover:not(.active), .audit-subnav .subtab-btn:hover:not(.active) {
       color: var(--text); background: rgba(255,255,255,.04);
     }
-    .settings-subnav .subtab-btn.active {
+    .settings-subnav .subtab-btn.active, .audit-subnav .subtab-btn.active {
       color: var(--accent); background: var(--accent-soft);
     }
     .settings-body { flex: 1; min-width: 0; }
@@ -2892,8 +2898,6 @@
     <div class="topbar-nav">
       <button class="tab-btn" id="tab-briefing-btn" style="display:none" onclick="switchTab('briefing',this)">Dashboard</button>
       <button class="tab-btn" id="tab-adc-btn" style="display:none" onclick="switchTab('adc',this)">ADC</button>
-      <button class="tab-btn" id="tab-report-btn" style="display:none" onclick="switchTab('report',this)">Report</button>
-      <button class="tab-btn" id="tab-ai-first-btn" style="display:none" onclick="switchTab('ai-first',this)">AI-First</button>
       <button class="tab-btn active" id="tab-projects-btn" onclick="switchTab('projects',this)">Project</button>
       <button class="tab-btn" id="tab-extensions-btn" style="display:none" onclick="switchTab('extensions',this)">Extension</button>
       <button class="tab-btn" id="tab-schedule-btn" style="display:none" onclick="switchTab('schedule',this)">Schedule</button>
@@ -3649,8 +3653,15 @@
 
     <!-- AUDIT -->
     <div class="pane" id="pane-audit">
+      <div class="section-header"><h2>Audit</h2></div>
+      <nav class="audit-subnav" id="audit-subnav" aria-label="Audit sections">
+        <button class="subtab-btn active" data-audit-tab="audit" aria-pressed="true" onclick="switchTab('audit')">Request log</button>
+        <button class="subtab-btn" data-audit-tab="ai-first" aria-pressed="false" onclick="switchTab('ai-first')">AI-First</button>
+        <button class="subtab-btn" data-audit-tab="report" aria-pressed="false" onclick="switchTab('report')">Report</button>
+      </nav>
+      <div id="audit-events">
       <div class="section-header">
-        <h2>Audit</h2>
+        <h2>Request log</h2>
         <div class="audit-filters">
           <input id="audit-actor" placeholder="User" style="width:130px" oninput="onAuditFiltersChanged()" />
           <input id="audit-project" placeholder="Project" style="width:130px" oninput="onAuditFiltersChanged()" />
@@ -3680,6 +3691,7 @@
         </table>
       </div>
       <div class="pagination-wrap" id="audit-pagination"></div>
+      </div>
     </div>
 
     <!-- WORK DASHBOARD -->
@@ -4701,9 +4713,9 @@ const ADMIN_TAB_ROUTES = Object.freeze({
   schedule: '/admin/schedule',
   users: '/admin/users',
   audit: '/admin/audit',
-  'ai-first': '/admin/ai-first',
+  'ai-first': '/admin/audit/ai-first',
   briefing: '/admin/briefing',
-  report: '/admin/report',
+  report: '/admin/audit/report',
   viewer: '/admin/graph',
   settings: '/admin/settings',
 });
@@ -4734,6 +4746,8 @@ const ADMIN_PATH_TABS = Object.freeze({
   '/admin/users': 'users',
   '/admin/user': 'users',
   '/admin/audit': 'audit',
+  '/admin/audit/ai-first': 'ai-first',
+  '/admin/audit/report': 'report',
   '/admin/ai-first': 'ai-first',
   '/admin/aifirst': 'ai-first',
   '/admin/briefing': 'briefing',
@@ -4743,9 +4757,38 @@ const ADMIN_PATH_TABS = Object.freeze({
   '/admin/settings': 'settings',
 });
 
+const AUDIT_TAB_PANELS = Object.freeze({
+  audit: 'audit-events',
+  'ai-first': 'pane-ai-first',
+  report: 'pane-report',
+});
+
+function enhanceAuditSections() {
+  const root = document.getElementById('pane-audit');
+  if (root.dataset.auditEnhanced) return;
+  for (const name of ['ai-first', 'report']) {
+    const panel = document.getElementById(AUDIT_TAB_PANELS[name]);
+    panel.classList.remove('pane');
+    panel.classList.remove('active');
+    panel.hidden = true;
+    root.append(panel);
+  }
+  root.dataset.auditEnhanced = 'true';
+}
+
+function selectAuditSubtab(name) {
+  for (const [tab, id] of Object.entries(AUDIT_TAB_PANELS)) {
+    document.getElementById(id).hidden = tab !== name;
+  }
+  document.querySelectorAll('#audit-subnav [data-audit-tab]').forEach(button => {
+    const selected = button.dataset.auditTab === name;
+    button.classList.toggle('active', selected);
+    button.setAttribute('aria-pressed', String(selected));
+  });
+}
+
 function normalizedAdminPath(pathname) {
   const normalized = String(pathname || '/admin').replace(/\/+$/, '');
-  document.getElementById('tab-ai-first-btn').style.display = '';
   return normalized || '/admin';
 }
 
@@ -5347,6 +5390,7 @@ loadAppVersion();
 async function initApp() {
   try { _me = await api('GET', '/auth/me'); } catch { logout(); return; }
   enhanceSettingsSections();
+  enhanceAuditSections();
   destroyLoginBackground();
   document.getElementById('login-screen').style.display = 'none';
   document.getElementById('app').style.display = 'flex';
@@ -5363,7 +5407,7 @@ async function initApp() {
       renderIndexingSummary(cfg);
     } catch {}
     document.getElementById('tab-briefing-btn').style.display = '';
-    document.getElementById('tab-report-btn').style.display = '';
+    document.getElementById('tab-audit-btn').style.display = '';
     document.getElementById('tab-extensions-btn').style.display = '';
     document.getElementById('tab-schedule-btn').style.display = '';
     document.getElementById('tab-viewer-btn').style.display = '';
@@ -6245,14 +6289,17 @@ function switchTab(name, btn, options = {}) {
   if (!_jwt || !_me) return;
   const requestedName = ADMIN_TAB_ROUTES[name] ? name : 'projects';
   const nextName = canOpenAdminTab(requestedName) ? requestedName : 'projects';
-  const pane = document.getElementById('pane-' + nextName);
+  const auditTab = Object.hasOwn(AUDIT_TAB_PANELS, nextName);
+  const pane = document.getElementById('pane-' + (auditTab ? 'audit' : nextName));
   if (!pane) return;
   document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   pane.classList.add('active');
+  if (auditTab) selectAuditSubtab(nextName);
   document.querySelector('.tab-content')?.classList.toggle('viewer-active', nextName === 'viewer');
   document.getElementById('app')?.classList.toggle('viewer-active', nextName === 'viewer');
-  const activeBtn = nextName === requestedName && btn ? btn : document.getElementById('tab-' + nextName + '-btn');
+  const activeBtn = auditTab ? document.getElementById('tab-audit-btn')
+    : nextName === requestedName && btn ? btn : document.getElementById('tab-' + nextName + '-btn');
   if (activeBtn) activeBtn.classList.add('active');
   if (options.updateUrl !== false) {
     setAdminRoute(nextName, { replace: Boolean(options.replace) || nextName !== requestedName });

@@ -381,7 +381,7 @@ CGA includes a built-in work activity domain adapted from WorkAssist so cross-pr
 - Cold-start document import: `python src/scripts/memory_cold_start.py --project-id <id> --root .` prints a dry-run plan; add `--apply` to upsert summaries using `WORKBRIEFING_POSTGRES_DSN`.
 - Skill validation: `python src/scripts/validate_skills.py .adc` checks every `SKILL.md` for frontmatter, SemVer version and the When to Use / Steps / Validation sections.
 
-The Admin briefing dashboard includes copyable PowerShell, Python, and JSON request templates for project-scoped activity publishing. The Report tab can connect a Microsoft account with device-code login so generated WSR payloads can enrich stored PBI/PR references with Azure DevOps ticket details.
+The Admin briefing dashboard includes copyable PowerShell, Python, and JSON request templates for project-scoped activity publishing. The Audit > Report subtab can connect a Microsoft account with device-code login so generated WSR payloads can enrich stored PBI/PR references with Azure DevOps ticket details.
 
 Recorded activity is stored in the local PostgreSQL auth database under the `work_activities` table, keeping project progress local-first alongside project and audit metadata.
 
@@ -661,6 +661,21 @@ and a hidden `.in-progress-*` staging directory behind. Stop/verify **all** writ
 for that backup folder, confirm no restore is running, and only then remove
 that specific stale lock/staging directory. Never remove locks from a live
 worker, and do not remove snapshots or named volumes as lock recovery.
+
+## Audit Workspace
+
+The administrator-only **Audit** entry groups three subtabs: **Request log**,
+**AI-First** (readiness and evidence packs), and **Report** (status reports).
+AI-First and Report no longer have duplicate top-level navigation buttons.
+Existing controls, filters, exports and server-side authorization are unchanged.
+Request-log polling stops when another subtab is selected.
+
+Deep links are `/admin/audit`, `/admin/audit/ai-first`, and
+`/admin/audit/report`. Legacy `/admin/ai-first`, `/admin/aifirst`, and
+`/admin/report` links still select the appropriate subtab, preserving query
+parameters and fragments. Browser Back/Forward restores the selected subtab.
+Report configuration remains under Settings > Report; it is not a second
+report-generation screen.
 
 ## Responsive Admin Navigation
 
