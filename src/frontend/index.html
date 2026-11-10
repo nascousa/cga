@@ -4524,6 +4524,8 @@
 
 <div id="toast-area"></div>
 
+<script src="/adc-versions.js"></script>
+<script src="/adc-collection.js"></script>
 <script src="/adc.js"></script>
 <script>
 let _jwt = localStorage.getItem('cg_jwt') || '';
@@ -6188,7 +6190,7 @@ function logout() {
   _msAdoPollTimer = null;
   _msAdoPollId = '';
   document.getElementById('graph-viewer-frame')?.removeAttribute('src');
-  adcState = null;
+  disposeAdcManager();
   document.getElementById('adc-manager').replaceChildren();
   document.getElementById('tab-adc-btn').style.display = 'none';
   destroyLoginBackground();

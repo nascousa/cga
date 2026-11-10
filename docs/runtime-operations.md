@@ -85,6 +85,55 @@ reported the same 13 pre-existing typing errors reproduced from unchanged HEAD.
 Node tests for loading, saving, failures, escaping and diagnostics; browser
 rendering and save/reload handlers were exercised with isolated mock data.
 
+### Verified Local ADC Centralization (2026-11-10)
+
+- Runtime image: `cga-local:1.30.128-adc-central-20261110.2`, image
+  `sha256:500a2b6ee0f54a33484b1d0992494cbe0ada00e34f9ff4dd558beb9602872799`.
+  This is a local feature overlay, not a signed public release.
+- Only ADC backend modules, the ADC scripts and their Admin-page wiring were
+  overlaid on the previously running query-policy image. Unrelated mainline
+  frontend changes were not applied. Only the API container was recreated;
+  database/graph/queue containers, volumes and credentials were retained.
+- The configured administrator's normal login was used for all project updates
+  and collection requests. BrowserAgent and Codex-CLI received their missing
+  registered checkout paths. The inventoried local DRI, SnapMarker and WorkAssist
+  projects were registered through the existing project API.
+- All **11 active projects** verified as `managed`: BrowserAgent, Codex-CLI,
+  ContextGraphAgent, IcM_Automation, DNSRE-1, orcasql-agctools-echo-ops,
+  QuickSearch, IWM, DRI, SnapMarker and WorkAssist. **268 rule documents** were
+  collected into 11 immutable project revisions with 11 collection receipts.
+  Existing projects retained their baselines. Every local source snapshot was
+  re-read and compared with both its receipt digest and the central effective
+  document contents. Original `.adc` files were not deleted or rewritten.
+- The main-rules editor, project-version panel and Versions tab were exercised
+  in the integrated browser using isolated fixture data and the real pinned
+  ECharts asset. The SVG Sankey reported `nodeAlign: right`; all three fixture
+  project endpoints had identical x coordinates (spread **0 pixels**). Theme
+  color synchronization, narrow viewport resizing and subtab navigation passed.
+  This browser exercise did not claim an authenticated live UI session.
+- Live authenticated version inventory and collection preview passed; anonymous
+  inventory/preview calls returned 401. All three deployed ADC script assets
+  returned HTTP 200, and the API container was healthy.
+- Before migration, the Compose configuration and a PostgreSQL dump were saved
+  under `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-adc-central-20261110`.
+  The gzip dump round-trip matched the original dump; SHA256 is
+  `95c6c477d66c440a70ac58bee7dbe830ca98d2606931c180843b2c10c4dcba88`.
+  No full restore rehearsal was performed. Preserve later project revisions
+  and administrator edits when planning rollback; do not blindly restore the
+  pre-migration database or discard collection history.
+
+Validation used an isolated PostgreSQL container/database, not the live auth
+database:
+
+```powershell
+# Set ADC_TEST_DSN to the isolated database named adc_test.
+.\.venv\Scripts\python.exe -m pytest src\tests\test_adc_collection.py src\tests\test_adc_governance.py src\tests\test_adc_remote.py src\tests\test_adc_ui.py src\tests\test_adc_skills.py src\tests\test_session_expiry_ui.py --no-cov -o addopts= -q
+# Passed: 31 tests, 14 subtests, no skips.
+$env:MYPYPATH = 'src'
+.\.venv\Scripts\python.exe -m mypy -m backend.adc.collection --follow-imports=silent
+# Passed.
+```
+
 ### Docker Desktop Bundle
 
 The Docker Desktop bundle is the recommended local distribution for non-developer Windows usage.

@@ -62,7 +62,8 @@ async function fail(request, status=401) {
 
 def test_logout_stops_authenticated_polling_and_unloads_viewer() -> None:
     markup = (SOURCE / "frontend" / "index.html").read_text(encoding="utf-8")
-    _run(_function(markup, "logout") + """
+    disposal = _function((SOURCE / "frontend" / "adc-versions.js").read_text(encoding="utf-8"), "disposeAdcManager")
+    _run(disposal + _function(markup, "logout") + """
 const assert = require('node:assert/strict');
 let adcState={}, _jwt='expired', _me={};
 let _indexStatusPollInterval=1, _auditPollInterval=2, _briefingPollInterval=3;
@@ -94,7 +95,8 @@ assert.equal(_me,null);
 def test_logout_invalidates_inflight_device_poll(response: str) -> None:
     markup = (SOURCE / "frontend" / "index.html").read_text(encoding="utf-8")
     functions = "\n".join(_function(markup, name) for name in ("logout", "pollMicrosoftAdoDevice"))
-    _run(functions + """
+    disposal = _function((SOURCE / "frontend" / "adc-versions.js").read_text(encoding="utf-8"), "disposeAdcManager")
+    _run(disposal + functions + """
 const assert = require('node:assert/strict');
 let adcState={}, _jwt='authenticated', _me={role:'admin'};
 let _indexStatusPollInterval=null, _auditPollInterval=null, _briefingPollInterval=null;

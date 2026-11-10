@@ -5,6 +5,23 @@ The Autonomous Development Constitution (ADC) is the project-context governance 
 ## Integrated ADC Governance
 
 CGA administrators manage the complete ADC document catalog at `/admin/adc`.
+The manager has three independent subtabs:
+
+- **Main rules** edits drafts and publishes immutable master ADC releases.
+- **Project versions** manages pinned baselines, project-specific changes,
+  history, rollback and rule collection from registered checkouts.
+- **Versions** shows all active projects, including unbound projects, and every
+  immutable project revision. Its Apache ECharts Sankey uses `nodeAlign: right`:
+  baseline release -> project revision -> project. Link width counts revisions,
+  not compliance, usage or source-code size. Selecting a revision opens its
+  historical content without changing the project's current binding.
+
+The version inventory also has a text table. Chart colors follow the Admin
+theme, resize with the panel, and are disposed on sign-out. The pinned ECharts
+6.0.0 asset loads on demand from jsDelivr with SHA-384 integrity verification.
+Project data remains in the browser; it is not sent to the CDN. If loading fails,
+the UI reports the error and retains the version table.
+
 The bundled initial release is the locally available ADC **1.1.23** package
 (44 documents), not a claim that upstream GitHub has no newer release. Its
 provenance, publisher, publication timestamp and SHA256 are recorded. The
@@ -73,6 +90,50 @@ No graph schema migration or reindex is required. The complete seed is stored
 in `src/backend/adc/seed.json`; the validated local release importer is
 `src/scripts/import-adc-release.py`. Existing published seed content must not
 be overwritten; later changes are new releases.
+
+### Central Collection of Project Rules
+
+CGA / ADC is the rule authority. Project `.adc` files are working/distribution
+copies, not a second release catalog. Use **Project versions > Preview all
+project rules**, review each result, then **Collect available rule snapshots**
+with an administrator's justification.
+
+Collection reads only the registered checkout and includes `.adc/index.md`,
+`bootstrap.md`, `prompt-rules.md`, root tool-rule pointers, and files under
+`.adc/standards/`, `.adc/rules/` and `.adc/.github/`. It excludes the provenance
+lock, credentials, Relay/edge-agent configuration, scratchpads, planning status
+and knowledge context. It never executes a rule or imported workflow.
+
+The preview identifies missing/unreadable roots explicitly. An unregistered
+checkout must be registered first; an empty repository path must be corrected
+in project settings. CGA does not guess another project's location by name.
+Every active registered project with local rules must be `managed` before
+claiming complete collection; `blocked` projects are not silently counted as
+migrated. A visible checkout without `.adc` is reported as `no_local_rules`
+only if it already has a centrally pinned baseline, not as a collected snapshot.
+
+Each collection rechecks the preview's snapshot SHA256 and expected project
+revision. Local edits or concurrent CGA updates return 409 without a committed
+revision. Existing bindings retain their baseline; unbound projects explicitly
+adopt the previewed baseline. Matching master rules are inherited; differences
+become project overrides/amendments. Unrelated changes and central-only rules
+are preserved. Collection is not an implicit baseline upgrade or deletion.
+
+The new immutable revision and its `adc_rule_collections` receipt commit
+atomically. Receipts record the registered source path, snapshot hash and
+per-document SHA256 manifest; they are part of PostgreSQL backups. Published
+master releases are never mutated. Original files are retained for offline
+agents and source-control review, not deleted or rewritten during collection.
+After collecting, make future rule changes in CGA and distribute approved
+bundles using the existing preview-first Relay workflow.
+
+Admin-only account endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/adc/versions` | Consistent release/project/revision inventory without document contents |
+| `GET /api/adc/rules/preview` | Preview rule snapshots for every active registered checkout |
+| `POST /api/adc/projects/{id}/rules/collect` | Collect the previewed snapshot using `release_id`, `expected_revision`, `snapshot_sha256`, and `reason` |
 
 ## Remote ADC Interfaces
 

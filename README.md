@@ -99,6 +99,7 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 ## What You Get
 
 - **Admin Dashboard:** project registration, user access groups, indexing status, settings, schedules, and operational views.
+- **Central ADC Management:** separate Main rules, Project versions and Versions subtabs; previewed rule collection from registered checkouts, immutable collection receipts, and a right-aligned ECharts Sankey for baseline-to-project version relationships. See [ADC governance](docs/adc-framework.md).
 - **3D Graph Viewer:** visual exploration of repository relationships and graph layout controls.
 - **Expired login sessions:** an authenticated API response of HTTP 401 returns Admin to sign-in and stops authenticated polling. An empty graph project list with an authentication error requires signing in again; it does not mean the registered projects have been deleted.
 - **MCP-compatible API:** agent-facing retrieval tools for symbols, files, dependencies, imports, variable flow, and architecture queries.

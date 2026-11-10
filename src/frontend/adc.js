@@ -34,13 +34,16 @@ function adcButton(parent, title, action) {
 
 async function adcAction(action) {
   if (!adcState || adcState.busy) return;
-  adcState.busy = true;
-  adcState.error.textContent = '';
+  const state = adcState;
+  state.busy = true;
+  state.error.textContent = '';
   try { await action(); }
   catch (error) {
-    adcState.error.textContent = error.message;
-    toast(error.message, 'error');
-  } finally { adcState.busy = false; }
+    if (adcState === state) {
+      state.error.textContent = error.message;
+      toast(error.message, 'error');
+    }
+  } finally { state.busy = false; }
 }
 
 function adcOptions(select, entries) {
@@ -58,7 +61,10 @@ function adcChangesPayload() {
 async function loadAdcManager() {
   if (_me?.role !== 'admin') return;
   const root = document.getElementById('adc-manager');
-  if (adcState) return;
+  if (adcState) {
+    if (adcState.activeTab === 'versions') adcState.chart?.resize();
+    return;
+  }
   root.replaceChildren();
   adcElement('h2', 'ADC governance', root);
   adcElement('p', 'Immutable releases, pinned project baselines, and audited amendments / overrides / exemptions. New projects pin the latest published version; existing projects never auto-upgrade.', root);
@@ -66,10 +72,10 @@ async function loadAdcManager() {
   error.setAttribute('role', 'alert');
   error.style.color = 'var(--danger, #ff6b6b)';
   const layout = adcElement('div', undefined, root);
-  layout.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:24px';
   const catalog = adcElement('section', undefined, layout);
   const project = adcElement('section', undefined, layout);
-  adcElement('h3', 'ADC release catalog', catalog);
+  const versions = adcElement('section', undefined, layout);
+  adcElement('h3', 'Main ADC rules and immutable releases', catalog);
   const releaseSelect = adcField(catalog, 'Published release', 'select');
   const provenance = adcElement('p', '', catalog);
   const docSelect = adcField(catalog, 'Section / document', 'select');
@@ -82,6 +88,8 @@ async function loadAdcManager() {
   importFile.type = 'file'; importFile.accept = '.json,application/json';
   adcState = {busy:false, error, releaseSelect, provenance, docSelect, docPath, content, draftStatus,
     version, releaseReason, documents:{}, releases:[], project, changes:[], dirty:false};
+  adcBuildNavigation(root, layout, {rules:catalog, projects:project, versions});
+  adcBuildVersionsPanel(versions);
   adcButton(catalog, 'Stage document', () => {
     const path = docPath.value.trim();
     if (!path) throw new Error('Enter a document path.');
@@ -123,7 +131,7 @@ async function loadAdcManager() {
   adcButton(catalog, 'Export release JSON', () => {
     if (!adcState.release) throw new Error('Select a release.');
     const {version, documents, reason, source} = adcState.release;
-    adcSaveBlob(new Blob([JSON.stringify({version, documents, reason, source}, null, 2)], {type:'application/json'}), `adc-${version}.json`);
+    adcSaveBlob(new Blob([JSON.stringify({version, documents, reason, source}, null, 2)], {type:'application/json'}), `ADC-Release-v${version}-en.json`);
   });
   releaseSelect.addEventListener('change', () => adcAction(async () => {
     if (adcState.dirty && !confirm('Discard the unpublished local draft?')) { releaseSelect.value = adcState.release.id; return; }
@@ -135,6 +143,7 @@ async function loadAdcManager() {
     draftStatus.textContent = 'Editor has unstaged changes. Click Stage document before publishing.';
   });
   adcBuildProjectPanel(project);
+  adcBuildCollectionPanel(project);
   await adcAction(async () => {
     await adcLoadCatalog();
     const projects = await api('GET', '/auth/projects');
@@ -161,6 +170,7 @@ async function adcLoadCatalog(selected) {
   if (selected) adcState.releaseSelect.value = selected;
   if (adcState.releaseSelect.value) await adcLoadRelease(adcState.releaseSelect.value);
   if (adcState.current?.release) adcState.targetRelease.value = adcState.current.release.id;
+  adcState.versionsStale = true;
 }
 
 async function adcLoadRelease(id) {
@@ -276,6 +286,7 @@ function adcSelectChange() {
 }
 
 async function adcLoadProject() {
+  adcState.versionsStale = true;
   adcState.projectDirty=false;
   adcState.current=null;
   adcState.changes=[];

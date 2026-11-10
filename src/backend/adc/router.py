@@ -5,7 +5,7 @@ import difflib
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import Field, field_validator
 
-from backend.adc import service
+from backend.adc import collection, service
 from backend.adc.remote import RemoteQuery, query
 from backend.auth.access import require_project_access
 from backend.auth.database import get_db
@@ -13,6 +13,22 @@ from backend.auth.dependencies import get_current_user, require_admin
 from backend.auth.pgshim import Connection
 
 router = APIRouter(tags=["ADC governance"])
+
+
+@router.get("/adc/versions")
+async def versions(_: dict = Depends(require_admin), db: Connection = Depends(get_db)):
+    return await collection.versions(db.raw)
+
+
+@router.get("/adc/rules/preview")
+async def rules_preview(_: dict = Depends(require_admin), db: Connection = Depends(get_db)):
+    return await collection.preview(db.raw)
+
+
+@router.post("/adc/projects/{project_id}/rules/collect", status_code=201)
+async def collect_rules(project_id: int, body: collection.CollectRequest,
+                        user: dict = Depends(require_admin), db: Connection = Depends(get_db)):
+    return await collection.collect(db.raw, project_id, body, user["username"])
 
 
 async def project_reader(project_id: int, user: dict = Depends(get_current_user), db: Connection = Depends(get_db)):
