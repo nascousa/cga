@@ -662,6 +662,25 @@ for that backup folder, confirm no restore is running, and only then remove
 that specific stale lock/staging directory. Never remove locks from a live
 worker, and do not remove snapshots or named volumes as lock recovery.
 
+## Responsive Admin Navigation
+
+The admin topbar measures the space available after the logo, version and user
+menu. When text labels no longer fit, all visible navigation buttons become a
+single row of icons. Labels return automatically when space becomes available,
+including after permission-dependent buttons are hidden. At very narrow widths,
+only the icon strip scrolls horizontally; the toolbar does not wrap.
+
+Each icon retains its accessible name and existing route. Hover or keyboard
+focus displays an unclipped tooltip; Escape dismisses it. Keyboard focus can
+scroll an off-screen icon into view without losing its tooltip.
+
+The 2026-11-10 local navigation overlay passed 12 focused UI tests, JavaScript
+syntax and Ruff checks. Browser fixtures verified text/icon/text restoration,
+permission changes, hover/focus tooltips and single-row geometry at actual
+viewport widths from 300 to 1920 CSS pixels, with zero toolbar or page overflow.
+Only the API service was recreated; database, graph and queue services were not
+replaced. The previous image and Compose configuration remain rollback sources.
+
 ## Desktop Bundle Packaging
 
 Recommended non-technical distribution files live under `deploy/docker-desktop`.
