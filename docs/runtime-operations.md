@@ -689,6 +689,10 @@ Each icon retains its accessible name and existing route. Hover or keyboard
 focus displays an unclipped tooltip; Escape dismisses it. Keyboard focus can
 scroll an off-screen icon into view without losing its tooltip.
 
+Automation appears immediately before Extension in the topbar. It is the
+existing scheduler, renamed in navigation and its page heading; the
+`/admin/schedule` deep link and task behavior remain unchanged.
+
 The 2026-11-10 local navigation overlay passed 12 focused UI tests, JavaScript
 syntax and Ruff checks. Browser fixtures verified text/icon/text restoration,
 permission changes, hover/focus tooltips and single-row geometry at actual
