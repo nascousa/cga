@@ -18,6 +18,9 @@ CGA, aka Context Graph Agent, is a local-first graph context service that gives 
 
 CGA is dedicated to AI-FIRST engineering teams that want local, evidence-backed context for agentic development workflows.
 
+**ADC** stands for **Agent Development Constitution**, CGA's centrally managed
+framework for agent development rules and project governance.
+
 In the published 2026-06-02 live multi-project benchmark, CGA reduced prompt tokens by **90.44%** on average while lowering Hallucination Pressure Score by **13.34%** across **102 real-code cases**. This is a historical pre-answer HPS snapshot; it is not a model task-completion result.
 
 ## For AI Coding Agents

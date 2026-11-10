@@ -1,6 +1,16 @@
-# Autonomous Development Constitution Notes
+# Agent Development Constitution Notes
 
-The Autonomous Development Constitution (ADC) is the project-context governance model used by CGA. It keeps architecture, conventions, domain knowledge, and AI instructions close to the code while separating them from ordinary product documentation.
+The Agent Development Constitution (ADC) is the project-context governance model used by CGA. It keeps architecture, conventions, domain knowledge, and AI instructions close to the code while separating them from ordinary product documentation.
+
+ADC means **Agent Development Constitution**. The earlier expansion is retired
+for current documentation, templates and new master releases. Immutable older
+releases and pinned adoption snapshots retain their original wording for
+provenance; the naming correction does not silently upgrade existing projects.
+
+The local CGA master catalog published this terminology-only correction as
+**ADC 1.2.2** on 2026-11-10, derived from 1.2.1. Twelve documents changed; all
+three earlier releases and existing project revisions were verified unchanged.
+Projects can review and explicitly adopt 1.2.2 through **Project versions**.
 
 ## Integrated ADC Governance
 

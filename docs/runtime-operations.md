@@ -134,6 +134,26 @@ $env:MYPYPATH = 'src'
 # Passed.
 ```
 
+### ADC Definition Update (2026-11-10)
+
+ADC now means **Agent Development Constitution**. The terminology-only local
+overlay is `cga-local:1.30.128-adc-definition-20261110`, image
+`sha256:36e412964c8f0a5edacdfa098ee889815be4c38f0ae6bf05b3b6401ff00d88cc`.
+It changes only the ADC page heading on top of the verified centralization
+image; current source documentation, templates and the template generator use
+the new expansion.
+
+The normal administrator API published master **ADC 1.2.2**, changing only the
+old expansion in 12 documents from 1.2.1. Its document SHA256 is
+`46a6473c122a0506f0ed7de9b59df47aba31e51b21648f13bdd421efbede519f`.
+The three prior releases' hashes and every existing project revision were
+verified unchanged. Pinned project bundles, their local caches and the bundled
+historical seed were not silently rewritten or upgraded.
+
+The preceding Compose configuration is retained under
+`%USERPROFILE%\.nasco\docker\main\cga\backups\pre-adc-definition-20261110`.
+Rolling back the UI image does not remove the newly published master release.
+
 ### Docker Desktop Bundle
 
 The Docker Desktop bundle is the recommended local distribution for non-developer Windows usage.

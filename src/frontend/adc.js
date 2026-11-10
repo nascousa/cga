@@ -66,7 +66,7 @@ async function loadAdcManager() {
     return;
   }
   root.replaceChildren();
-  adcElement('h2', 'ADC governance', root);
+  adcElement('h2', 'Agent Development Constitution (ADC)', root);
   adcElement('p', 'Immutable releases, pinned project baselines, and audited amendments / overrides / exemptions. New projects pin the latest published version; existing projects never auto-upgrade.', root);
   const error = adcElement('p', '', root);
   error.setAttribute('role', 'alert');
