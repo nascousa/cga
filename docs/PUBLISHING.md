@@ -11,6 +11,36 @@ This guide covers the public GitHub release path for CGA, aka Context Graph Agen
 - Container image: tag pushes publish the API/runtime image to GitHub Container Registry:
   - `ghcr.io/nascousa/cga-api:<tag>`
 
+## Current Release Readiness (2026-11-10)
+
+| Area | Verified state |
+| --- | --- |
+| Source version | Backend and Relay declare `1.30.128`; this is not a public-release claim. |
+| Main integration | Ontology query routing and runtime fixes merged through [PR #57](https://github.com/nascousa/cga/pull/57). The checked main commit is `9a3f714e36e30e7c380046759a389c2ec978b196`. |
+| Main validation | [Policy CI](https://github.com/nascousa/cga/actions/runs/42691299869) passed Python quality/security and both Windows/Linux Relay jobs. [CodeQL](https://github.com/nascousa/cga/actions/runs/42691299246) passed all four analysis jobs. These are existing CI results, not a new local full-suite run. |
+| Local runtime | The query-policy cutover and its limits are documented in [runtime operations](runtime-operations.md#verified-local-query-policy-cutover-2026-11-09). A read-only check on November 10 returned HTTP 200 from `http://127.0.0.1:18001/health`; no containers or data were changed. |
+| Published release | [v1.30.113](https://github.com/nascousa/cga/releases/tag/v1.30.113) is still the latest published release. The v1.30.125 draft is unpublished historical preparation, not the current source candidate. |
+| Signing gate | The repository Actions secrets API returned zero repository secrets. Neither required Relay signing secret is configured there. The documented local Relay candidate is unsigned and must not be distributed as a signed formal release. |
+| Merge gate | The active main ruleset requires a pull request and currently sets the required approving review count to zero. Historical draft notes about independent approval do not establish today's rule; recheck current rules and any applicable release approvals before publishing. |
+
+### Remaining Maintainer Actions
+
+1. Provision a trusted Windows code-signing PFX and configure
+   `CGA_RELAY_SIGNING_CERT_BASE64` and `CGA_RELAY_SIGNING_CERT_PASSWORD` using
+   secure GitHub Actions secret entry. Do not send certificate material or its
+   password through issues, pull requests, logs, or chat.
+2. Select the reviewed main commit for the release, confirm its version metadata
+   matches the intended tag, and recheck its CI and current approval requirements.
+   The November 9 local overlay is not a substitute for an exact release build.
+3. Only after these prerequisites are satisfied, follow the tag flow below.
+   Require the signed Relay verification and image publication jobs to succeed,
+   then build and verify the matching Docker Desktop bundle.
+4. Preserve existing published versions and the historical draft's source/assets.
+   Do not relabel or overwrite them to imply they contain the current candidate.
+
+The signing gate is unresolved. No new release tag, public release, or signed
+artifact is claimed by this readiness update.
+
 ## Maintainer Preflight
 
 Before the first public release:
@@ -28,6 +58,12 @@ Before the first public release:
 .\src\cga-relay\scripts\build-secure-release.ps1
 ```
 
+An unsigned local candidate is validation-only and does not satisfy the formal
+release gate. Before pushing a release tag, confirm that both signing secrets
+are configured and that the selected commit meets the current repository and
+release approval requirements. Do not disable `-RequireSignature` to unblock a
+release.
+
 9. Run local service validation from the repository root:
 
 ```bash
@@ -39,14 +75,16 @@ Then open `http://localhost:8001/admin` and `http://localhost:8001/mcp`.
 
 ## Tag Release Flow
 
-Use Semantic Versioning tags. Example for `1.29.85`:
+Use Semantic Versioning tags only after maintainer preflight succeeds. The
+following example uses the current source version, `1.30.128`; it is not an
+instruction to publish while signing is blocked:
 
 ```bash
 git status --short
 git checkout main
 git pull origin main
-git tag -a v1.29.85 -m "CGA v1.29.85"
-git push origin v1.29.85
+git tag -a v1.30.128 -m "CGA v1.30.128"
+git push origin v1.30.128
 ```
 
 Pushing the tag runs `.github/workflows/release.yml`, which builds and publishes GHCR images and creates a GitHub Release. The workflow fails closed before publication if the Relay signing secrets are absent, Authenticode validation fails, PE mitigations are missing, debug symbols or build paths remain, or artifact generation fails.
@@ -54,13 +92,16 @@ Pushing the tag runs `.github/workflows/release.yml`, which builds and publishes
 After the workflow succeeds, upload the locally built Docker Desktop zip and checksum to the same release:
 
 ```powershell
-$version = "1.30.117"
+$version = "1.30.128"
 $zip = "deploy/docker-desktop/dist/releases/CGA-Docker-Desktop-$version.zip"
 $checksum = "$zip.sha256"
 $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
 "$hash  CGA-Docker-Desktop-$version.zip" | Set-Content -Path $checksum -Encoding ASCII
-gh release upload "v$version" $zip $checksum --repo nascousa/cga --clobber
+gh release upload "v$version" $zip $checksum --repo nascousa/cga
 ```
+
+Do not overwrite existing release assets. If an asset already exists, stop and
+verify the release commit and checksums before deciding how to proceed.
 
 ## User Install From Source
 

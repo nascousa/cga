@@ -3,9 +3,16 @@
 # CGA (Context Graph Agent)
 
 - **Version:** 1.30.128
-- **Status:** ADC governance check-in; merge and deployment pending; Windows release signing pending
+- **Status:** Ontology query routing and runtime reliability fixes merged; local query-policy cutover verified; formal Windows release blocked by signing configuration
 - **Author:** Nate Scott
-- **Date:** 2026-10-06 (CGA-managed ADC authority and pinned project adoption provenance)
+- **Date:** 2026-11-10 (release-readiness status)
+
+The source/runtime version above is not a published-release claim. The latest
+published GitHub release is
+[v1.30.113](https://github.com/nascousa/cga/releases/tag/v1.30.113);
+v1.30.125 remains an unpublished draft. See
+[current release readiness](docs/PUBLISHING.md#current-release-readiness-2026-11-10)
+for verified checks and the remaining signing gate.
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
