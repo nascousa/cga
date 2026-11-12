@@ -1,0 +1,8 @@
+{
+  "summary": "Remove the user menu's green active border",
+  "changes": {
+    "Changed": [
+      "The user menu button keeps its neutral border when a management page is active."
+    ]
+  }
+}

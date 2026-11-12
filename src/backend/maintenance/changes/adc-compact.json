@@ -1,0 +1,6 @@
+{
+  "summary": "Compact ADC editing workspaces",
+  "changes": {
+    "Changed": ["Compact Constitution toolbars and collapse publication/import controls.", "Place the Amendments change picker beside the editor and collapse baseline review, history and collection tools."]
+  }
+}

@@ -1,0 +1,20 @@
+[
+  {
+    "version": "1.30.132",
+    "date": "2026-11-11",
+    "summary": "ADC Constitution and project Amendments workspace",
+    "changes": {
+      "Changed": ["Renamed Main rules to Constitution and Project versions to Amendments.", "Added a searchable document sidebar beside the Constitution editor."],
+      "Fixed": ["Avoid false unsaved-change prompts for historical Windows line endings without rewriting published documents."]
+    }
+  },
+  {
+    "version": "1.30.131",
+    "date": "2026-11-10",
+    "summary": "Compact administration and Automation navigation",
+    "changes": {
+      "Changed": ["Grouped Users, Plugins and System settings in the administrator menu.", "Separated Automation tasks from execution history and collapsed advanced fields."],
+      "Fixed": ["Disabled unchanged plugin settings saves and separated save status from actions."]
+    }
+  }
+]

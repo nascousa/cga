@@ -30,6 +30,14 @@ This project **MUST** integrate with the ContextGraph ecosystem:
 
 ContextGraph MCP access is endpoint-first by default. A local MCP implementation is optional and repository-specific.
 
+## Research Report Formats
+
+Keep the existing report format and the evidence-driven ECharts interactive
+format as parallel choices. All reports require dark-mode support, and charts
+must follow the active theme. See
+[Research Report Formats](standards/conventions/research-reports.md)
+for layout, evidence, offline packaging, preservation and validation requirements.
+
 ## Environment Requirements
 Refer to `bootstrap.md` for exact start-up commands.
 

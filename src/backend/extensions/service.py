@@ -10,6 +10,7 @@ from typing import Any
 
 from backend import runtime_config
 from backend.auth.pgshim import Connection
+from backend.plugins.host import execution, require_enabled, selection
 from backend.extensions.models import (
     ExtensionConfigOut,
     ExtensionConfigUpdate,
@@ -199,7 +200,9 @@ def _run_from_row(row: Any) -> ExtensionRunOut:
 
 
 async def list_extensions() -> ExtensionList:
-    return ExtensionList(items=list_extension_definitions())
+    return ExtensionList(items=[
+        item for item in list_extension_definitions() if item.extension_id in selection()["installed"]
+    ])
 
 
 async def get_project(db: Connection, project_id: int) -> dict[str, Any]:
@@ -381,12 +384,30 @@ async def run_project_extension(
     config_override: dict[str, Any] | None = None,
     schedule_id: int | None = None,
 ) -> ExtensionRunOut:
+    if not get_extension_definition(extension_id):
+        raise ExtensionNotFoundError(extension_id)
+    with execution(extension_id):
+        return await _run_project_extension(
+            db, extension_id, project_id, config_override=config_override, schedule_id=schedule_id,
+        )
+
+
+async def _run_project_extension(
+    db: Connection,
+    extension_id: str,
+    project_id: int | None = None,
+    *,
+    config_override: dict[str, Any] | None = None,
+    schedule_id: int | None = None,
+) -> ExtensionRunOut:
     definition = get_extension_definition(extension_id)
     if not definition:
         raise ExtensionNotFoundError(extension_id)
     validate_extension_config(extension_id, config_override or {})
     project = await get_project(db, project_id) if project_id is not None else None
     config = await get_extension_config(db, extension_id, project_id)
+    if not config.enabled:
+        raise ValueError("Extension configuration is disabled")
     started = iso_utc()
     started_clock = time.perf_counter()
     status = "success"
@@ -423,14 +444,14 @@ async def run_project_extension(
                 "yes",
                 "on",
             }
-            smtp_config = runtime_config.get_smtp_delivery_config() if notifications_enabled else {}
-            outputs["notifications"] = await asyncio.to_thread(
-                deliver_extension_notifications,
-                extension_id,
-                result,
-                effective_config,
-                smtp_config=smtp_config,
-            )
+            if notifications_enabled:
+                require_enabled("notifications")
+                outputs["notifications"] = await asyncio.to_thread(
+                    deliver_extension_notifications, extension_id, result, effective_config,
+                    smtp_config=runtime_config.get_smtp_delivery_config(),
+                )
+            else:
+                outputs["notifications"] = {"status": "disabled", "channels": {}}
         except Exception as exc:
             outputs["notifications"] = {
                 "status": "failed",

@@ -1,8 +1,14 @@
 'use strict';
 
 function adcBuildCollectionPanel(parent) {
-  adcElement('h3', 'Collect project rules into CGA / ADC', parent);
-  adcElement('p', 'Preview every active registered checkout. Collect entry rules, tool rule pointers, standards/, rules/ and .adc/.github/ into the pinned baseline plus project overrides. Local source files remain distribution copies; operational context, credentials and Relay state are not collected. Missing paths and conflicts block that project explicitly.', parent);
+  parent = adcDisclosure(parent, 'Collect project rules');
+  adcState.collectionPanel = parent;
+  adcInfoText(parent, 'Collect project rules', [
+    ['Preview', 'Inspect every active registered checkout before collecting snapshots.'],
+    ['Scope', 'Collect entry rules, tool pointers, standards/, rules/ and .adc/.github/ as project overrides of the pinned baseline.'],
+    ['Local files', 'Source files remain distribution copies. Operational context, credentials and Relay state are excluded.'],
+    ['Blocked projects', 'Missing paths and conflicts must be resolved explicitly.'],
+  ]);
   adcButton(parent, 'Preview all project rules', adcPreviewCollections);
   adcButton(parent, 'Collect available rule snapshots', adcCollectSnapshots);
   adcState.collectionStatus = adcElement('p', 'Preview required before collection.', parent);
@@ -36,7 +42,7 @@ async function adcPreviewCollections() {
 
 async function adcCollectSnapshots() {
   if (!adcState.collections) throw new Error('Preview project rules first.');
-  if (adcState.projectDirty) throw new Error('Save or discard staged project changes before collecting rules.');
+  if (adcHasProjectDraft()) throw new Error('Save or discard staged or unstaged project changes before collecting rules.');
   const ready = adcState.collections.filter(p => p.status === 'ready');
   if (!ready.length) throw new Error('No ready snapshots. Resolve blocked projects or preview again.');
   if (!confirm(`Collect ${ready.length} project rule snapshots into immutable CGA revisions? Existing baselines and local files will not be overwritten.`)) return;

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from backend.auth.database import get_db
 from backend.auth.dependencies import require_admin
 from backend.auth.pgshim import Connection
+from backend.plugins.host import PluginUnavailableError
 from backend.extensions.models import (
     ExtensionConfigOut,
     ExtensionConfigUpdate,
@@ -105,6 +106,8 @@ async def run_admin_platform_extension(
         return await run_project_extension(db, extension_id, config_override=(body or ExtensionRunRequest()).config_override)
     except ExtensionNotFoundError as exc:
         raise _not_found(exc) from exc
+    except PluginUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -163,6 +166,8 @@ async def run_admin_extension(
         return await run_project_extension(db, extension_id, project_id, config_override=(body or ExtensionRunRequest()).config_override)
     except (ExtensionNotFoundError, ExtensionProjectNotFoundError) as exc:
         raise _not_found(exc) from exc
+    except PluginUnavailableError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

@@ -6,9 +6,9 @@ function adcBuildNavigation(root, layout, panels) {
   const nav = adcElement('div');
   nav.setAttribute('role', 'tablist');
   nav.setAttribute('aria-label', 'ADC management');
-  nav.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin:16px 0';
+  nav.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 12px';
   root.insertBefore(nav, layout);
-  const labels = {rules:'Main rules', projects:'Project versions', versions:'Versions'};
+  const labels = {rules:'Constitution', projects:'Amendments', versions:'Versions'};
   adcState.panels = panels;
   adcState.tabButtons = {};
   adcState.activeTab = 'rules';
@@ -61,20 +61,91 @@ async function adcSelectTab(name) {
 }
 
 function adcBuildVersionsPanel(parent) {
-  adcElement('h3', 'Versions: baseline releases, project revisions and adoption', parent);
-  adcElement('p', 'Baseline releases -> immutable project revisions -> projects. Unadopted baselines and unbound projects appear as isolated nodes. Width counts revisions, not code size or compliance. Click a release or revision to inspect it; upgrades and rollback remain explicit project actions.', parent);
+  adcInfoText(parent, 'Version adoption', [
+    ['Flow', 'Baseline releases -> immutable project revisions -> projects; endpoints align right.'],
+    ['Scope', 'Current revisions are shown by default. Choose All history to audit earlier versions.'],
+    ['Isolated nodes', 'Unadopted baselines and unbound projects remain visible.'],
+    ['Width', 'Links count revisions, not code size or compliance.'],
+    ['Inspect', 'Click a release or revision to inspect it. Upgrades and rollback require explicit project actions.'],
+  ], 'h3');
   adcButton(parent, 'Refresh versions', adcRefreshVersions);
+  const filters = adcElement('div', undefined, parent);
+  filters.style.cssText = 'display:flex;flex-wrap:wrap;gap:12px;align-items:end';
+  const searchGroup = adcElement('div', undefined, filters);
+  searchGroup.style.cssText = 'flex:1;min-width:180px';
+  adcState.versionSearch = adcField(searchGroup, 'Filter projects by name or ID');
+  adcState.versionSearch.type = 'search';
+  const scopeGroup = adcElement('div', undefined, filters);
+  adcState.versionScope = adcField(scopeGroup, 'Revision view', 'select');
+  adcOptions(adcState.versionScope, [['current','Current revisions'], ['history','All history']]);
+  const update = () => {
+    if (!adcState.versionData) return;
+    adcApplyVersionFilters();
+    adcAction(adcRenderVersionChart);
+  };
+  adcState.versionSearch.addEventListener('input', update);
+  adcState.versionScope.addEventListener('change', update);
   const chart = adcElement('div', undefined, parent);
   chart.id = 'adc-version-sankey';
-  chart.style.cssText = 'width:100%;height:520px;min-width:0;margin:16px 0';
+  chart.style.cssText = 'width:100%;height:520px;min-width:0;overflow:hidden;margin:16px 0';
   chart.setAttribute('role', 'img');
   chart.setAttribute('aria-label', 'ADC baseline to project revision to project Sankey, with nodes aligned right');
   adcState.chartRoot = chart;
   adcState.versionSummary = adcElement('p', '', parent);
+  adcState.versionSummary.setAttribute('role', 'status');
   const scroll = adcElement('div', undefined, parent);
   scroll.style.overflowX = 'auto';
   adcState.versionTable = adcElement('table', undefined, scroll);
   adcState.versionTable.style.width = '100%';
+}
+
+function adcFilterVersions(data, query, scope) {
+  const term = query.trim().toLocaleLowerCase();
+  const projects = data.projects.filter(p => !term || `${p.project_name} ${p.id} ${p.project_id || ''}`.toLocaleLowerCase().includes(term));
+  const selected = new Set(projects.map(p => p.id));
+  const latest = new Map();
+  for (const r of data.revisions) latest.set(r.project_id, Math.max(latest.get(r.project_id) || 0, r.revision));
+  const revisions = data.revisions.filter(r => selected.has(r.project_id)
+    && (scope === 'history' || latest.get(r.project_id) === r.revision));
+  return {releases:data.releases, projects, revisions};
+}
+
+function adcApplyVersionFilters() {
+  const data = adcState.versionData;
+  const filtered = adcFilterVersions(data, adcState.versionSearch.value, adcState.versionScope.value);
+  adcState.versionView = filtered;
+  const bound = new Set(filtered.revisions.map(r => r.project_id));
+  adcState.versionSummary.textContent = `${data.releases.length} baseline releases; showing ${filtered.projects.length} of ${data.projects.length} projects, ${filtered.revisions.length} of ${data.revisions.length} revisions; ${filtered.projects.length-bound.size} unbound. ${adcState.versionScope.value === 'history' ? 'All history' : 'Current revisions only'}.`;
+  const table = adcState.versionTable;
+  table.replaceChildren();
+  const head = adcElement('tr', undefined, adcElement('thead', undefined, table));
+  for (const title of ['Project', 'Revision', 'ADC baseline', 'Actor / reason', 'Collected rules']) adcElement('th', title, head);
+  const body = adcElement('tbody', undefined, table);
+  const releases = new Map(data.releases.map(r => [r.id, r.version]));
+  const latest = new Map();
+  for (const r of data.revisions) latest.set(r.project_id, Math.max(latest.get(r.project_id) || 0, r.revision));
+  const byProject = new Map();
+  for (const r of filtered.revisions) {
+    if (!byProject.has(r.project_id)) byProject.set(r.project_id, []);
+    byProject.get(r.project_id).push(r);
+  }
+  for (const p of filtered.projects) {
+    const revisions = (byProject.get(p.id) || []).sort((a,b) => b.revision-a.revision);
+    for (const r of revisions.length ? revisions : [null]) {
+      const row = adcElement('tr', undefined, body);
+      adcElement('td', p.project_name, row);
+      const revisionCell = adcElement('td', r ? '' : 'Unbound', row);
+      if (r) adcButton(revisionCell, `r${r.revision}${latest.get(p.id) === r.revision ? ' (current)' : ''}`, () => adcInspectVersion(p.id, r.revision));
+      adcElement('td', r ? releases.get(r.release_id) : 'Adoption required', row);
+      adcElement('td', r ? `${r.actor}: ${r.reason}` : '', row);
+      const receipt = adcElement('td', r?.snapshot_sha256 ? `${r.snapshot_sha256.slice(0,12)}...` : 'No collection receipt on this revision', row);
+      if (r?.snapshot_sha256) receipt.title = r.snapshot_sha256;
+    }
+  }
+  if (!filtered.projects.length) {
+    const cell = adcElement('td', 'No projects match this filter.', adcElement('tr', undefined, body));
+    cell.colSpan = 5;
+  }
 }
 
 function adcVersionGraph(data) {
@@ -130,30 +201,13 @@ async function adcRefreshVersions() {
   adcState.versionSummary.textContent = 'Loading version inventory...';
   adcState.chart?.clear();
   adcState.versionData = null;
+  adcState.versionView = null;
   adcState.versionTable.replaceChildren();
   try {
     const data = await api('GET', '/adc/versions');
     adcState.versionData = data;
     adcState.versionsStale = false;
-    const bound = new Set(data.revisions.map(r => r.project_id));
-    adcState.versionSummary.textContent = `${data.releases.length} baseline releases, ${data.revisions.length} project revisions, ${data.projects.length} projects; ${data.projects.length-bound.size} unbound. Historical revisions are included.`;
-    const table = adcState.versionTable;
-    const head = adcElement('tr', undefined, adcElement('thead', undefined, table));
-    for (const title of ['Project', 'Revision', 'ADC baseline', 'Actor / reason', 'Collected rules']) adcElement('th', title, head);
-    const body = adcElement('tbody', undefined, table);
-    const releases = new Map(data.releases.map(r => [r.id, r.version]));
-    for (const p of data.projects) {
-      const revisions = data.revisions.filter(r => r.project_id === p.id);
-      for (const r of revisions.length ? revisions : [null]) {
-        const row = adcElement('tr', undefined, body);
-        adcElement('td', p.project_name, row);
-        const revisionCell = adcElement('td', r ? '' : 'Unbound', row);
-        if (r) adcButton(revisionCell, `r${r.revision}`, () => adcInspectVersion(p.id, r.revision));
-        adcElement('td', r ? releases.get(r.release_id) : 'Adoption required', row);
-        adcElement('td', r ? `${r.actor}: ${r.reason}` : '', row);
-        adcElement('td', r?.snapshot_sha256 || 'No collection receipt on this revision', row);
-      }
-    }
+    adcApplyVersionFilters();
     if (adcState.activeTab === 'versions') await adcRenderVersionChart();
   } catch (error) {
     adcState.versionSummary.textContent += ` Unable to complete refresh: ${error.message}`;
@@ -165,7 +219,7 @@ async function adcRenderVersionChart() {
   const state = adcState;
   const charts = await adcLoadCharts();
   if (adcState !== state || state.activeTab !== 'versions' || !state.versionData) return;
-  const graph = adcVersionGraph(state.versionData);
+  const graph = adcVersionGraph(state.versionView);
   if (!state.chart) {
     state.chart = charts.init(state.chartRoot, null, {renderer:'svg'});
     state.chart.on('click', event => {
@@ -175,8 +229,15 @@ async function adcRenderVersionChart() {
         adcAction(() => adcInspectRelease(event.data.releaseId));
       }
     });
-    state.chartResize = new ResizeObserver(() => state.chart?.resize());
+    state.resizeChart = () => {
+      if (!state.chart || !state.chartRoot.clientWidth) return;
+      state.chart.resize();
+      const width = Math.max(70, Math.min(190, state.chartRoot.clientWidth * 0.3));
+      state.chart.setOption({series:[{right:width + 20, label:{width}}]});
+    };
+    state.chartResize = new ResizeObserver(state.resizeChart);
     state.chartResize.observe(state.chartRoot);
+    window.addEventListener('resize', state.resizeChart);
     state.themeObserver = new MutationObserver(() => {
       if (adcState === state && state.activeTab === 'versions') {
         adcAction(adcRenderVersionChart);
@@ -188,24 +249,26 @@ async function adcRenderVersionChart() {
   const style = getComputedStyle(document.documentElement);
   const text = style.getPropertyValue('--text').trim() || '#e6ecf5';
   const panel = style.getPropertyValue('--panel').trim() || '#0d1118';
-  state.chartRoot.style.height = `${Math.max(520, graph.nodes.length * 22)}px`;
+  const layers = [state.versionView.releases.length, state.versionView.revisions.length, state.versionView.projects.length];
+  state.chartRoot.style.height = `${Math.max(420, Math.max(...layers) * 26)}px`;
   state.chart.resize();
+  const labelWidth = Math.max(70, Math.min(190, state.chartRoot.clientWidth * 0.3));
   state.chart.setOption({
     backgroundColor:'transparent',
     textStyle:{color:text},
     tooltip:{trigger:'item', renderMode:'richText', backgroundColor:panel, textStyle:{color:text},
       formatter:entry => entry.dataType === 'node' ? entry.data.description : '1 project revision'},
-    series:[{type:'sankey', nodeAlign:'right', orient:'horizontal', left:12, right:210,
+    series:[{type:'sankey', nodeAlign:'right', orient:'horizontal', left:12, right:labelWidth + 20,
       top:20, bottom:20, nodeGap:12, draggable:false, emphasis:{focus:'adjacency'},
       data:graph.nodes, links:graph.links, lineStyle:{color:'gradient', curveness:0.5},
-      label:{color:text, formatter:entry => entry.data.display},
+      label:{color:text, width:labelWidth, overflow:'truncate', formatter:entry => entry.data.display},
       levels:[{depth:0,itemStyle:{color:'#60a5fa'}},{depth:1,itemStyle:{color:'#a78bfa'}},
         {depth:2,itemStyle:{color:'#4ade80'}}]}],
   }, true);
 }
 
 async function adcInspectVersion(projectId, revision) {
-  if (adcState.projectDirty && !confirm('Discard staged project changes to inspect this version?')) return;
+  if (adcHasProjectDraft() && !confirm('Discard staged or unstaged project changes to inspect this version?')) return;
   adcState.projectSelect.value = String(projectId);
   await adcLoadProject();
   const historic = await api('GET', `/adc/projects/${projectId}?revision=${revision}`);
@@ -214,13 +277,16 @@ async function adcInspectVersion(projectId, revision) {
 }
 
 async function adcInspectRelease(releaseId) {
-  if (adcState.dirty && !confirm('Discard the unpublished rule draft to inspect this release?')) return;
+  if (adcHasRuleDraft() && !confirm('Discard the unpublished rule draft to inspect this release?')) return;
   adcState.releaseSelect.value = String(releaseId);
   await adcLoadRelease(releaseId);
   await adcSelectTab('rules');
 }
 
 function disposeAdcManager() {
+  adcState?.disposeInfo?.();
+  if (adcState?.beforeUnload) window.removeEventListener('beforeunload', adcState.beforeUnload);
+  if (adcState?.resizeChart) window.removeEventListener('resize', adcState.resizeChart);
   adcState?.chartResize?.disconnect();
   adcState?.themeObserver?.disconnect();
   adcState?.chart?.dispose();

@@ -293,6 +293,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_scope       ON audit_logs(scope);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_project_id  ON audit_logs(project_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_name  ON audit_logs(actor_name);
 
+CREATE TABLE IF NOT EXISTS maintenance_state (
+    key TEXT PRIMARY KEY,
+    payload_json TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS ai_first_evidence_packs (
     id                  BIGSERIAL PRIMARY KEY,
     evidence_id         TEXT    UNIQUE NOT NULL,

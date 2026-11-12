@@ -70,11 +70,16 @@ from backend.indexer.consumer import IndexerConsumer
 from backend.cga_relay.router import account_router as cga_relay_account_router
 from backend.cga_relay.router import router as cga_relay_router
 from backend.extensions.router import router as extensions_router
+from backend.plugins.router import router as plugins_router
+from backend.plugins.host import available_plugins, is_enabled, require_installed, require_plugin
+from backend.plugins.settings import tracing_enabled
+from backend.maintenance.router import router as maintenance_router
+from backend.maintenance.retention import retention_loop
+from backend.maintenance.updates import drain_loop
+from backend.maintenance.gate import MaintenanceGate
+from backend.reports import ReportFilters, build_report
 from backend.tools.producer import MCPProducer
 from backend.tools import server as mcp_server
-from backend.perf.context_quality import benchmark_context_quality, ContextQualityInputError
-from backend.perf.token_efficiency import benchmark_token_efficiency, TokenBenchmarkInputError
-from backend.schedules.router import router as schedules_router
 from backend.schedules.service import ScheduledTaskWorker
 from backend.viewer.router import router as viewer_router
 from backend.workbriefing.service import WorkActivityValidationError, WorkBriefingService
@@ -83,7 +88,7 @@ from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.128"
+APP_VERSION = "1.30.132"
 AUTH_SCHEMA_VERSION = 1
 GRAPH_SCHEMA_VERSION = 2
 RUNTIME_CONFIG_VERSION = 1
@@ -125,6 +130,13 @@ class NoStoreStaticFiles(StaticFiles):
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
         return response
+
+
+class FrontendStaticFiles(StaticFiles):
+    async def get_response(self, path: str, scope: dict) -> Response:
+        if Path(path).parts[:1] == ("plugins",):
+            raise HTTPException(status_code=404)
+        return await super().get_response(path, scope)
 
 _registry = GraphRegistry(host=FALKORDB_HOST, port=FALKORDB_PORT)
 _producer = MCPProducer(redis_url=QUEUE_REDIS_URL)
@@ -187,8 +199,8 @@ def _upgrade_commands(install_flavor: str) -> list[dict]:
             "label": "Docker Desktop bundle",
             "recommended": install_flavor in {"desktop-bundle", "unknown"},
             "commands": [
-                ".\\upgrade-cga-desktop.cmd",
-                ".\\start-cga-desktop.cmd",
+                "# Configure the independent host updater first; see docs/runtime-operations.md",
+                "python src\\scripts\\cga_update_host.py --config <private-installation-config.json>",
             ],
         },
         {
@@ -303,7 +315,7 @@ def _upgrade_status_payload() -> dict:
             "requires_database_migration": False,
             "requires_graph_reindex": False,
             "recommended_graph_reindex": False,
-            "rollback_mode": "restore-pre-upgrade-backup",
+            "rollback_mode": "image-only-for-compatible-schema",
         },
         "readiness": {
             "score": score,
@@ -344,7 +356,7 @@ async def lifespan(app: FastAPI):
         log.warning("cache.disabled", reason=str(exc))
 
     # Phase 3: trace recorder + evaluator
-    if TRACE_ENABLED:
+    if TRACE_ENABLED and is_enabled("evaluation") and tracing_enabled():
         try:
             from backend.eval.trace_eval import TraceRecorder, TraceEvaluator
             recorder = TraceRecorder(redis_url=CACHE_REDIS_URL)
@@ -371,12 +383,26 @@ async def lifespan(app: FastAPI):
 
     await _backup_service.start()
     await _scheduled_task_worker.start()
+    retention_task = asyncio.create_task(retention_loop())
+    update_drain_task = asyncio.create_task(drain_loop(app))
+    app.state.scheduled_task_worker = _scheduled_task_worker
+    app.state.trace_evaluator = _trace_evaluator
 
     log.info("cga.started", falkordb=f"{FALKORDB_HOST}:{FALKORDB_PORT}")
 
     yield
 
     # Shutdown
+    update_drain_task.cancel()
+    try:
+        await update_drain_task
+    except asyncio.CancelledError:
+        pass
+    retention_task.cancel()
+    try:
+        await retention_task
+    except asyncio.CancelledError:
+        pass
     await _scheduled_task_worker.stop()
     await _backup_service.stop()
     if _consumer:
@@ -414,12 +440,19 @@ app.add_middleware(ProjectTokenMiddleware)
 
 # ── Auth API ───────────────────────────────────────────────────────────────
 app.include_router(auth_router, prefix="/api")
+app.include_router(maintenance_router, prefix="/api")
+
+
+app.add_middleware(MaintenanceGate)
 app.include_router(adc_router, prefix="/api")
 app.include_router(cga_relay_router, prefix="/api")
 app.include_router(cga_relay_account_router, prefix="/api")
 app.include_router(viewer_router, prefix="/api")
-app.include_router(schedules_router, prefix="/api")
+if "automation" in available_plugins():
+    from backend.plugins.automation import router as schedules_router
+    app.include_router(schedules_router, prefix="/api")
 app.include_router(extensions_router, prefix="/api")
+app.include_router(plugins_router, prefix="/api")
 
 
 def _truncate(value: str | None, limit: int) -> str | None:
@@ -759,21 +792,25 @@ async def mcp_info() -> dict:
     }
 
 
-@app.post("/api/benchmark/token-efficiency")
+@app.post("/api/benchmark/token-efficiency", dependencies=[Depends(require_plugin("evaluation"))])
 async def api_benchmark_token_efficiency(payload: dict) -> dict:
     """Benchmark estimated token savings between baseline and CG/MCP contexts.
 
     Shared API intended for any downstream project, not tied to a specific repository.
     """
+    from backend.perf.token_efficiency import benchmark_token_efficiency, TokenBenchmarkInputError
+
     try:
         return benchmark_token_efficiency(payload=payload, repo_root=REPO_ROOT)
     except TokenBenchmarkInputError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-@app.post("/api/benchmark/context-quality")
+@app.post("/api/benchmark/context-quality", dependencies=[Depends(require_plugin("evaluation"))])
 async def api_benchmark_context_quality(payload: dict) -> dict:
     """Benchmark context quality and HPS for baseline-vs-CG context bundles."""
+    from backend.perf.context_quality import benchmark_context_quality, ContextQualityInputError
+
     try:
         return benchmark_context_quality(payload=payload, repo_root=REPO_ROOT)
     except ContextQualityInputError as exc:
@@ -870,7 +907,7 @@ async def api_admin_backups_update_config(payload: dict, _: dict = Depends(requi
     return {"ok": True, "config": cfg.to_dict()}
 
 
-@app.get("/api/admin/work-briefing")
+@app.get("/api/admin/work-briefing", dependencies=[Depends(require_plugin("briefing"))])
 async def api_admin_work_briefing(
     project_id: str | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=5000),
@@ -894,7 +931,22 @@ async def api_admin_work_briefing(
     return payload
 
 
-@app.get("/api/admin/work-briefing/activities")
+@app.get("/api/admin/reports/source", dependencies=[Depends(require_plugin("reports"))])
+async def api_admin_report_source(
+    project_id: str | None = Query(default=None),
+    limit: int = Query(default=25, ge=1, le=5000),
+    include_external: bool = Query(default=False),
+    admin: dict = Depends(require_admin),
+) -> dict:
+    return await api_admin_work_briefing(project_id, limit, include_external, admin)
+
+
+@app.post("/api/admin/reports/generate", dependencies=[Depends(require_plugin("reports"))])
+async def api_admin_report_generate(body: ReportFilters, _: dict = Depends(require_admin)) -> dict:
+    return await build_report(_work_briefing_service, body)
+
+
+@app.get("/api/admin/work-briefing/activities", dependencies=[Depends(require_plugin("briefing"))])
 async def api_admin_work_briefing_activities(
     project_id: str | None = Query(default=None),
     limit: int = Query(default=25, ge=1, le=5000),
@@ -1234,7 +1286,7 @@ async def api_project_work_briefing_learning_context(
     )
 
 
-@app.get("/api/project/work-briefing")
+@app.get("/api/project/work-briefing", dependencies=[Depends(require_plugin("briefing"))])
 async def api_project_work_briefing(
     request: Request,
     project_id: str | None = Query(default=None),
@@ -1350,12 +1402,22 @@ async def graph_viewer_ui():
     return RedirectResponse(url="/viewer/", status_code=307)
 
 
+@app.get("/plugins/reports.js", include_in_schema=False, dependencies=[Depends(require_installed("reports"))])
+async def reports_plugin_asset():
+    return FileResponse(_FRONTEND / "plugins" / "reports.js", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/plugins/briefing.js", include_in_schema=False, dependencies=[Depends(require_plugin("briefing"))])
+async def briefing_plugin_asset():
+    return FileResponse(_FRONTEND / "plugins" / "briefing.js", headers={"Cache-Control": "no-store"})
+
+
 if _VIEWER.is_dir():
     app.mount("/viewer", NoStoreStaticFiles(directory=str(_VIEWER), html=True), name="viewer")
 
 
 if _FRONTEND.is_dir():
-    app.mount("/", StaticFiles(directory=str(_FRONTEND), html=True), name="frontend")
+    app.mount("/", FrontendStaticFiles(directory=str(_FRONTEND), html=True), name="frontend")
 
 
 if __name__ == "__main__":

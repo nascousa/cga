@@ -1,0 +1,8 @@
+{
+  "summary": "Audit lifecycle, version Change Logs and controlled updates",
+  "changes": {
+    "Added": ["Audit capacity and policy previews, confirmed persistent retention settings and bounded background cleanup.", "System settings Change Logs, bundled release history and release-time change-note validation.", "Online release checks and notifications, signed update manifests and administrator-confirmed host update requests."],
+    "Security": ["Keep audit deletion disabled until a policy is previewed and explicitly enabled.", "Require trusted signed artifacts and an independently configured host executor before enabling installation; preserve existing ports and data."],
+    "Changed": ["Separate product release history from request audit records and local unpublished work."]
+  }
+}

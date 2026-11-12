@@ -30,6 +30,9 @@ yarn.log
 .pnpm-debug.log
 src/dist/
 src/viewer/dist/
+src/frontend/report-vendor/
+sdk/cga-plugin-sdk/src/*.egg-info/
+sdk/cga-plugin-sdk/dist/
 build/
 target/
 coverage/

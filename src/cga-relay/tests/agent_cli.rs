@@ -27,6 +27,65 @@ impl Command {
         );
         Self(command)
     }
+
+    fn args<I, S>(&mut self, args: I) -> &mut Self
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<OsStr>,
+    {
+        let args = args.into_iter().map(|arg| arg.as_ref().to_os_string()).collect::<Vec<_>>();
+        #[cfg(target_os = "linux")]
+        if let Some(config) = args.windows(2).find(|pair| pair[0] == "--config").map(|pair| PathBuf::from(&pair[1])) {
+            let bin = config.parent().unwrap().join("state").join(".credential-test-bin");
+            let mut paths = vec![bin];
+            paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+            self.0.env("PATH", std::env::join_paths(paths).unwrap());
+        }
+        self.0.args(args);
+        self
+    }
+}
+
+#[cfg(target_os = "macos")]
+#[derive(Debug)]
+struct AgentError(String);
+#[cfg(target_os = "macos")]
+type AgentResult<T> = Result<T, AgentError>;
+#[cfg(target_os = "macos")]
+#[path = "../src/secret_store.rs"]
+mod secret_store;
+
+fn write_test_account_session(path: impl AsRef<Path>, text: impl AsRef<[u8]>) -> io::Result<()> {
+    let path = path.as_ref();
+    #[cfg(windows)]
+    return fs::write(path, text);
+    #[cfg(not(windows))]
+    {
+        let text = std::str::from_utf8(text.as_ref()).unwrap();
+        let token = text.split("\"access_token\":\"").nth(1).unwrap().split('"').next().unwrap();
+        #[cfg(target_os = "linux")]
+        let (field, value) = {
+            use std::os::unix::ffi::OsStrExt;
+            use std::os::unix::fs::PermissionsExt;
+            let bin = path.parent().unwrap().join(".credential-test-bin");
+            fs::create_dir_all(&bin)?;
+            // Fake Secret Service contains only test tokens and is isolated to this fixture.
+            fs::write(bin.join("token"), token)?;
+            let tool = bin.join("secret-tool");
+            fs::write(&tool, "#!/bin/sh\nbase=\"$(dirname \"$0\")\"\ncase \"$1\" in\nlookup) cat \"$base/token\" ;;\nstore) cat > \"$base/token\" ;;\nclear) rm -f \"$base/token\" ;;\n*) exit 2 ;;\nesac\n")?;
+            fs::set_permissions(&tool, fs::Permissions::from_mode(0o700))?;
+            let canonical = path.parent().unwrap().canonicalize()?.join(path.file_name().unwrap());
+            let scope = canonical.as_os_str().as_bytes().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+            ("access_token_secret_service", scope)
+        };
+        #[cfg(target_os = "macos")]
+        let (field, value) = {
+            let persisted = secret_store::protect_access_token(path, token).expect("test requires an unlocked macOS Keychain");
+            (persisted.field, persisted.value)
+        };
+        let text = text.replace(&format!("\"access_token\":\"{token}\""), &format!("\"{field}\":\"{value}\""));
+        fs::write(path, text)
+    }
 }
 
 impl Deref for Command {
@@ -66,6 +125,17 @@ impl TestDir {
 
 impl Drop for TestDir {
     fn drop(&mut self) {
+        #[cfg(target_os = "macos")]
+        {
+            let path = self.path.join("state").join("account-session.json");
+            if let Ok(text) = fs::read_to_string(&path) {
+                if let Some(value) = text.split("\"access_token_keychain\":\"")
+                    .nth(1).and_then(|value| value.split('"').next())
+                {
+                    let _ = secret_store::delete_access_token(&path, "access_token_keychain", value);
+                }
+            }
+        }
         let _ = fs::remove_dir_all(&self.path);
     }
 }
@@ -74,11 +144,114 @@ fn agent_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_cga-relay"))
 }
 
+#[test]
+fn headless_gateway_publishes_settings_and_responds_without_a_tray() {
+    let tmp = TestDir::new("headless-gateway");
+    let config = write_safe_config(tmp.path(), tmp.path(), &[]);
+    let mut child = Command::new(agent_bin())
+        .args(["serve", "--config", config.to_str().unwrap()])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("headless gateway should start");
+    let result = || {
+        let address_file = tmp.path().join("state").join("settings-url.txt");
+        let deadline = Instant::now() + Duration::from_secs(8);
+        let url = loop {
+            if let Ok(url) = fs::read_to_string(&address_file) {
+                if !url.trim().is_empty() {
+                    break url;
+                }
+            }
+            assert!(
+                child.try_wait().unwrap().is_none(),
+                "gateway exited before readiness"
+            );
+            assert!(
+                Instant::now() < deadline,
+                "gateway readiness deadline exceeded"
+            );
+            thread::sleep(Duration::from_millis(25));
+        };
+        let authority = url
+            .trim()
+            .strip_prefix("http://")
+            .unwrap()
+            .split('/')
+            .next()
+            .unwrap();
+        let mut stream = TcpStream::connect(authority).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        write!(
+            stream,
+            "GET /status.json HTTP/1.1\r\nHost: {authority}\r\nConnection: close\r\n\r\n"
+        )
+        .unwrap();
+        let mut response = String::new();
+        std::io::Read::read_to_string(&mut stream, &mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"));
+        assert!(response.contains("\"project_id\":\"PROJECT123\""));
+        assert!(response.contains("/api/index-git-incremental"));
+    };
+    // Keep teardown before assertions propagate so no test gateway outlives its test.
+    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(result));
+    let _ = child.kill();
+    let _ = child.wait();
+    if let Err(error) = outcome {
+        std::panic::resume_unwind(error);
+    }
+}
+
 fn run_agent(args: &[&str]) -> Output {
     Command::new(agent_bin())
         .args(args)
         .output()
         .expect("agent command should run")
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn macos_tray_requires_cli_without_starting_a_gateway() {
+    let tmp = TestDir::new("macos-cli-only");
+    let config = write_safe_config(tmp.path(), tmp.path(), &[]);
+    let output = run_agent(&["tray", "--config", config.to_str().unwrap()]);
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("use 'serve' or stdio 'mcp' on macOS"));
+    assert!(!tmp.path().join("state").join("settings-url.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn sync_reports_unsafe_account_storage_even_when_a_project_token_is_available() {
+    let tmp = TestDir::new("sync-unsafe-account-storage");
+    let config = write_safe_config(tmp.path(), tmp.path(), &[]);
+    let login = run_agent(&[
+        "login",
+        "--config",
+        config.to_str().unwrap(),
+        "--email",
+        "dev@example.test",
+        "--token-env",
+        "CGA_TEST_DEVELOPER_TOKEN",
+    ]);
+    assert!(login.status.success(), "{}", stderr(&login));
+    fs::create_dir_all(tmp.path().join("state")).unwrap();
+    fs::write(
+        tmp.path().join("state").join("account-session.json"),
+        format!("{{\"access_token\":\"{TEST_SECRET}\",\"username\":\"legacy\"}}"),
+    )
+    .unwrap();
+    let output = Command::new(agent_bin())
+        .args(["sync", "--config", config.to_str().unwrap(), "--dry-run"])
+        .env("CGA_TEST_DEVELOPER_TOKEN", TEST_SECRET)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(stderr(&output).contains("plaintext"), "{}", stderr(&output));
+    assert!(!stderr(&output).contains(TEST_SECRET));
+    assert!(!stdout(&output).contains(TEST_SECRET));
 }
 
 fn write_safe_config(base: &Path, project_root: &Path, extra: &[(&str, String)]) -> PathBuf {
@@ -794,14 +967,27 @@ fn tray_status_reports_notification_area_mode_without_starting_loop() {
     let out = stdout(&output);
     assert!(out.contains("\"agent_id\":\"dev-agent-01\""));
     assert!(out.contains("\"tooltip\":\"CGA-Relay - dev-agent-01 - not signed in\""));
-    assert!(out.contains("\"icon\":\"embedded-resource:4\""));
+    if cfg!(windows) {
+        assert!(out.contains("\"icon\":\"embedded-resource:4\""));
+    }
     assert!(out.contains("\"icon_variant\":\"gray\""));
     assert!(out.contains("\"backend_available\":true"));
     assert!(out.contains("\"logged_in\":false"));
     assert!(out.contains("\"username\":\"\""));
-    assert!(out.contains(
-        "\"menu\":[\"Not signed in\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]"
-    ));
+    if cfg!(target_os = "linux") {
+        assert!(out.contains(
+            "\"menu\":[\"Not signed in\",\"Sign in...\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]"
+        ));
+        assert!(out.contains("\"supported\":true"));
+        assert!(out.contains("\"runtime_check\":\"performed-on-launch\""));
+        assert!(out.contains("\"menu_events\":[\"helper-stdio\"]"));
+        assert!(!out.contains("WM_CONTEXTMENU"));
+        assert!(out.contains("\"mode\":\"linux-appindicator\""));
+    } else {
+        assert!(out.contains(
+            "\"menu\":[\"Not signed in\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]"
+        ));
+    }
     assert!(out.contains("\"name\":\"CGA-Relay\""));
     assert!(out.contains("\"user_groups\":[]"));
     assert!(out.contains("\"user_group_count\":0"));
@@ -809,13 +995,17 @@ fn tray_status_reports_notification_area_mode_without_starting_loop() {
     assert!(out.contains("\"author\":\"Nate Scott\""));
     assert!(out.contains("\"repository\":\"https://github.com/nascousa/cga\""));
     assert!(out.contains("\"support\":\"https://github.com/nascousa/cga/issues\""));
-    assert!(out.contains(
-        "\"menu_events\":[\"WM_LBUTTONDBLCLK\",\"WM_CONTEXTMENU\",\"WM_RBUTTONUP\",\"WM_TIMER\"]"
-    ));
     if cfg!(windows) {
+        assert!(out.contains(
+            "\"menu_events\":[\"WM_LBUTTONDBLCLK\",\"WM_CONTEXTMENU\",\"WM_RBUTTONUP\",\"WM_TIMER\"]"
+        ));
         assert!(out.contains("\"supported\":true"));
         assert!(out.contains("\"icon_loaded\":true"));
         assert!(out.contains("windows-shell-notify-icon"));
+    }
+    if cfg!(target_os = "macos") {
+        assert!(out.contains("\"supported\":false"));
+        assert!(out.contains("\"mode\":\"unsupported\""));
     }
     assert!(!out.contains(TEST_SECRET));
     assert!(!stderr(&output).contains(TEST_SECRET));
@@ -851,21 +1041,23 @@ fn tray_status_warns_when_cga_server_container_is_unavailable() {
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
     assert!(out.contains("\"backend_available\":false"), "stdout: {out}");
-    assert!(
-        out.contains("\"icon\":\"embedded-resource:7\""),
-        "stdout: {out}"
-    );
+    if cfg!(windows) {
+        assert!(
+            out.contains("\"icon\":\"embedded-resource:7\""),
+            "stdout: {out}"
+        );
+    }
     assert!(
         out.contains("\"icon_variant\":\"yellow-blink\""),
         "stdout: {out}"
     );
     assert!(
-        out.contains("\"notification_title\":\"CGA Server Container is unavailable\""),
+        out.contains("\"notification_title\":\"CGA server connection is unavailable\""),
         "stdout: {out}"
     );
     assert!(
         out.contains(
-            "\"notification_message\":\"Start the CGA Server Container to reconnect CGA-Relay.\""
+            "\"notification_message\":\"CGA-Relay will reconnect automatically. If this persists, check the CGA Server Container and Docker.\""
         ),
         "stdout: {out}"
     );
@@ -879,7 +1071,7 @@ fn tray_status_uses_color_icon_and_username_when_signed_in() {
     fs::create_dir_all(&repo).unwrap();
     let state = tmp.path().join("state");
     fs::create_dir_all(&state).unwrap();
-    fs::write(
+    write_test_account_session(
         state.join("account-session.json"),
         format!(
             "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{}\"}}",
@@ -907,13 +1099,21 @@ fn tray_status_uses_color_icon_and_username_when_signed_in() {
 
     assert!(output.status.success(), "stderr: {}", stderr(&output));
     let out = stdout(&output);
-    assert!(out.contains("\"icon\":\"embedded-resource:1\""));
+    if cfg!(windows) {
+        assert!(out.contains("\"icon\":\"embedded-resource:1\""));
+    }
     assert!(out.contains("\"icon_variant\":\"color\""));
     assert!(out.contains("\"logged_in\":true"));
     assert!(out.contains("\"username\":\"dev@example.com\""));
-    assert!(out.contains(
-        "\"menu\":[\"Signed in: dev@example.com\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]"
-    ));
+    if cfg!(target_os = "linux") {
+        assert!(out.contains(
+            "\"menu\":[\"Signed in: dev@example.com\",\"Sign out\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]"
+        ));
+    } else {
+        assert!(out.contains(
+            "\"menu\":[\"Signed in: dev@example.com\",\"Open CGA Web\",\"Settings\",\"Logs\",\"About\",\"Relaunch\",\"Exit\"]"
+        ));
+    }
     assert!(out.contains("\"user_groups\":[\"Team Alpha\"]"));
     assert!(out.contains("\"user_group_count\":1"));
     assert!(out.contains("signed in as dev@example.com"));
@@ -936,7 +1136,7 @@ fn tray_status_treats_expired_account_jwt_as_signed_out() {
     fs::create_dir_all(&repo).unwrap();
     let state = tmp.path().join("state");
     fs::create_dir_all(&state).unwrap();
-    fs::write(
+    write_test_account_session(
         state.join("account-session.json"),
         "{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"e30.eyJzdWIiOiJkZXYiLCJleHAiOjF9.sig\"}\n",
     )
@@ -981,7 +1181,7 @@ fn settings_render_omits_account_data_from_stdout() {
     let config = write_safe_config(tmp.path(), &repo, &[]);
     let state = tmp.path().join("state");
     fs::create_dir_all(&state).unwrap();
-    fs::write(
+    write_test_account_session(
         state.join("account-session.json"),
         "{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"test-token\"}\n",
     )
@@ -1358,7 +1558,7 @@ fn sync_reports_expired_account_login_before_scanning() {
         "MISSING_TOKEN_ENV",
     ]);
     assert!(login.status.success(), "stderr: {}", stderr(&login));
-    fs::write(
+    write_test_account_session(
         tmp.path().join("state").join("account-session.json"),
         "{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"e30.eyJzdWIiOiJkZXYiLCJleHAiOjF9.sig\"}\n",
     )
@@ -1433,7 +1633,7 @@ fn sync_prefers_valid_account_session_for_account_namespace_project() {
         .unwrap();
     assert!(login.status.success(), "stderr: {}", stderr(&login));
     let state = tmp.path().join("state");
-    fs::write(
+    write_test_account_session(
         state.join("account-session.json"),
         format!(
             "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{account_token}\"}}\n"
@@ -1507,7 +1707,7 @@ fn sync_falls_back_to_project_token_when_account_session_is_rejected() {
         .output()
         .unwrap();
     assert!(login.status.success(), "stderr: {}", stderr(&login));
-    fs::write(
+    write_test_account_session(
         tmp.path().join("state").join("account-session.json"),
         format!(
             "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{account_token}\"}}\n"
@@ -1607,7 +1807,7 @@ fn sync_does_not_fallback_or_delete_account_session_on_forbidden() {
         .unwrap();
     assert!(login.status.success(), "stderr: {}", stderr(&login));
     let session_path = tmp.path().join("state").join("account-session.json");
-    fs::write(
+    write_test_account_session(
         &session_path,
         format!(
             "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{account_token}\"}}\n"
@@ -1680,7 +1880,7 @@ fn sync_rejected_account_session_without_project_token_requires_login() {
         .unwrap();
     assert!(login.status.success(), "stderr: {}", stderr(&login));
     let session_path = tmp.path().join("state").join("account-session.json");
-    fs::write(
+    write_test_account_session(
         &session_path,
         format!(
             "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{account_token}\"}}\n"
@@ -1752,7 +1952,7 @@ fn sync_fails_when_project_token_fallback_is_forbidden() {
         .unwrap();
     assert!(login.status.success(), "stderr: {}", stderr(&login));
     let session_path = tmp.path().join("state").join("account-session.json");
-    fs::write(
+    write_test_account_session(
         &session_path,
         format!(
             "{{\"username\":\"dev@example.com\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{account_token}\"}}\n"
@@ -2600,7 +2800,7 @@ fn mcp_tools_call_uses_account_session_when_project_token_env_is_missing() {
     let repo = tmp.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
     fs::create_dir_all(tmp.path().join("state")).unwrap();
-    fs::write(
+    write_test_account_session(
         tmp.path().join("state").join("account-session.json"),
         format!(
             "{{\"username\":\"dev\",\"role\":\"developer\",\"token_type\":\"bearer\",\"access_token\":\"{}\"}}",
@@ -2731,12 +2931,23 @@ fn communication_logs_store_mcp_payload_metadata_only() {
 
 #[test]
 fn malformed_http_responses_are_logged_as_metadata_only() {
-    const RESPONSE_MARKER: &str = "PRIVATE_MALFORMED_RESPONSE_MARKER";
+    assert_malformed_http_response(
+        "PRIVATE_MALFORMED_RESPONSE_MARKER",
+        "invalid HTTP response",
+    );
+}
+
+#[test]
+fn empty_http_response_reports_connection_closed() {
+    assert_malformed_http_response("", "connection closed before HTTP response headers");
+}
+
+fn assert_malformed_http_response(response: &'static str, expected_error: &str) {
     let tmp = TestDir::new("malformed-response-log");
     let repo = tmp.path().join("repo");
     fs::create_dir_all(&repo).unwrap();
     fs::write(repo.join("source.txt"), "source\n").unwrap();
-    let (port, server) = spawn_malformed_sync_server(RESPONSE_MARKER);
+    let (port, server) = spawn_malformed_sync_server(response);
     let config = write_safe_config(
         tmp.path(),
         &repo,
@@ -2782,12 +2993,14 @@ fn malformed_http_responses_are_logged_as_metadata_only() {
 
     server.join().unwrap();
     assert!(!output.status.success());
-    assert!(stderr(&output).contains("invalid HTTP response"));
+    assert!(stderr(&output).contains(expected_error), "stderr: {}", stderr(&output));
     let (_, log_text) = read_log_files(tmp.path());
     assert!(log_text.contains("invalid_response_bytes="));
     assert!(!log_text.contains("invalid_response_sha256="));
     assert!(!log_text.contains("invalid_response:\n"));
-    assert!(!log_text.contains(RESPONSE_MARKER));
+    if !response.is_empty() {
+        assert!(!log_text.contains(response));
+    }
 }
 
 #[test]

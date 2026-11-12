@@ -1,0 +1,13 @@
+{
+  "summary": "Versioned first-party plugin standards, approval policy and developer SDK",
+  "changes": {
+    "Added": [
+      "English/Chinese plugin contract and independent exact-commit approval policy, with explicit trusted in-process boundaries.",
+      "Installable Python SDK with scaffolding, semantic/file validation, host adapter result contracts and deterministic non-overwriting packages.",
+      "Joint standards/SDK packaging and approval-gated provenance publication workflows; drafts and missing reviewer configuration do not count as formal approval."
+    ],
+    "Changed": [
+      "The developer kit remains a verified local candidate: GitHub workflow authorization and independent publication approvals are still required; no SDK release or runtime update has been published."
+    ]
+  }
+}

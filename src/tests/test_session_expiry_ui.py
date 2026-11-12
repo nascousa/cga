@@ -19,6 +19,8 @@ def _run(script: str) -> None:
     node = shutil.which("node")
     if node is None:
         pytest.skip("Node is needed to execute frontend JavaScript")
+    # Tooltip disposal is independent of the authenticated-session timers.
+    script = "function adcDisposeInfo() {}\nfunction stopMaintenancePolling() {}\n" + script
     result = subprocess.run(
         [node, "-e", script], check=False, capture_output=True, text=True, timeout=10
     )
@@ -79,6 +81,8 @@ const document={getElementById(id) {
 const localStorage={removeItem(key){assert.equal(key,'cg_jwt');}};
 function destroyLoginBackground() {}
 function initLoginBackground() {}
+function disposePluginDetails() {}
+function closeUserMenu() {}
 logout();
 assert.deepEqual(stopped,[1,2,3,4,5,6]);
 assert.equal(_indexStatusPollInterval,null);
@@ -88,6 +92,7 @@ assert.equal(_msAdoPollId,'');
 assert.equal(els.get('graph-viewer-frame').removed,'src');
 assert.equal(_jwt,'');
 assert.equal(_me,null);
+assert.equal(els.get('user-admin-menu').hidden,true);
 """)
 
 
@@ -109,6 +114,8 @@ const document={getElementById:()=>({style:{},replaceChildren(){},removeAttribut
 const localStorage={removeItem(){}};
 function destroyLoginBackground() {}
 function initLoginBackground() {}
+function disposePluginDetails() {}
+function closeUserMenu() {}
 let respond, requests=0;
 function api(method,path,body) {
   requests++;

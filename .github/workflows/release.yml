@@ -39,8 +39,83 @@ jobs:
           path: ${{ runner.temp }}/cga-relay-dist/*
           if-no-files-found: error
 
+  relay-unix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Test native Relay and installers
+        working-directory: src/cga-relay
+        run: |
+          test "$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml)" = "${GITHUB_REF_NAME#v}" || { echo "Tag does not match Relay package version" >&2; exit 1; }
+          cargo test --locked
+          python3 scripts/tests/test_unix_install.py
+      - name: Build signed Linux release
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          CGA_RELAY_GPG_PRIVATE_KEY: ${{ secrets.CGA_RELAY_GPG_PRIVATE_KEY }}
+          CGA_RELAY_GPG_SIGNING_KEY: ${{ secrets.CGA_RELAY_GPG_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          : "${CGA_RELAY_GPG_PRIVATE_KEY:?Configure the Linux release signing key}"
+          : "${CGA_RELAY_GPG_SIGNING_KEY:?Configure the Linux signing fingerprint}"
+          export GNUPGHOME
+          GNUPGHOME="$(mktemp -d "$RUNNER_TEMP/relay-gpg.XXXXXX")"
+          chmod 700 "$GNUPGHOME"
+          trap 'gpgconf --kill gpg-agent; rm -rf -- "$GNUPGHOME"' EXIT
+          printf '%s' "$CGA_RELAY_GPG_PRIVATE_KEY" | gpg --batch --import
+          sh src/cga-relay/scripts/build-unix-package.sh --release "$RUNNER_TEMP/relay-unix-dist"
+      - name: Build signed and notarized macOS CLI release
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CGA_RELAY_APPLE_CERT_BASE64: ${{ secrets.CGA_RELAY_APPLE_CERT_BASE64 }}
+          CGA_RELAY_APPLE_CERT_PASSWORD: ${{ secrets.CGA_RELAY_APPLE_CERT_PASSWORD }}
+          CGA_RELAY_APPLE_SIGNING_IDENTITY: ${{ secrets.CGA_RELAY_APPLE_SIGNING_IDENTITY }}
+          CGA_RELAY_APPLE_ID: ${{ secrets.CGA_RELAY_APPLE_ID }}
+          CGA_RELAY_APPLE_APP_PASSWORD: ${{ secrets.CGA_RELAY_APPLE_APP_PASSWORD }}
+          CGA_RELAY_APPLE_TEAM_ID: ${{ secrets.CGA_RELAY_APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          : "${CGA_RELAY_APPLE_CERT_BASE64:?Configure the Apple signing certificate}"
+          : "${CGA_RELAY_APPLE_SIGNING_IDENTITY:?Configure the Developer ID identity}"
+          : "${CGA_RELAY_APPLE_ID:?Configure the Apple notarization account}"
+          : "${CGA_RELAY_APPLE_APP_PASSWORD:?Configure the notarization app password}"
+          : "${CGA_RELAY_APPLE_TEAM_ID:?Configure the Apple developer team}"
+          keychain="$RUNNER_TEMP/cga-relay-signing.keychain-db"
+          certificate="$RUNNER_TEMP/cga-relay-signing.p12"
+          keychain_password="$(openssl rand -hex 32)"
+          trap 'security delete-keychain "$keychain"; rm -f -- "$certificate"' EXIT
+          printf '%s' "$CGA_RELAY_APPLE_CERT_BASE64" | base64 --decode > "$certificate"
+          chmod 600 "$certificate"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$CGA_RELAY_APPLE_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          xcrun notarytool store-credentials cga-relay-release --keychain "$keychain" --apple-id "$CGA_RELAY_APPLE_ID" --team-id "$CGA_RELAY_APPLE_TEAM_ID" --password "$CGA_RELAY_APPLE_APP_PASSWORD"
+          export CGA_RELAY_NOTARY_PROFILE=cga-relay-release
+          export CGA_RELAY_NOTARY_KEYCHAIN="$keychain"
+          sh src/cga-relay/scripts/build-unix-package.sh --release "$RUNNER_TEMP/relay-unix-dist"
+      - name: Upload verified Unix archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: cga-relay-unix-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/relay-unix-dist/*.tar.gz
+            ${{ runner.temp }}/relay-unix-dist/*.zip
+            ${{ runner.temp }}/relay-unix-dist/*.sha256
+            ${{ runner.temp }}/relay-unix-dist/*.asc
+          if-no-files-found: error
+
   publish:
-    needs: relay-windows
+    needs: [relay-windows, relay-unix]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -56,6 +131,13 @@ jobs:
           name: cga-relay-windows-x64
           path: relay-dist
 
+      - name: Download verified Unix relay assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: cga-relay-unix-*
+          path: relay-unix-dist
+          merge-multiple: true
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
 
@@ -67,6 +149,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and publish API image
+        id: api-image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
@@ -76,6 +159,23 @@ jobs:
             ${{ env.API_IMAGE }}:${{ github.ref_name }}
             ${{ env.API_IMAGE }}:latest
 
+      - name: Sign API update manifest and generate matching release notes
+        shell: bash
+        env:
+          CGA_UPDATE_SIGNING_KEY: ${{ secrets.CGA_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          : "${CGA_UPDATE_SIGNING_KEY:?Configure the trusted API update signing key}"
+          docker run --rm --entrypoint python --env CGA_UPDATE_SIGNING_KEY \
+            -v "$PWD:/release" \
+            "${{ env.API_IMAGE }}@${{ steps.api-image.outputs.digest }}" \
+            src/scripts/sign_update_manifest.py \
+            --version "${GITHUB_REF_NAME#v}" \
+            --minimum-version "1.30.133" \
+            --image "${{ env.API_IMAGE }}@${{ steps.api-image.outputs.digest }}" \
+            --output /release/update-manifest.jwt \
+            --notes-output /release/release-notes.md
+
       - name: Create source bundle and checksums
         shell: bash
         run: |
@@ -83,20 +183,27 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           archive="cga-${version}.tar.gz"
           git archive --format=tar.gz --prefix="cga-${version}/" -o "$archive" HEAD
-          sha256sum "$archive" docker-compose.release.yml .env.example > SHA256SUMS.txt
+          sha256sum "$archive" docker-compose.release.yml .env.example update-manifest.jwt > SHA256SUMS.txt
           # action-gh-release uploads each configured path using its basename.
           (
             cd relay-dist
             sha256sum cga-relay.exe "cga-relay-${version}-windows-x64.zip"
           ) >> SHA256SUMS.txt
+          (
+            cd relay-unix-dist
+            sha256sum *.tar.gz *.zip
+          ) >> SHA256SUMS.txt
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
-          generate_release_notes: true
+          body_path: release-notes.md
+          overwrite_files: false
           files: |
             cga-*.tar.gz
             relay-dist/*
+            relay-unix-dist/*
             docker-compose.release.yml
             .env.example
             SHA256SUMS.txt
+            update-manifest.jwt

@@ -28,6 +28,8 @@ from typing import Any
 import redis
 import redis.asyncio as aioredis
 import structlog
+from backend.plugins.host import PluginUnavailableError, execution, is_enabled
+from backend.plugins.settings import tracing_enabled
 
 log = structlog.get_logger()
 
@@ -57,7 +59,7 @@ class TraceRecorder:
         self._enabled = True
 
     def record(self, tool: str, args: dict, results: list, latency_ms: float) -> None:
-        if not self._enabled:
+        if not self._enabled or not is_enabled("evaluation") or not tracing_enabled():
             return
         trace = Trace(
             trace_id=str(uuid.uuid4()),
@@ -113,20 +115,30 @@ class TraceEvaluator:
     # ------------------------------------------------------------------
 
     async def _loop(self) -> None:
+        pending: list[tuple[str, dict]] = []
         while self._running:
+            if not is_enabled("evaluation") or not tracing_enabled():
+                await asyncio.sleep(2)
+                continue
             try:
-                messages = await self._client.xreadgroup(
-                    _TRACE_GROUP,
-                    "eval-worker-0",
-                    {_TRACE_STREAM: ">"},
-                    count=_BATCH,
-                    block=_BLOCK_MS,
-                )
-                if not messages:
-                    continue
-                for _stream, entries in messages:
-                    for msg_id, data in entries:
+                if not pending:
+                    messages = await self._client.xreadgroup(
+                        _TRACE_GROUP,
+                        "eval-worker-0",
+                        {_TRACE_STREAM: ">"},
+                        count=_BATCH,
+                        block=_BLOCK_MS,
+                    )
+                    pending = [entry for _stream, entries in messages for entry in entries]
+                while pending:
+                    if not tracing_enabled():
+                        break
+                    msg_id, data = pending[0]
+                    with execution("evaluation"):
                         await self._evaluate_trace(msg_id, data)
+                    pending.pop(0)
+            except PluginUnavailableError:
+                log.info("trace_eval.paused")
             except aioredis.RedisError as exc:
                 log.warning("trace_eval.redis_error", error=str(exc))
                 await asyncio.sleep(2)

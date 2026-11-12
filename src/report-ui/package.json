@@ -1,0 +1,17 @@
+{
+  "name": "cga-report-libraries",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild libraries.js --bundle --splitting --format=esm --minify --legal-comments=external --outdir=../frontend/report-vendor --entry-names=report-libraries --chunk-names=chunks/[name]-[hash] && node notices.mjs"
+  },
+  "dependencies": {
+    "echarts": "6.1.0",
+    "html2canvas": "1.4.1",
+    "jspdf": "4.2.1",
+    "mermaid": "12.3.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

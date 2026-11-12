@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -24,6 +24,42 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Test Relay
         run: cargo test --locked
+      - name: Test Unix user installers
+        if: runner.os != 'Windows'
+        run: python3 scripts/tests/test_unix_install.py
+      - name: Verify Linux tray dependencies and helpers
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1 libsecret-tools gnome-keyring xvfb xauth dbus-x11
+          /usr/bin/python3 -m py_compile desktop/linux/tray.py
+          dbus-run-session -- xvfb-run -a /usr/bin/python3 desktop/linux/test_tray.py
+      - name: Test native Linux credential persistence
+        if: runner.os == 'Linux'
+        run: |
+          export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+          export RUSTUP_HOME="${RUSTUP_HOME:-$HOME/.rustup}"
+          export HOME
+          HOME="$(mktemp -d "$RUNNER_TEMP/relay-keyring.XXXXXX")"
+          dbus-run-session -- sh -c '
+            printf "ci-ephemeral-keyring\n" | gnome-keyring-daemon --unlock --components=secrets
+            cargo test --locked --test credential_sessions native_secret_service -- --ignored
+          '
+      - name: Build native Unix candidate
+        if: runner.os != 'Windows'
+        run: sh scripts/build-unix-package.sh "$RUNNER_TEMP/relay-candidate"
+      - name: Smoke-test installed Unix candidate
+        if: runner.os != 'Windows'
+        run: |
+          package="$(find "$RUNNER_TEMP/relay-candidate" -mindepth 1 -maxdepth 1 -type d -name '*-candidate')"
+          python3 scripts/tests/smoke_unix_package.py "$package"
+      - name: Upload native Unix candidate
+        if: runner.os != 'Windows'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: relay-candidate-${{ matrix.os }}
+          path: ${{ runner.temp }}/relay-candidate/*-candidate.*
+          if-no-files-found: error
       - name: Verify hardened Windows candidate
         if: runner.os == 'Windows'
         shell: pwsh
@@ -61,6 +97,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -72,6 +110,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pip-audit
+
+      - name: Check product version alignment
+        run: |
+          python src/scripts/bump_version.py --check
+          python src/scripts/check_change_logs.py
+        env:
+          CGA_CHANGELOG_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
 
       - name: Run tests with coverage gate
         id: coverage

@@ -15,6 +15,8 @@ mod adc;
 mod json;
 mod secret_store;
 mod single_instance;
+#[cfg(any(target_os = "linux", test))]
+mod unix_desktop;
 
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -24,8 +26,9 @@ const SERVER_NAME: &str = "cga-relay";
 const TRAY_ICON_LOGGED_IN_RESOURCE_ID: u16 = 1;
 const TRAY_ICON_LOGGED_OUT_RESOURCE_ID: u16 = 4;
 const TRAY_ICON_WARNING_RESOURCE_ID: u16 = 7;
-const BACKEND_NOTIFICATION_TITLE: &str = "CGA Server Container is unavailable";
-const BACKEND_NOTIFICATION_MESSAGE: &str = "Start the CGA Server Container to reconnect CGA-Relay.";
+const BACKEND_NOTIFICATION_TITLE: &str = "CGA server connection is unavailable";
+const BACKEND_NOTIFICATION_MESSAGE: &str =
+    "CGA-Relay will reconnect automatically. If this persists, check the CGA Server Container and Docker.";
 const PROJECT_DISPLAY_NAME: &str = "CGA-Relay";
 const PROJECT_AUTHOR: &str = "Nate Scott";
 const PROJECT_REPOSITORY: &str = "https://github.com/nascousa/cga";
@@ -213,6 +216,7 @@ fn run(args: Vec<String>) -> AgentResult<()> {
         "index" => cmd_index(&args[1..]),
         "refs" => cmd_refs(&args[1..]),
         "settings" => cmd_settings(&args[1..]),
+        "serve" => cmd_serve(&args[1..]),
         "tray" => cmd_tray(&args[1..]),
         "mcp" => cmd_mcp(&args[1..]),
         "adc" => adc::command(&args[1..]),
@@ -239,7 +243,8 @@ fn print_help() {
     println!("  index     Index Git or explicit file changes into a default/ref graph");
     println!("  refs      Promote temporary ref graphs after merge");
     println!("  settings  Render or inspect the local account settings page");
-    println!("  tray      Run the Windows notification-area tray icon");
+    println!("  serve     Run the local settings and indexing gateway without a tray");
+    println!("  tray      Run the native Windows or Linux desktop tray");
     println!("  mcp       Run the stdio MCP-compatible gateway");
     println!("  adc       Read approved project ADC; sync previews by default (--apply writes)");
     println!();
@@ -325,7 +330,7 @@ fn cmd_sync(args: &[String]) -> AgentResult<()> {
         AgentError("login profile does not contain account_token_env".to_string())
     })?;
     let developer_token = nonempty_env(token_env);
-    let account_session = read_account_session(&config).unwrap_or_default();
+    let account_session = read_account_session(&config)?;
     let mut account_token = current_account_access_token(&account_session);
     let projects = select_projects(&config, all, project_tag, namespace)?;
     if account_token.is_none()
@@ -416,7 +421,7 @@ fn output_rules_path(config: &AgentConfig) -> PathBuf {
 }
 
 fn sync_output_rules(config: &AgentConfig) -> AgentResult<()> {
-    let session = read_account_session(config).unwrap_or_default();
+    let session = read_account_session(config)?;
     let access_token = current_account_access_token(&session).ok_or_else(|| {
         AgentError("CGA account login is required to synchronize output rules".to_string())
     })?;
@@ -521,6 +526,9 @@ fn cmd_tray(args: &[String]) -> AgentResult<()> {
         println!("{}", tray_status_json(&config));
         return Ok(());
     }
+    if !tray_supported() {
+        return run_platform_tray(&config, "");
+    }
     ensure_state_dirs(&config)?;
     let settings_url = start_settings_server(config.clone())?;
     run_platform_tray(&config, &settings_url)
@@ -541,6 +549,15 @@ fn cmd_settings(args: &[String]) -> AgentResult<()> {
     ))
 }
 
+fn cmd_serve(args: &[String]) -> AgentResult<()> {
+    let config = load_config(required_arg(args, "--config")?)?;
+    let settings_url = start_settings_server(config)?;
+    println!("CGA-Relay settings: {settings_url}");
+    loop {
+        thread::park();
+    }
+}
+
 fn cmd_mcp(args: &[String]) -> AgentResult<()> {
     let config = load_config(required_arg(args, "--config")?)?;
     let mut input = std::io::stdin().lock();
@@ -557,6 +574,12 @@ fn cmd_mcp(args: &[String]) -> AgentResult<()> {
     Ok(())
 }
 
+#[cfg(target_os = "linux")]
+fn tray_status_json(config: &AgentConfig) -> String {
+    unix_desktop::status_json(config)
+}
+
+#[cfg(not(target_os = "linux"))]
 fn tray_status_json(config: &AgentConfig) -> String {
     let login = tray_login_status(config);
     let backend_available = tray_backend_available(config);
@@ -592,7 +615,10 @@ fn tray_status_json(config: &AgentConfig) -> String {
 }
 
 fn tray_login_status(config: &AgentConfig) -> TrayLoginStatus {
-    let session = read_account_session(config).unwrap_or_default();
+    let session = read_account_session(config).unwrap_or_else(|error| {
+        eprintln!("CGA credential unavailable: {}", error.0);
+        BTreeMap::new()
+    });
     let logged_in = current_account_access_token(&session).is_some();
     let username = if logged_in {
         session
@@ -700,7 +726,7 @@ fn tray_tooltip(config: &AgentConfig, login: &TrayLoginStatus, backend_available
 }
 
 fn tray_supported() -> bool {
-    cfg!(windows)
+    cfg!(any(windows, target_os = "linux"))
 }
 
 #[cfg(windows)]
@@ -720,10 +746,15 @@ fn run_platform_tray(config: &AgentConfig, settings_url: &str) -> AgentResult<()
     windows_tray::run(config, settings_url)
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+fn run_platform_tray(config: &AgentConfig, settings_url: &str) -> AgentResult<()> {
+    unix_desktop::run(config, settings_url)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
 fn run_platform_tray(_config: &AgentConfig, _settings_url: &str) -> AgentResult<()> {
     Err(AgentError(
-        "system tray mode is currently supported only on Windows".to_string(),
+        "desktop tray mode is supported only on Windows and Linux; use 'serve' or stdio 'mcp' on macOS".to_string(),
     ))
 }
 
@@ -1153,11 +1184,32 @@ fn account_groups_path(config: &AgentConfig) -> PathBuf {
 
 fn clear_account_session(config: &AgentConfig) -> AgentResult<()> {
     let mut errors = Vec::new();
-    for (path, description) in [
-        (account_session_path(config), "account session"),
+    let path = account_session_path(config);
+    let credential_deleted = match fs::read_to_string(&path) {
+        Ok(text) => {
+            let mut result = Ok(());
+            for field in ACCOUNT_CREDENTIAL_FIELDS {
+                if let Some(value) = json_string_field(&text, field) {
+                    if let Err(error) = secret_store::delete_access_token(&path, field, &value) {
+                        result = Err(error);
+                    }
+                }
+            }
+            result
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(AgentError("cannot read account session to delete its credential".into())),
+    };
+    let mut files = vec![
         (account_projects_path(config), "cached account projects"),
         (account_groups_path(config), "cached account groups"),
-    ] {
+    ];
+    match credential_deleted {
+        Ok(()) => files.push((path, "account session")),
+        Err(error) => errors.push(error.0),
+    }
+    // Keep the credential reference if backend deletion failed so logout can be retried.
+    for (path, description) in files {
         match fs::remove_file(path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
@@ -1308,7 +1360,9 @@ fn doctor_json(config: &AgentConfig) -> String {
 }
 
 fn settings_status_json(config: &AgentConfig) -> String {
-    let session = read_account_session(config).unwrap_or_default();
+    let result = read_account_session(config);
+    let credential_error = result.as_ref().err().map(|error| error.0.as_str()).unwrap_or("");
+    let session = result.as_ref().ok().cloned().unwrap_or_default();
     let groups = load_account_groups(config).unwrap_or_default();
     let projects = projects_from_account_groups(&groups);
     let settings_url = fs::read_to_string(settings_url_path(config)).unwrap_or_default();
@@ -1322,14 +1376,15 @@ fn settings_status_json(config: &AgentConfig) -> String {
         format!("{relay_base_url}/api/index-git-incremental")
     };
     format!(
-        "{{\"enabled\":true,\"page\":\"local-account-settings\",\"project_id\":\"{}\",\"project_root\":\"{}\",\"login_endpoint\":\"/login\",\"projects_endpoint\":\"/api/auth/me/groups\",\"index_endpoint\":\"{}\",\"session_configured\":{},\"username\":\"{}\",\"project_count\":{},\"settings_url\":\"{}\"}}",
+        "{{\"enabled\":true,\"page\":\"local-account-settings\",\"project_id\":\"{}\",\"project_root\":\"{}\",\"login_endpoint\":\"/login\",\"projects_endpoint\":\"/api/auth/me/groups\",\"index_endpoint\":\"{}\",\"session_configured\":{},\"username\":\"{}\",\"project_count\":{},\"settings_url\":\"{}\",\"credential_error\":\"{}\"}}",
         json_escape(&config.project_id),
         json_escape(&display_path(&config.project_root)),
         json_escape(&index_endpoint),
         current_account_access_token(&session).is_some(),
         json_escape(session.get("username").map(String::as_str).unwrap_or("")),
         projects.len(),
-        json_escape(settings_url)
+        json_escape(settings_url),
+        json_escape(credential_error)
     )
 }
 
@@ -1648,7 +1703,9 @@ const SETTINGS_LOGIN_HTML: &str = "<section class=\"panel account-panel\"><div><
 const SETTINGS_PAGE_PREVIEW_HTML: &str = "<!doctype html><html data-theme=\"dark\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>CGA-Relay Settings</title><style>:root{color-scheme:dark}</style></head><body><main><h1>CGA-Relay Settings</h1><div class=\"status-grid\"><span>Relay</span><span>API</span></div><div class=\"version-pill\">Settings preview</div><p>Sign in to CGA to view account-specific settings.</p></main></body></html>";
 
 fn settings_page_html(config: &AgentConfig, message: Option<(&str, bool)>) -> String {
-    let session = read_account_session(config).unwrap_or_default();
+    let result = read_account_session(config);
+    let credential_error = result.as_ref().err().map(|error| error.0.as_str());
+    let session = result.as_ref().ok().cloned().unwrap_or_default();
     let groups = refresh_account_groups(config, &session)
         .or_else(|_| load_account_groups(config))
         .unwrap_or_default();
@@ -1660,10 +1717,19 @@ fn settings_page_html(config: &AgentConfig, message: Option<(&str, bool)>) -> St
             "<section class=\"panel account-panel\"><div><p class=\"eyebrow\">Account</p><h2>Signed in</h2><p class=\"muted\">Connected as <strong>{}</strong>.</p></div><div class=\"account-actions\"><form method=\"post\" action=\"/refresh\"><button type=\"submit\">Refresh access</button></form><form method=\"post\" action=\"/logout\"><button class=\"secondary\" type=\"submit\">Sign out</button></form></div></section>",
             html_escape(username)
         )
+    } else if credential_error.is_some() {
+        format!(
+            "{SETTINGS_LOGIN_HTML}<form method=\"post\" action=\"/logout\"><button class=\"secondary\" type=\"submit\">Clear stored account session</button></form>"
+        )
     } else {
         SETTINGS_LOGIN_HTML.to_string()
     };
-    render_settings_page(config, message, &account_html, &group_html)
+    render_settings_page(
+        config,
+        credential_error.map(|error| (error, true)).or(message),
+        &account_html,
+        &group_html,
+    )
 }
 
 fn render_settings_page(
@@ -2821,6 +2887,91 @@ fn read_profile(config: &AgentConfig) -> AgentResult<BTreeMap<String, String>> {
     Ok(parse_flat_json_object(&text))
 }
 
+const ACCOUNT_CREDENTIAL_FIELDS: [&str; 4] = [
+    "access_token_dpapi",
+    "access_token_keychain",
+    "access_token_secret_service",
+    "access_token_memory",
+];
+
+#[cfg(test)]
+mod credential_session_tests {
+    use super::*;
+
+    fn config() -> AgentConfig {
+        let state_dir = std::env::temp_dir().join(format!(
+            ".credential-test-{}-{}",
+            std::process::id(),
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        fs::create_dir_all(&state_dir).unwrap();
+        AgentConfig {
+            agent_id: "agent".into(),
+            api_base_url: "http://127.0.0.1:1".into(),
+            control_api_base_url: "http://127.0.0.1:1".into(),
+            api_key_env: "CGA_CREDENTIAL_TEST_API_KEY".into(),
+            account_email: String::new(),
+            account_token_env: "CGA_CREDENTIAL_TEST_TOKEN".into(),
+            project_id: "PROJECT123".into(),
+            project_root: state_dir.clone(),
+            log_dir: state_dir.join("logs"),
+            state_dir,
+            include_globs: Vec::new(),
+            exclude_globs: Vec::new(),
+            max_file_bytes: 1024,
+            max_batch_bytes: DEFAULT_MAX_BATCH_BYTES,
+            browser_allowed_origins: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn memory_login_read_and_logout_share_the_same_scoped_credential() {
+        let config = config();
+        let path = account_session_path(&config);
+        let persisted = secret_store::protect_session_for_test(&path, "test-private-value").unwrap();
+        write_private_file(&path, &format!(
+            "{{\"username\":\"dev\",\"{}\":\"{}\"}}",
+            persisted.field, persisted.value
+        )).unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("test-private-value"));
+        let session = read_account_session(&config).unwrap();
+        assert_eq!(current_account_access_token(&session), Some("test-private-value"));
+        clear_account_session(&config).unwrap();
+        assert!(read_account_session(&config).unwrap().is_empty());
+        assert_eq!(secret_store::load_access_token(&path, persisted.field, &persisted.value).unwrap(), None);
+        fs::remove_dir_all(config.state_dir).unwrap();
+    }
+
+    #[test]
+    fn failed_credential_deletion_retains_reference_and_surfaces_in_settings() {
+        let config = config();
+        let path = account_session_path(&config);
+        write_private_file(&path, "{\"access_token_memory\":\"wrong-scope\"}").unwrap();
+        fs::write(account_groups_path(&config), "cached").unwrap();
+        assert!(read_account_session(&config).unwrap_err().0.contains("different session path"));
+        assert!(settings_page_html(&config, None).contains("different session path"));
+        assert!(clear_account_session(&config).is_err());
+        assert!(path.exists());
+        assert!(!account_groups_path(&config).exists());
+        fs::remove_dir_all(config.state_dir).unwrap();
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn legacy_plaintext_is_rejected_without_using_or_logging_the_token() {
+        let config = config();
+        let path = account_session_path(&config);
+        fs::write(&path, "{\"access_token\":\"legacy-private-value\"}").unwrap();
+        let error = read_account_session(&config).unwrap_err().0;
+        assert!(error.contains("legacy plaintext"));
+        assert!(error.contains("sign in again"));
+        assert!(!error.contains("legacy-private-value"));
+        clear_account_session(&config).unwrap();
+        assert!(!path.exists());
+        fs::remove_dir_all(config.state_dir).unwrap();
+    }
+}
+
 fn read_account_session(config: &AgentConfig) -> AgentResult<BTreeMap<String, String>> {
     let path = account_session_path(config);
     if !path.exists() {
@@ -2834,18 +2985,33 @@ fn read_account_session(config: &AgentConfig) -> AgentResult<BTreeMap<String, St
             values.insert(key.to_string(), value);
         }
     }
-    if let Some(protected) = json_string_field(&text, "access_token_dpapi") {
-        let access_token = secret_store::unprotect_access_token(&protected)?;
-        values.insert("access_token".to_string(), access_token);
-    } else if let Some(access_token) = json_string_field(&text, "access_token") {
-        values.insert("access_token".to_string(), access_token.clone());
+    let credentials = ACCOUNT_CREDENTIAL_FIELDS.iter().filter_map(|field| {
+        json_string_field(&text, field).map(|value| (*field, value))
+    }).collect::<Vec<_>>();
+    if credentials.len() > 1 {
+        return Err(AgentError("account session has conflicting credential references; sign out and sign in again".into()));
+    }
+    #[cfg(not(windows))]
+    if json_string_field(&text, "access_token").is_some() {
+        return Err(AgentError(
+            "legacy plaintext account session is not trusted; sign out in local settings (or remove account-session.json), then sign in again to use OS-protected storage. Revoke the old token if it may have been exposed".into(),
+        ));
+    }
+    if let Some((field, protected)) = credentials.first() {
+        if let Some(access_token) = secret_store::load_access_token(&path, field, protected)? {
+            values.insert("access_token".to_string(), access_token);
+        }
+    } else {
         #[cfg(windows)]
-        write_account_session(
-            config,
-            values.get("username").map(String::as_str).unwrap_or(""),
-            values.get("role").map(String::as_str).unwrap_or(""),
-            &access_token,
-        )?;
+        if let Some(access_token) = json_string_field(&text, "access_token") {
+            write_account_session(
+                config,
+                values.get("username").map(String::as_str).unwrap_or(""),
+                values.get("role").map(String::as_str).unwrap_or(""),
+                &access_token,
+            )?;
+            values.insert("access_token".to_string(), access_token);
+        }
     }
     Ok(values)
 }
@@ -2920,7 +3086,28 @@ fn write_account_session(
     role: &str,
     access_token: &str,
 ) -> AgentResult<()> {
-    let persisted = secret_store::protect_access_token(access_token)?;
+    fs::create_dir_all(&config.state_dir)
+        .map_err(|error| AgentError(format!("cannot create account session directory: {error}")))?;
+    let path = account_session_path(config);
+    let previous = match fs::read_to_string(&path) {
+        Ok(text) => ACCOUNT_CREDENTIAL_FIELDS.iter().filter_map(|field| {
+            json_string_field(&text, field).map(|value| (*field, value))
+        }).collect::<Vec<_>>(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(_) => return Err(AgentError("cannot read previous account credential reference; sign out before signing in again".into())),
+    };
+    let persisted = secret_store::protect_access_token(&path, access_token)?;
+    for (field, value) in &previous {
+        if *field != persisted.field {
+            if let Err(error) = secret_store::delete_access_token(&path, field, value) {
+                let _ = secret_store::delete_access_token(&path, persisted.field, &persisted.value);
+                return Err(AgentError(format!(
+                    "cannot replace previous account credential; sign out using its original credential backend first: {}",
+                    error.0
+                )));
+            }
+        }
+    }
     let body = format!(
         "{{\"username\":\"{}\",\"role\":\"{}\",\"token_type\":\"bearer\",\"{}\":\"{}\"}}\n",
         json_escape(username),
@@ -2928,7 +3115,13 @@ fn write_account_session(
         persisted.field,
         json_escape(&persisted.value)
     );
-    write_private_file(&account_session_path(config), &body)
+    if let Err(error) = write_private_file(&path, &body) {
+        if !previous.iter().any(|(field, _)| *field == persisted.field) {
+            let _ = secret_store::delete_access_token(&path, persisted.field, &persisted.value);
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn write_account_projects(config: &AgentConfig, projects: &[AccountProject]) -> AgentResult<()> {
@@ -3233,15 +3426,10 @@ fn post_sync_body(
                 return Err(response.into_error());
             }
             *account_token = None;
-            match fs::remove_file(account_session_path(config)) {
-                Ok(()) => {}
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-                Err(error) => {
-                    return Err(AgentError(format!(
-                        "CGA account login was rejected, but its local session could not be removed: {error}"
-                    )));
-                }
-            }
+            clear_account_session(config).map_err(|error| AgentError(format!(
+                "CGA account login was rejected, but its credential could not be removed: {}",
+                error.0
+            )))?;
             if developer_token.is_none() {
                 return Err(AgentError(
                     "CGA account login is no longer valid; sign in again before syncing"
@@ -3587,7 +3775,8 @@ fn post_cga_relay_tool(
             &request_body,
         );
     }
-    if let Ok(session) = read_account_session(config) {
+    {
+        let session = read_account_session(config)?;
         if let Some(access_token) = current_account_access_token(&session) {
             return http_post_json(
                 config,
@@ -4007,7 +4196,11 @@ fn read_http_response(
                 response.len()
             ),
         );
-        return Err(AgentError("invalid HTTP response".to_string()));
+        return Err(AgentError(if response.is_empty() {
+            "connection closed before HTTP response headers; the server may be restarting".to_string()
+        } else {
+            "invalid HTTP response".to_string()
+        }));
     };
     let head = std::str::from_utf8(&response[..header_end])
         .map_err(|_| AgentError("HTTP headers are not valid UTF-8".to_string()))?;
@@ -4294,7 +4487,7 @@ fn unescape_field(value: &str) -> String {
 #[cfg(windows)]
 mod windows_tray {
     use super::{
-        cga_admin_web_url, clear_account_session, tray_backend_check, tray_icon_resource_id,
+        cga_admin_web_url, clear_account_session, log_communication, tray_backend_check, tray_icon_resource_id,
         tray_login_menu_label, tray_login_status, tray_tooltip,
         tray_user_group_summary, AgentConfig, AgentError, AgentResult, TrayLoginStatus,
         BACKEND_NOTIFICATION_MESSAGE, BACKEND_NOTIFICATION_TITLE, PROJECT_AUTHOR,
@@ -4307,6 +4500,7 @@ mod windows_tray {
     use std::sync::{Arc, Mutex};
     use std::ptr::{null, null_mut};
     use std::thread;
+    use std::time::{Duration, Instant};
 
     type Bool = i32;
     type Dword = u32;
@@ -4425,10 +4619,46 @@ mod windows_tray {
         h_balloon_icon: Hicon,
     }
 
+    #[derive(Default)]
+    struct BackendHealthState {
+        available: Option<bool>,
+        failures: u8,
+        successes: u8,
+        last_notification: Option<Instant>,
+    }
+
+    impl BackendHealthState {
+        fn record(&mut self, success: bool, now: Instant) -> bool {
+            let previous = self.available;
+            if success {
+                self.failures = 0;
+                self.successes = self.successes.saturating_add(1);
+                if previous != Some(false) || self.successes >= 2 {
+                    self.available = Some(true);
+                }
+            } else {
+                self.successes = 0;
+                self.failures = self.failures.saturating_add(1);
+                if self.failures >= 3 {
+                    self.available = Some(false);
+                }
+            }
+            let notify = previous != Some(false)
+                && self.available == Some(false)
+                && self.last_notification.is_none_or(|last| {
+                    now.duration_since(last) >= Duration::from_secs(300)
+                });
+            if notify {
+                self.last_notification = Some(now);
+            }
+            notify
+        }
+    }
+
     struct TrayState {
         config: AgentConfig,
         login: TrayLoginStatus,
-        backend_available: Option<bool>,
+        backend_health: BackendHealthState,
         backend_check_in_flight: bool,
         backend_error: Arc<Mutex<String>>,
         warning_icon_visible: bool,
@@ -4610,7 +4840,7 @@ mod windows_tray {
         TrayState {
             config: config.clone(),
             login,
-            backend_available: None,
+            backend_health: BackendHealthState::default(),
             backend_check_in_flight: false,
             backend_error: Arc::new(Mutex::new(String::new())),
             warning_icon_visible: false,
@@ -4758,7 +4988,7 @@ mod windows_tray {
         state.login = login;
         state.account_label = wide_null(&escape_menu_label(&tray_login_menu_label(&state.login)));
         state.about_text = wide_null(&tray_about_text(&state.config, &state.login));
-        let backend_available = state.backend_available != Some(false);
+        let backend_available = state.backend_health.available != Some(false);
         let tooltip = tray_tooltip(&state.config, &state.login, backend_available);
         let icon_resource_id = active_tray_icon_resource_id(state);
         modify_icon(hwnd, h_instance, &tooltip, icon_resource_id);
@@ -4778,6 +5008,7 @@ mod windows_tray {
             let result = tray_backend_check(&config);
             let backend_available = result.is_ok();
             if let Err(error) = &result {
+                log_communication(&config, "backend.health_probe_failed", &error.0);
                 if let Ok(mut slot) = backend_error.lock() {
                     *slot = error.0.clone();
                 }
@@ -4799,16 +5030,23 @@ mod windows_tray {
             return;
         };
         state.backend_check_in_flight = false;
-        if state.backend_available == Some(backend_available) {
+        let previous = state.backend_health.available;
+        let notify = state.backend_health.record(backend_available, Instant::now());
+        if state.backend_health.available == previous {
             return;
         }
 
-        state.backend_available = Some(backend_available);
+        let backend_available = state.backend_health.available != Some(false);
         state.warning_icon_visible = !backend_available;
         let tooltip = tray_tooltip(&state.config, &state.login, backend_available);
         let icon_resource_id = active_tray_icon_resource_id(state);
         modify_icon(hwnd, h_instance, &tooltip, icon_resource_id);
-        if !backend_available {
+        log_communication(
+            &state.config,
+            "backend.health_changed",
+            &format!("available={backend_available}\nnotification={notify}"),
+        );
+        if notify {
             let detail = state
                 .backend_error
                 .lock()
@@ -4823,7 +5061,7 @@ mod windows_tray {
         let Some(state) = tray_state_from_hwnd_mut(hwnd) else {
             return;
         };
-        if state.backend_available != Some(false) {
+        if state.backend_health.available != Some(false) {
             return;
         }
 
@@ -4834,7 +5072,7 @@ mod windows_tray {
     }
 
     fn active_tray_icon_resource_id(state: &TrayState) -> u16 {
-        if state.backend_available == Some(false) && state.warning_icon_visible {
+        if state.backend_health.available == Some(false) && state.warning_icon_visible {
             TRAY_ICON_WARNING_RESOURCE_ID
         } else {
             tray_icon_resource_id(&state.login, true)
@@ -5107,6 +5345,54 @@ mod windows_tray {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn backend_health_ignores_short_failures_and_requires_sustained_recovery() {
+            let now = Instant::now();
+            let mut health = BackendHealthState::default();
+            assert!(!health.record(false, now));
+            assert!(!health.record(false, now));
+            assert_eq!(health.available, None);
+            assert!(!health.record(true, now));
+            assert_eq!(health.available, Some(true));
+            assert!(!health.record(false, now));
+            assert!(!health.record(false, now));
+            assert_eq!(health.available, Some(true));
+            assert!(health.record(false, now));
+            assert_eq!(health.available, Some(false));
+            assert!(!health.record(true, now));
+            assert_eq!(health.available, Some(false));
+            assert!(!health.record(false, now));
+            assert!(!health.record(true, now));
+            assert_eq!(health.available, Some(false));
+            assert!(!health.record(true, now));
+            assert_eq!(health.available, Some(true));
+        }
+
+        #[test]
+        fn backend_health_throttles_new_outages_but_keeps_warning_state() {
+            let now = Instant::now();
+            let mut health = BackendHealthState::default();
+            for _ in 0..2 {
+                assert!(!health.record(false, now));
+            }
+            assert!(health.record(false, now));
+            assert!(!health.record(false, now + Duration::from_secs(1)));
+            for _ in 0..2 {
+                assert!(!health.record(true, now + Duration::from_secs(2)));
+            }
+            for _ in 0..3 {
+                assert!(!health.record(false, now + Duration::from_secs(299)));
+            }
+            assert_eq!(health.available, Some(false));
+            for _ in 0..2 {
+                assert!(!health.record(true, now + Duration::from_secs(300)));
+            }
+            for _ in 0..2 {
+                assert!(!health.record(false, now + Duration::from_secs(300)));
+            }
+            assert!(health.record(false, now + Duration::from_secs(300)));
+        }
 
         #[test]
         fn account_menu_command_is_bound_to_the_displayed_action() {

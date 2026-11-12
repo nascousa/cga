@@ -17,9 +17,9 @@
   white-space: nowrap;
   padding-inline: var(--nav-text-padding);
 }
-.topbar-nav .nav-icon { display: none; flex: 0 0 auto; }
+.topbar-nav .nav-icon { display: block; flex: 0 0 auto; margin-right: 6px; }
 .topbar-nav.is-compact .tab-btn { width: 34px; min-height: 34px; padding: 7px; }
-.topbar-nav.is-compact .nav-icon { display: block; }
+.topbar-nav.is-compact .nav-icon { margin-right: 0; }
 .topbar-nav.is-compact .nav-label {
   position: fixed;
   left: 0;

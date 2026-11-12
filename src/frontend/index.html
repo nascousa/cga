@@ -1266,6 +1266,7 @@
     }
     .btn-sm { padding: 5px 10px; font-size: 12px; }
     .btn:disabled { opacity: .5; cursor: not-allowed; }
+    #pane-settings .btn:disabled, #update-dialog .btn:disabled { background:var(--panel-2);color:var(--muted);border-color:var(--border);opacity:1; }
 
     /* ── Modal ── */
     .overlay {
@@ -1520,6 +1521,152 @@
     .schedule-summary-cell strong[data-schedule-status="failed"] { color: var(--danger); }
     .schedule-summary-cell strong[data-schedule-status="running"] { color: var(--info); }
     .schedule-summary-cell strong[data-schedule-status="empty"] { color: var(--muted); }
+    #adc-manager { min-width: 0; }
+    #adc-manager .adc-header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 8px; }
+    #adc-manager .adc-header h2, #adc-manager .adc-header .adc-info-row { margin: 0 !important; }
+    #adc-manager > [role="alert"]:empty { display: none; }
+    #adc-manager .adc-toolbar { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; margin-bottom: 12px; min-width: 0; }
+    #adc-manager .adc-toolbar-field { flex: 1 1 220px; min-width: 0; }
+    #adc-manager .adc-toolbar > .adc-info-row { flex: 0 1 auto; margin: 0 0 4px !important; }
+    #adc-manager label { font-size: 12px; color: var(--muted); margin: 0 0 4px !important; }
+    #adc-manager .adc-info-row { margin: 8px 0 4px !important; }
+    #adc-manager input:not([type="checkbox"]), #adc-manager select, #adc-manager textarea { box-sizing: border-box; min-width: 0; max-width: 100%; margin: 0; padding: 8px 10px; font-size: 13px; }
+    #adc-manager .btn { margin: 0 !important; }
+    #adc-manager .adc-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+    #adc-manager .adc-field-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; margin-bottom: 10px; }
+    #adc-manager .adc-field-grid > div { min-width: 0; }
+    #adc-manager .adc-disclosure { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; min-width: 0; }
+    #adc-manager .adc-disclosure > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; font-size: 13px; }
+    #adc-manager .adc-disclosure > summary::-webkit-details-marker { display: none; }
+    #adc-manager .adc-disclosure > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    #adc-manager .adc-disclosure > summary > svg { width: 14px; height: 14px; flex: 0 0 14px; }
+    #adc-manager .adc-disclosure[open] > summary { margin-bottom: 12px; }
+    #adc-manager .adc-disclosure[open] > summary > svg { transform: rotate(90deg); }
+    #adc-manager .adc-disclosure > .btn { margin: 8px 6px 0 0 !important; }
+    #adc-manager .adc-constitution-workspace { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 14px; align-items: start; }
+    #adc-manager .adc-document-sidebar { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+    #adc-manager .adc-document-sidebar h4 { margin: 0 0 8px; font-size: 13px; }
+    #adc-manager .adc-document-sidebar input { min-width: 0; box-sizing: border-box; }
+    #adc-manager .adc-document-sidebar > p { color: var(--muted); font-size: 12px; }
+    #adc-manager .adc-document-list { display: flex; flex-direction: column; gap: 4px; max-height: 65dvh; overflow-y: auto; }
+    #adc-manager .adc-document-link { display: flex; align-items: flex-start; gap: 6px; width: 100%; padding: 6px 8px; text-align: left; font: inherit; font-size: 12px; color: var(--text); background: transparent; border: 1px solid transparent; border-radius: 6px; cursor: pointer; }
+    #adc-manager .adc-document-link > svg { flex: 0 0 16px; width: 16px; height: 16px; margin-top: 2px; }
+    #adc-manager .adc-document-link > span { min-width: 0; flex: 1; }
+    #adc-manager .adc-document-link > span > span, #adc-manager .adc-document-link small { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    #adc-manager .adc-document-link small { margin-top: 2px; color: var(--muted); font-size: 10px; }
+    #adc-manager .adc-document-link:hover { background: var(--panel-elevated); }
+    #adc-manager .adc-document-link[aria-current="page"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+    #adc-manager .adc-document-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+    #adc-manager .adc-constitution-editor { min-width: 0; }
+    #adc-manager .adc-constitution-editor textarea { height: clamp(280px, 48dvh, 560px); min-height: 240px; resize: vertical; font-family: Consolas, monospace; line-height: 1.5; }
+    #adc-manager .adc-constitution-editor > p { margin: 6px 0; font-size: 12px; color: var(--muted); }
+    #adc-manager .adc-amendment-workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 14px; align-items: start; }
+    #adc-manager .adc-amendment-sidebar { min-width: 0; padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
+    #adc-manager .adc-amendment-sidebar select[size] { height: 224px; overflow: auto; }
+    #adc-manager .adc-amendment-editor { min-width: 0; }
+    #adc-manager .adc-amendment-editor > textarea { height: clamp(220px, 30dvh, 400px); resize: vertical; font-family: Consolas, monospace; margin-bottom: 10px; }
+    #adc-manager .adc-commit { margin: 12px 0 0; padding-top: 12px; border-top: 1px solid var(--border); }
+    #adc-manager .adc-disclosure pre:empty { display: none; }
+    #adc-manager .adc-disclosure pre { max-width: 100%; overflow-wrap: anywhere; font-size: 12px; }
+    #adc-manager .adc-disclosure > div > div { min-width: 0; }
+    #adc-manager .adc-disclosure > div > div > .btn { margin: 0 6px 6px 0 !important; }
+    @media (max-width: 760px) {
+      #adc-manager .adc-constitution-workspace, #adc-manager .adc-amendment-workspace { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+      #adc-manager .adc-field-grid { grid-template-columns: minmax(0, 1fr); }
+      #adc-manager .adc-document-list { max-height: 220px; }
+      #adc-manager .adc-amendment-sidebar select[size] { height: 120px; }
+    }
+    #pane-schedule [hidden] { display: none !important; }
+    .schedule-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .schedule-tabs [aria-selected="true"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+    .schedule-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .schedule-workspace-section { margin-bottom: 16px; padding: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+    .schedule-workspace-section > .briefing-section-head { flex-wrap: wrap; align-items: flex-end; }
+    .schedule-workspace-section table { min-width: 720px; }
+    .schedule-filters { flex-wrap: wrap; }
+    .schedule-filters label { margin: 0; min-width: 0; flex: 1 1 160px; }
+    .schedule-filters input, .schedule-filters select { width: 100%; min-width: 0; margin-top: 6px; }
+    .schedule-task-name { width: 40%; max-width: 420px; overflow-wrap: anywhere; }
+    .schedule-task-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; color: var(--muted); font-size: 12px; }
+    .schedule-task-details { margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .schedule-task-details summary, .schedule-advanced > summary, .ai-first-inputs > summary { cursor: pointer; }
+    .schedule-task-details .mono { margin-top: 8px; overflow-wrap: anywhere; white-space: normal; }
+    .schedule-last-run { margin-top: 8px; }
+    .schedule-cadence { white-space: nowrap; }
+    .schedule-advanced { padding-top: 12px; border-top: 1px solid var(--border); }
+    .schedule-advanced > summary { margin-bottom: 12px; color: var(--muted); }
+    .ai-first-inputs { margin-bottom: 16px; }
+    .ai-first-inputs > summary { padding: 12px 0; color: var(--muted); }
+    .extension-nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+    .extension-nav .btn[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); background: var(--panel); }
+    .plugin-intro { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 18px; }
+    .plugin-layout { display: grid; grid-template-columns: minmax(300px, 380px) minmax(0, 1fr); gap: 22px; align-items: start; }
+    .plugin-layout > *, .plugin-settings-panel { min-width: 0; }
+    .plugin-settings-panel { position: sticky; top: 80px; max-height: calc(100vh - 100px); overflow: auto; padding: 22px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); }
+    .plugin-detail-empty { padding: 64px 16px; text-align: center; color: var(--muted); line-height: 1.7; }
+    .plugin-detail-empty h3 { color: var(--text); }
+    .plugin-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; max-height: 62vh; overflow-y: auto; padding: 2px; }
+    .plugin-card.is-selected { border-color: var(--accent); box-shadow: inset 3px 0 var(--accent); }
+    .plugin-card:focus-within { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .plugin-detail-tabs { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0 12px; margin-bottom: 16px; border-bottom: 1px solid var(--border); }
+    .plugin-detail-tabs button { flex-shrink: 0; }
+    .plugin-detail-tabs button[aria-selected="true"] { color: var(--accent); background: var(--accent-soft); border-color: var(--accent); }
+    .plugin-detail-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    #pane-extensions #plugin-detail-monitor-slot .extension-layout { grid-template-columns: minmax(0, 1fr); }
+    #plugin-detail-monitor-slot .extension-layout > section:first-child { display: none; }
+    #plugin-detail-monitor-slot details[data-plugin-section] > summary { display: none; }
+    @media (max-width: 760px) {
+      .plugin-layout { grid-template-columns: minmax(0, 1fr); }
+      .plugin-settings-panel { position: static; max-height: none; padding: 16px; }
+      .plugin-layout:not(.has-detail) .plugin-settings-panel,
+      .plugin-layout.has-detail #extension-plugin-workspace { display: none; }
+    }
+    .plugin-catalog-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; margin-bottom: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+    .plugin-catalog-toolbar label { display: grid; gap: 6px; flex: 1 1 160px; min-width: 0; color: var(--muted); font-size: 12px; }
+    .plugin-catalog-toolbar .plugin-search { flex-basis: 100%; }
+    .plugin-catalog-toolbar input, .plugin-catalog-toolbar select { width: 100%; min-width: 0; }
+    .plugin-results { margin: 0 0 12px; color: var(--muted); font-size: 12px; }
+    .plugin-card { display: flex; flex-direction: column; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); cursor: pointer; }
+    .plugin-card-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: start; gap: 12px; }
+    .plugin-card-head > :first-child { min-width: 0; overflow-wrap: anywhere; }
+    .plugin-card-badges { display: flex; flex-direction: row; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; flex-shrink: 0; max-width: 100%; }
+    .plugin-price-free { color: var(--accent); background: var(--accent-soft); border: 1px solid var(--accent); }
+    .plugin-price-paid { color: var(--warn); background: var(--warn-soft); border: 1px solid var(--warn); }
+    .plugin-price-unknown { color: var(--muted); border: 1px solid var(--border-strong); }
+    .plugin-card h4 { margin: 4px 0 0; font-size: 15px; color: var(--text); }
+    .plugin-category { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
+    .plugin-description { color: var(--muted); font-size: 12px; line-height: 1.6; margin: 12px 0 18px; flex: 1; }
+    .plugin-card-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 10px; border-top: 1px solid var(--border); }
+    .plugin-controls { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; }
+    .plugin-card .pill { white-space: nowrap; }
+    .plugin-save-bar { position: sticky; bottom: 0; z-index: 4; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 14px 16px; margin-top: 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; }
+    .plugin-save-bar p { margin: 0; color: var(--muted); font-size: 12px; }
+    .plugin-core-note { padding: 14px 16px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); font-size: 12px; line-height: 1.7; }
+    .plugin-core-note strong { color: var(--text); }
+    .plugin-action-icon, .action-icon { width: 16px; height: 16px; flex: 0 0 16px; vertical-align: middle; margin-right: 6px; }
+    .plugin-card-actions { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
+    .plugin-detail-head { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 16px; margin: 16px 0; }
+    .plugin-detail-head > div { min-width: 0; }
+    #plugin-detail-state { white-space: normal; }
+    .plugin-detail-head h3 { margin: 0 0 8px; font-size: 20px; }
+    .plugin-detail-head p { margin: 0; color: var(--muted); line-height: 1.6; }
+    .plugin-detail-form { max-width: 860px; padding: 16px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+    .plugin-detail-form .form-group { margin-bottom: 18px; }
+    .plugin-detail-form input:not([type="checkbox"]), .plugin-detail-form select, .plugin-detail-form textarea { width: 100%; }
+    .plugin-detail-form textarea { min-height: 170px; font-family: Consolas, monospace; }
+    #plugin-settings-status { margin: 0 0 12px; color: var(--muted); }
+    .plugin-detail-form .btn:disabled { background: var(--panel-2); color: var(--muted); border-color: var(--border-strong); opacity: 1; filter: none; }
+    .plugin-detail-note { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 12px 0; }
+    .plugin-detail-diagnostics { max-width: 860px; margin-top: 16px; }
+    .plugin-detail-diagnostics pre { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); background: var(--panel); padding: 16px; border: 1px solid var(--border); border-radius: 8px; }
+    #pane-extensions [hidden] { display: none !important; }
+    #pane-extensions .extension-layout { grid-template-columns: minmax(230px, 280px) minmax(0, 1fr); gap: 20px; }
+    #extension-monitor-workspace > .section-header { margin-top: 4px; }
+    #extension-monitor-workspace .briefing-toolbar { flex-wrap: wrap; }
+    @media (max-width: 980px) {
+      #pane-extensions .extension-layout { grid-template-columns: 1fr; }
+      .plugin-intro { flex-direction: column; }
+    }
     .extension-layout {
       display: grid;
       grid-template-columns: minmax(280px, 380px) minmax(0, 1fr);
@@ -2812,11 +2959,13 @@
     .user-dropdown {
       display: none; position: absolute; right: 0; top: calc(100% + 6px);
       background: var(--panel-elevated); border: 1px solid var(--border);
-      border-radius: 10px; min-width: 160px;
+      border-radius: 10px; min-width: 220px; max-width: calc(100vw - 24px);
       box-shadow: 0 8px 24px rgba(0,0,0,.4);
       z-index: 50; overflow: hidden;
     }
     .user-dropdown.open { display: block; }
+    .user-dropdown [hidden] { display: none !important; }
+    .user-dropdown-group-label { padding: 8px 14px 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
     .user-dropdown-header {
       padding: 10px 14px 8px;
       border-bottom: 1px solid var(--border);
@@ -2824,12 +2973,14 @@
     }
     .user-dropdown-header strong { display: block; color: var(--text); font-size: 13px; }
     .user-dropdown-item {
-      display: block; width: 100%; text-align: left;
+      display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
       padding: 9px 14px; background: transparent;
       border: none; color: var(--text); cursor: pointer;
       font-size: 13px; transition: background .12s;
     }
     .user-dropdown-item:hover { background: rgba(255,255,255,.05); }
+    .user-dropdown-item.active { color: var(--accent); background: var(--accent-soft); }
+    .user-dropdown-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
     .user-dropdown-item.danger { color: var(--danger); }
     .user-dropdown-divider { height: 1px; background: var(--border); margin: 2px 0; }
     @media (max-width: 640px) {
@@ -2848,7 +2999,7 @@
       .topbar .user-badge { flex: 0 0 auto; }
     }
   </style>
-  <link rel="stylesheet" href="/navigation.css" />
+  <link rel="stylesheet" href="/navigation.css?v=1.30.131-user-menu.1" />
 </head>
 <body>
 
@@ -2894,29 +3045,34 @@
       <span class="logo-text">CONTEXT GRAPH AGENT</span>
     </a>
     <span id="app-version" style="font-size:11px;color:var(--muted);padding-left:6px;align-self:center">v…</span>
+    <button class="btn btn-sm" id="update-notice" onclick="showUpdateDetails()" hidden aria-label="Review available CGA update"></button>
     <div class="topbar-spacer" style="flex:1"></div>
     <div class="topbar-nav">
       <button class="tab-btn" id="tab-briefing-btn" style="display:none" onclick="switchTab('briefing',this)">Dashboard</button>
-      <button class="tab-btn" id="tab-adc-btn" style="display:none" onclick="switchTab('adc',this)">ADC</button>
       <button class="tab-btn active" id="tab-projects-btn" onclick="switchTab('projects',this)">Project</button>
-      <button class="tab-btn" id="tab-schedule-btn" style="display:none" onclick="switchTab('schedule',this)">Automation</button>
-      <button class="tab-btn" id="tab-extensions-btn" style="display:none" onclick="switchTab('extensions',this)">Extension</button>
-      <button class="tab-btn" id="tab-users-btn" onclick="switchTab('users',this)">User</button>
-      <button class="tab-btn" id="tab-audit-btn" onclick="switchTab('audit',this)">Audit</button>
       <button class="tab-btn" id="tab-viewer-btn" style="display:none" onclick="switchTab('viewer',this)">Graph</button>
-      <button class="tab-btn" id="tab-settings-btn" style="display:none" onclick="switchTab('settings',this)">Settings</button>
+      <button class="tab-btn" id="tab-schedule-btn" style="display:none" onclick="switchTab('schedule',this)">Automation</button>
+      <button class="tab-btn" id="tab-adc-btn" style="display:none" onclick="switchTab('adc',this)">ADC</button>
+      <button class="tab-btn" id="tab-audit-btn" onclick="switchTab('audit',this)">Audit</button>
     </div>
     <div class="user-badge">
-      <div class="user-menu-wrap" id="user-menu-wrap">
-        <button class="user-menu-btn" id="user-menu-btn" onclick="toggleUserMenu()" aria-label="Open user menu" title="User menu">
+      <div class="user-menu-wrap" id="user-menu-wrap" onkeydown="if(event.key==='Escape') closeUserMenu(true)">
+        <button class="user-menu-btn" id="user-menu-btn" onclick="toggleUserMenu()" aria-label="Open user menu" aria-controls="user-dropdown" aria-expanded="false" title="User menu">
           <span id="topbar-user"></span>
           <span id="topbar-role" class="role-tag"></span>
           <span class="chevron">&#9660;</span>
         </button>
         <div class="user-dropdown" id="user-dropdown">
-          <button class="user-dropdown-item" onclick="openProfile(); closeUserMenu()">&#9998; Profile</button>
+          <button class="user-dropdown-item" onclick="openProfile(); closeUserMenu()">Profile</button>
+          <div id="user-admin-menu" role="group" aria-labelledby="user-admin-menu-label" hidden>
+            <div class="user-dropdown-divider"></div>
+            <div class="user-dropdown-group-label" id="user-admin-menu-label">Administration</div>
+            <button class="user-dropdown-item" id="tab-users-btn" data-admin-tab="users" onclick="switchTab('users',this); closeUserMenu(true)">Users and access</button>
+            <button class="user-dropdown-item" id="tab-extensions-btn" style="display:none" data-admin-tab="extensions" onclick="switchTab('extensions',this); closeUserMenu(true)">Plugin management</button>
+            <button class="user-dropdown-item" id="tab-settings-btn" style="display:none" data-admin-tab="settings" onclick="switchTab('settings',this); closeUserMenu(true)">System settings</button>
+          </div>
           <div class="user-dropdown-divider"></div>
-          <button class="user-dropdown-item danger" onclick="logout()">&#10148; Sign out</button>
+          <button class="user-dropdown-item danger" onclick="logout()">Sign out</button>
         </div>
       </div>
     </div>
@@ -2985,14 +3141,83 @@
     <!-- EXTENSIONS (admin only) -->
     <div class="pane" id="pane-extensions">
       <div class="section-header">
-        <h2>Extension</h2>
+        <div><h2>Plugins</h2><p class="settings-hint">Choose your capabilities. Configure only what you use.</p></div>
         <div class="briefing-toolbar">
           <button class="btn btn-sm" onclick="loadExtensions()">Refresh</button>
-          <button class="btn btn-primary btn-sm" onclick="runSelectedExtension(this)">Run Now</button>
-          <button class="btn btn-sm btn-accent" onclick="scheduleSelectedExtension()">Schedule Scan</button>
         </div>
       </div>
 
+      <div id="plugin-layout" class="plugin-layout">
+      <section id="extension-plugin-workspace" aria-label="Plugin catalog">
+        <div class="plugin-intro">
+          <span id="plugin-count" class="pill pill-gray">Loading plugins</span>
+        </div>
+        <div class="plugin-catalog-toolbar" role="search" aria-label="Find plugins">
+          <label class="plugin-search" for="plugin-search">Search plugins
+            <input id="plugin-search" type="search" placeholder="Name, ID, description or category" oninput="applyPluginCatalogView()" />
+          </label>
+          <label for="plugin-category-filter">Category
+            <select id="plugin-category-filter" onchange="applyPluginCatalogView()"><option value="">All categories</option></select>
+          </label>
+          <label for="plugin-state-filter">Status
+            <select id="plugin-state-filter" onchange="applyPluginCatalogView()">
+              <option value="">All statuses</option>
+              <option value="enabled">Enabled</option>
+              <option value="disabled">Installed, disabled</option>
+              <option value="installed">Installed</option>
+              <option value="not-installed">Not installed</option>
+              <option value="not-bundled">Not bundled</option>
+            </select>
+          </label>
+          <label for="plugin-sort">Sort by
+            <select id="plugin-sort" onchange="applyPluginCatalogView()">
+              <option value="name">Name: A-Z</option>
+              <option value="name-desc">Name: Z-A</option>
+              <option value="category">Category, then name</option>
+              <option value="status">Status, then name</option>
+            </select>
+          </label>
+          <button type="button" class="btn btn-sm" data-plugin-icon="reset" onclick="resetPluginCatalogView()">Reset filters</button>
+        </div>
+        <p id="plugin-results" class="plugin-results" role="status" aria-live="polite"></p>
+        <div class="plugin-grid" id="plugin-catalog"></div>
+        <div id="plugin-no-results" class="empty-state" hidden>No plugins match your filters. Try another search or reset the filters.</div>
+        <div class="plugin-save-bar">
+          <p id="plugin-selection-status" role="status" aria-live="polite">No unsaved changes</p>
+          <button id="plugin-save-btn" class="btn btn-primary btn-sm" onclick="savePluginSelection(this)" disabled>Save changes</button>
+        </div>
+        <div class="plugin-core-note"><strong>Always included:</strong> ADC governance, system Audit, graph, identity and the core scheduler.<br>Uninstalling retains settings and history. Starting background evaluation after initial activation requires an API restart.</div>
+      </section>
+
+      <aside class="plugin-settings-panel" aria-label="Plugin settings">
+      <div id="plugin-detail-empty" class="plugin-detail-empty"><h3>Select a plugin</h3><p>Choose an installed plugin on the left to view its settings.<br>Your plugin list and filters stay in place.</p></div>
+      <section id="plugin-detail-workspace" hidden aria-labelledby="plugin-detail-title">
+        <button class="btn btn-sm" data-plugin-icon="back" onclick="closePluginDetails()">Close settings</button>
+        <div class="plugin-detail-head">
+          <div><h3 id="plugin-detail-title"></h3><p id="plugin-detail-description"></p></div>
+          <span id="plugin-detail-state" class="pill pill-gray"></span>
+        </div>
+        <p id="plugin-detail-scope" class="plugin-detail-note"></p>
+        <div id="plugin-detail-tabs" class="plugin-detail-tabs" role="tablist" aria-label="Plugin settings sections"></div>
+        <div id="plugin-detail-content"></div>
+        <div id="plugin-detail-monitor-slot"></div>
+        <div id="plugin-diagnostics-panel" class="plugin-detail-diagnostics" hidden>
+          <button class="btn btn-sm" data-plugin-icon="inspect" onclick="inspectPluginDetails(this)">Check configuration</button>
+          <p class="plugin-detail-note">Checks saved configuration and runtime status only. No external request, scan or notification is sent.</p>
+          <pre id="plugin-detail-diagnostics" role="status" hidden></pre>
+        </div>
+      </section>
+      </aside>
+      </div>
+
+      <div id="extension-monitor-workspace" hidden>
+      <div class="section-header">
+        <div><h3>Policy monitor</h3><p class="settings-hint">Configure collection, review findings and manage scan history.</p></div>
+        <div class="briefing-toolbar">
+          <button class="btn btn-sm" data-monitor-action onclick="scheduleSelectedExtension()">Schedule scan</button>
+          <button class="btn btn-primary btn-sm" data-monitor-action onclick="runSelectedExtension(this)">Run now</button>
+        </div>
+      </div>
       <div class="schedule-summary-grid">
         <div class="schedule-summary-cell"><span>Extension</span><strong id="extension-summary-name">—</strong></div>
         <div class="schedule-summary-cell"><span>Monitor Scope</span><strong id="extension-summary-project">Platform</strong></div>
@@ -3074,7 +3299,7 @@
               </div>
             </details>
 
-            <details class="extension-config-block" open>
+            <details class="extension-config-block">
               <summary>Azure Collection</summary>
               <div class="extension-form-grid">
                 <div class="form-group">
@@ -3309,6 +3534,7 @@
           </table>
         </div>
       </section>
+      </div>
     </div>
 
     <!-- SCHEDULE (admin only) -->
@@ -3317,7 +3543,7 @@
         <h2>Automation</h2>
         <div class="briefing-toolbar">
           <button class="btn btn-sm" onclick="loadSchedules()">Refresh</button>
-          <button class="btn btn-primary btn-sm" onclick="openScheduleEditor()">+ New Task</button>
+          <button class="btn btn-primary btn-sm" onclick="openScheduleEditor()">New Task</button>
         </div>
       </div>
 
@@ -3328,158 +3554,13 @@
         <div class="schedule-summary-cell"><span>Last Status</span><strong id="schedule-last-status">—</strong></div>
       </div>
 
-      <section class="briefing-section">
-        <div class="briefing-section-head">
-          <div>
-            <span class="briefing-kicker">Policy Profile</span>
-            <h3 id="ai-first-policy-title">Project policy</h3>
-          </div>
-          <button class="btn btn-sm btn-ghost" onclick="loadAiFirstPolicyProfiles()">Refresh</button>
-        </div>
-        <div class="settings-card">
-          <div class="settings-row settings-form-row">
-            <label for="ai-first-policy-profile">Profile</label>
-            <span class="settings-control">
-              <select id="ai-first-policy-profile"></select>
-              <span id="ai-first-policy-summary" class="settings-status">Select a project to load policy.</span>
-            </span>
-          </div>
-          <div class="settings-row settings-form-row">
-            <label for="ai-first-policy-notes">Notes</label>
-            <span class="settings-control">
-              <input id="ai-first-policy-notes" placeholder="Optional policy note" />
-            </span>
-          </div>
-          <div class="settings-actions">
-            <button class="btn btn-primary" onclick="saveAiFirstPolicyProfile()">Save Policy</button>
-          </div>
-        </div>
-      </section>
+      <div class="schedule-tabs" role="tablist" aria-label="Automation views" onkeydown="handleScheduleTabKey(event)">
+        <button type="button" class="btn" id="schedule-tab-tasks" role="tab" data-schedule-tab="tasks" aria-controls="schedule-tasks-panel" aria-selected="true" tabindex="0" onclick="selectScheduleTab('tasks')"><svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 5h18v16H3z M7 2v6 M17 2v6 M3 10h18 M7 14h3 M14 14h3 M7 18h3"></path></svg>Tasks</button>
+        <button type="button" class="btn" id="schedule-tab-history" role="tab" data-schedule-tab="history" aria-controls="schedule-history-panel" aria-selected="false" tabindex="-1" onclick="selectScheduleTab('history')"><svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-7 M3 3v6h6 M12 7v5l3 2"></path></svg>Execution history</button>
+      </div>
 
-      <section class="briefing-section">
-        <div class="briefing-section-head">
-          <div>
-            <span class="briefing-kicker">Signals</span>
-            <h3>PR / CI / Benchmark evidence</h3>
-          </div>
-          <button class="btn btn-sm btn-ghost" onclick="loadAiFirstSignals()">Refresh</button>
-        </div>
-        <div class="schedule-editor-grid">
-          <div class="form-group">
-            <label>Type</label>
-            <select id="ai-first-signal-type">
-              <option value="ci">CI</option>
-              <option value="pr">PR</option>
-              <option value="benchmark">Benchmark</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Status</label>
-            <select id="ai-first-signal-status">
-              <option value="ok">ok</option>
-              <option value="warn">warn</option>
-              <option value="fail">fail</option>
-              <option value="pending">pending</option>
-              <option value="merged">merged</option>
-              <option value="blocked">blocked</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Name</label>
-            <input id="ai-first-signal-name" placeholder="CI run, PR review, HPS benchmark" />
-          </div>
-          <div class="form-group">
-            <label>Value</label>
-            <input id="ai-first-signal-value" placeholder="90.44" />
-          </div>
-          <div class="form-group">
-            <label>Unit</label>
-            <input id="ai-first-signal-unit" placeholder="%, ms, count" />
-          </div>
-          <div class="form-group wide">
-            <label>Source URL</label>
-            <input id="ai-first-signal-source-url" placeholder="https://github.com/.../actions/runs/..." />
-          </div>
-          <div class="form-group wide">
-            <label>GitHub Repo URL</label>
-            <input id="ai-first-github-repo-url" placeholder="https://github.com/nascousa/cga" />
-          </div>
-          <div class="form-group">
-            <label>ADO Org</label>
-            <input id="ai-first-ado-org" placeholder="contoso" />
-          </div>
-          <div class="form-group">
-            <label>ADO Project</label>
-            <input id="ai-first-ado-project" placeholder="Project" />
-          </div>
-          <div class="form-group">
-            <label>ADO Repo</label>
-            <input id="ai-first-ado-repo" placeholder="cga" />
-          </div>
-          <div class="form-group wide">
-            <label>ADO Repo URL</label>
-            <input id="ai-first-ado-repo-url" placeholder="https://dev.azure.com/org/project/_git/repo" />
-          </div>
-        </div>
-        <div class="settings-actions">
-          <button class="btn btn-primary" onclick="recordAiFirstSignal()">Record Signal</button>
-          <button class="btn btn-accent" onclick="importAiFirstGithubSignals()">Import GitHub</button>
-          <button class="btn btn-accent" onclick="importAiFirstAzureDevOpsSignals()">Import ADO</button>
-        </div>
-        <div class="table-wrap" style="margin-top:12px">
-          <table>
-            <thead><tr>
-              <th>Signal</th>
-              <th class="center-col-header">Project</th>
-              <th class="center-col-header">Type</th>
-              <th class="center-col-header">Status</th>
-              <th class="center-col-header">Value</th>
-              <th class="center-col-header">Observed</th>
-            </tr></thead>
-            <tbody id="ai-first-signals-body">
-              <tr><td colspan="6"><div class="empty-state">No signals loaded.</div></td></tr>
-            </tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="briefing-section">
-        <div class="briefing-section-head">
-          <div>
-            <span class="briefing-kicker">Automation</span>
-            <h3>Scheduled tasks</h3>
-          </div>
-          <div class="briefing-toolbar">
-            <select id="schedule-filter-type" onchange="renderSchedules()" title="Filter tasks by type">
-              <option value="">All task types</option>
-              <option value="browseragent_task">BrowserAgent task</option>
-              <option value="agent_activation">Agent activation</option>
-              <option value="http_request">HTTP request</option>
-              <option value="extension_task">Extension task</option>
-            </select>
-            <input id="schedule-filter-search" placeholder="Search schedules" oninput="renderSchedules()" />
-          </div>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead><tr>
-              <th>Task</th>
-              <th class="center-col-header">Project</th>
-              <th class="center-col-header">Task ID</th>
-              <th class="center-col-header">Type</th>
-              <th>Target</th>
-              <th class="center-col-header">Cadence</th>
-              <th class="center-col-header">Next Run</th>
-              <th class="center-col-header">Last Run</th>
-              <th class="center-col-header">Status</th>
-              <th class="actions-col-header">Actions</th>
-            </tr></thead>
-            <tbody id="schedule-body"></tbody>
-          </table>
-        </div>
-      </section>
-
-      <section class="briefing-section" id="schedule-editor" hidden>
+      <div id="schedule-tasks-panel" role="tabpanel" aria-labelledby="schedule-tab-tasks">
+      <section class="schedule-workspace-section" id="schedule-editor" hidden>
         <div class="briefing-section-head">
           <div>
             <span class="briefing-kicker">Task Config</span>
@@ -3489,12 +3570,12 @@
         </div>
         <div class="schedule-editor-grid">
           <div class="form-group">
-            <label>Name</label>
+            <label for="schedule-name">Name</label>
             <input id="schedule-name" placeholder="Nightly BrowserAgent smoke" />
           </div>
           <div class="form-group">
-            <label>Task Type</label>
-            <select id="schedule-task-type" onchange="applyScheduleTypeDefaults()">
+            <label for="schedule-task-type">Task Type</label>
+            <select id="schedule-task-type" onchange="applyScheduleTypeDefaults(true)">
               <option value="browseragent_task">BrowserAgent task</option>
               <option value="agent_activation">Agent activation</option>
               <option value="http_request">HTTP request</option>
@@ -3502,40 +3583,32 @@
             </select>
           </div>
           <div class="form-group">
-            <label>Project</label>
+            <label for="schedule-project-id">Project</label>
             <select id="schedule-project-id"></select>
           </div>
           <div class="form-group">
-            <label>Agent ID</label>
-            <input id="schedule-agent-id" placeholder="cga-relay-a or browseragent-local" />
-          </div>
-          <div class="form-group">
-            <label>Runner URL</label>
+            <label for="schedule-target-url">Runner URL</label>
             <input id="schedule-target-url" placeholder="http://localhost:9876/command/batch" />
           </div>
           <div class="form-group">
-            <label>Every N Minutes</label>
+            <label for="schedule-cadence">Every N Minutes</label>
             <input id="schedule-cadence" type="number" min="1" max="43200" value="60" />
           </div>
           <div class="form-group">
-            <label>Timeout Seconds</label>
-            <input id="schedule-timeout" type="number" min="1" max="600" value="30" />
-          </div>
-          <div class="form-group">
-            <label>Enabled</label>
+            <label for="schedule-enabled">Enabled</label>
             <select id="schedule-enabled">
               <option value="true">Enabled</option>
               <option value="false">Disabled</option>
             </select>
           </div>
           <div class="form-group wide">
-            <label>Description</label>
+            <label for="schedule-description">Description</label>
             <input id="schedule-description" placeholder="Optional notes for admins" />
           </div>
           <div class="form-group wide" id="schedule-browser-task-panel">
             <div class="schedule-browser-panel">
               <div class="schedule-browser-head">
-                <label>Browser Test</label>
+                <label for="schedule-browser-template">Browser Test</label>
                 <select id="schedule-browser-template" onchange="applyBrowserTaskTemplate(this.value)">
                   <option value="page_smoke">Page smoke</option>
                   <option value="screenshot">Screenshot capture</option>
@@ -3544,15 +3617,15 @@
               </div>
               <div class="schedule-browser-grid">
                 <div class="form-group wide">
-                  <label>Page URL</label>
+                  <label for="schedule-browser-url">Page URL</label>
                   <input id="schedule-browser-url" placeholder="http://localhost:18001/admin/schedule" oninput="syncBrowserTaskPayload()" />
                 </div>
                 <div class="form-group wide">
-                  <label>Goal</label>
+                  <label for="schedule-browser-goal">Goal</label>
                   <textarea id="schedule-browser-goal" spellcheck="false" oninput="syncBrowserTaskPayload()"></textarea>
                 </div>
                 <div class="form-group wide">
-                  <label>Text Assertions</label>
+                  <label for="schedule-browser-assertions">Text Assertions</label>
                   <textarea id="schedule-browser-assertions" spellcheck="false" oninput="syncBrowserTaskPayload()"></textarea>
                 </div>
                 <div class="form-group wide">
@@ -3567,10 +3640,23 @@
               </div>
             </div>
           </div>
-          <div class="form-group wide">
-            <label>JSON Payload</label>
-            <textarea id="schedule-payload" spellcheck="false">{"action":"ping","params":{}}</textarea>
-          </div>
+          <details class="schedule-advanced form-group wide" id="schedule-advanced">
+            <summary>Advanced: agent, timeout and JSON payload</summary>
+            <div class="schedule-editor-grid">
+              <div class="form-group">
+                <label for="schedule-agent-id">Agent ID</label>
+                <input id="schedule-agent-id" placeholder="cga-relay-a or browseragent-local" />
+              </div>
+              <div class="form-group">
+                <label for="schedule-timeout">Timeout Seconds</label>
+                <input id="schedule-timeout" type="number" min="1" max="600" value="30" />
+              </div>
+              <div class="form-group wide">
+                <label for="schedule-payload">JSON Payload</label>
+                <textarea id="schedule-payload" spellcheck="false">{"action":"ping","params":{}}</textarea>
+              </div>
+            </div>
+          </details>
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:4px">
           <button type="button" class="btn btn-ghost" onclick="closeScheduleEditor()">Cancel</button>
@@ -3578,7 +3664,40 @@
         </div>
       </section>
 
-      <section class="briefing-section">
+      <section class="schedule-workspace-section" aria-labelledby="schedule-list-title">
+        <div class="briefing-section-head">
+          <h3 id="schedule-list-title">Scheduled tasks</h3>
+          <div class="briefing-toolbar schedule-filters">
+            <label>Task type
+              <select id="schedule-filter-type" onchange="renderSchedules()">
+                <option value="">All task types</option>
+                <option value="browseragent_task">BrowserAgent task</option>
+                <option value="agent_activation">Agent activation</option>
+                <option value="http_request">HTTP request</option>
+                <option value="extension_task">Extension task</option>
+              </select>
+            </label>
+            <label>Search
+              <input id="schedule-filter-search" type="search" placeholder="Name, project, task ID..." oninput="renderSchedules()" />
+            </label>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>Task</th>
+              <th class="center-col-header">Schedule</th>
+              <th class="center-col-header">Next Run</th>
+              <th class="center-col-header">Last Execution</th>
+              <th class="actions-col-header">Actions</th>
+            </tr></thead>
+            <tbody id="schedule-body"></tbody>
+          </table>
+        </div>
+      </section>
+      </div>
+
+      <section class="schedule-workspace-section" id="schedule-history-panel" role="tabpanel" aria-labelledby="schedule-tab-history" hidden>
         <div class="briefing-section-head">
           <div>
             <span class="briefing-kicker">Runs</span>
@@ -3656,7 +3775,6 @@
       <div class="section-header"><h2>Audit</h2></div>
       <nav class="audit-subnav" id="audit-subnav" aria-label="Audit sections">
         <button class="subtab-btn active" data-audit-tab="audit" aria-pressed="true" onclick="switchTab('audit')">Request log</button>
-        <button class="subtab-btn" data-audit-tab="ai-first" aria-pressed="false" onclick="switchTab('ai-first')">AI-First</button>
         <button class="subtab-btn" data-audit-tab="report" aria-pressed="false" onclick="switchTab('report')">Report</button>
       </nav>
       <div id="audit-events">
@@ -3706,9 +3824,7 @@
             onkeydown="if (event.key === 'Enter') { event.preventDefault(); loadWorkBriefing(); }"
           />
           <datalist id="briefing-project-options"></datalist>
-          <select id="briefing-limit" onchange="loadWorkBriefing()">
-            <option value="25" selected>25 per load</option>
-          </select>
+          <input id="briefing-limit" type="number" min="1" max="25" value="25" aria-label="Initial activities to load" title="Initial activities to load (1-25)" style="width:100px" onchange="loadWorkBriefing()" />
           <button class="btn btn-accent btn-sm" onclick="refreshWorkBriefing()">Refresh</button>
         </div>
       </div>
@@ -3881,6 +3997,124 @@
         </div>
       </section>
 
+      <details class="ai-first-inputs">
+        <summary>Project policy and evidence inputs</summary>
+      <section class="briefing-section">
+        <div class="briefing-section-head">
+          <div>
+            <span class="briefing-kicker">Policy Profile</span>
+            <h3 id="ai-first-policy-title">Project policy</h3>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="loadAiFirstPolicyProfiles()">Refresh</button>
+        </div>
+        <div class="settings-card">
+          <div class="settings-row settings-form-row">
+            <label for="ai-first-policy-profile">Profile</label>
+            <span class="settings-control">
+              <select id="ai-first-policy-profile"></select>
+              <span id="ai-first-policy-summary" class="settings-status">Select a project to load policy.</span>
+            </span>
+          </div>
+          <div class="settings-row settings-form-row">
+            <label for="ai-first-policy-notes">Notes</label>
+            <span class="settings-control">
+              <input id="ai-first-policy-notes" placeholder="Optional policy note" />
+            </span>
+          </div>
+          <div class="settings-actions">
+            <button class="btn btn-primary" onclick="saveAiFirstPolicyProfile()">Save Policy</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="briefing-section">
+        <div class="briefing-section-head">
+          <div>
+            <span class="briefing-kicker">Signals</span>
+            <h3>PR / CI / Benchmark evidence</h3>
+          </div>
+          <button class="btn btn-sm btn-ghost" onclick="loadAiFirstSignals()">Refresh</button>
+        </div>
+        <div class="schedule-editor-grid">
+          <div class="form-group">
+            <label>Type</label>
+            <select id="ai-first-signal-type">
+              <option value="ci">CI</option>
+              <option value="pr">PR</option>
+              <option value="benchmark">Benchmark</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Status</label>
+            <select id="ai-first-signal-status">
+              <option value="ok">ok</option>
+              <option value="warn">warn</option>
+              <option value="fail">fail</option>
+              <option value="pending">pending</option>
+              <option value="merged">merged</option>
+              <option value="blocked">blocked</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Name</label>
+            <input id="ai-first-signal-name" placeholder="CI run, PR review, HPS benchmark" />
+          </div>
+          <div class="form-group">
+            <label>Value</label>
+            <input id="ai-first-signal-value" placeholder="90.44" />
+          </div>
+          <div class="form-group">
+            <label>Unit</label>
+            <input id="ai-first-signal-unit" placeholder="%, ms, count" />
+          </div>
+          <div class="form-group wide">
+            <label>Source URL</label>
+            <input id="ai-first-signal-source-url" placeholder="https://github.com/.../actions/runs/..." />
+          </div>
+          <div class="form-group wide">
+            <label>GitHub Repo URL</label>
+            <input id="ai-first-github-repo-url" placeholder="https://github.com/nascousa/cga" />
+          </div>
+          <div class="form-group">
+            <label>ADO Org</label>
+            <input id="ai-first-ado-org" placeholder="contoso" />
+          </div>
+          <div class="form-group">
+            <label>ADO Project</label>
+            <input id="ai-first-ado-project" placeholder="Project" />
+          </div>
+          <div class="form-group">
+            <label>ADO Repo</label>
+            <input id="ai-first-ado-repo" placeholder="cga" />
+          </div>
+          <div class="form-group wide">
+            <label>ADO Repo URL</label>
+            <input id="ai-first-ado-repo-url" placeholder="https://dev.azure.com/org/project/_git/repo" />
+          </div>
+        </div>
+        <div class="settings-actions">
+          <button class="btn btn-primary" onclick="recordAiFirstSignal()">Record Signal</button>
+          <button class="btn btn-accent" onclick="importAiFirstGithubSignals()">Import GitHub</button>
+          <button class="btn btn-accent" onclick="importAiFirstAzureDevOpsSignals()">Import ADO</button>
+        </div>
+        <div class="table-wrap" style="margin-top:12px">
+          <table>
+            <thead><tr>
+              <th>Signal</th>
+              <th class="center-col-header">Project</th>
+              <th class="center-col-header">Type</th>
+              <th class="center-col-header">Status</th>
+              <th class="center-col-header">Value</th>
+              <th class="center-col-header">Observed</th>
+            </tr></thead>
+            <tbody id="ai-first-signals-body">
+              <tr><td colspan="6"><div class="empty-state">No signals loaded.</div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+      </details>
+
       <section class="briefing-section">
         <div class="briefing-section-head">
           <div>
@@ -3920,6 +4154,57 @@
 
     <!-- REPORT (admin only) -->
     <div class="pane" id="pane-report">
+      <div id="report-workspace" aria-busy="false">
+        <div class="report-heading">
+          <div><h2>Report</h2><p>Work activity, AI-First readiness and evidence in one filtered workspace.</p></div>
+          <div class="report-actions">
+            <select aria-label="Report theme" onchange="ReportWorkspace.theme(this.value)"><option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option></select>
+            <button class="btn btn-primary" id="report-generate" onclick="ReportWorkspace.generate()">Generate report</button>
+            <button class="btn" data-report-export onclick="ReportWorkspace.exportReport('pdf')" disabled>Download PDF</button>
+            <button class="btn" data-report-export onclick="ReportWorkspace.exportReport('csv')" disabled>CSV</button>
+            <button class="btn" data-report-export onclick="ReportWorkspace.exportReport('json')" disabled>JSON</button>
+            <button class="btn" data-report-export onclick="ReportWorkspace.exportReport('mmd')" disabled>Mermaid</button>
+          </div>
+        </div>
+        <form class="report-filters" onsubmit="event.preventDefault();ReportWorkspace.generate()" onchange="ReportWorkspace.buttons()" oninput="ReportWorkspace.buttons()">
+          <label class="report-project-filter">Projects <select id="report-projects" multiple aria-label="Report projects"></select><small>No selection = all projects; Ctrl/Cmd selects multiple.</small></label>
+          <label>Period <select id="report-period" onchange="ReportWorkspace.range()"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="custom">Custom range</option></select></label>
+          <label>From (UTC, inclusive) <input type="date" id="report-start" required onchange="document.getElementById('report-period').value='custom'"></label>
+          <label>Through (UTC, inclusive) <input type="date" id="report-end" required onchange="document.getElementById('report-period').value='custom'"></label>
+          <label>Event type <input id="report-type" list="report-type-options" placeholder="All types"><datalist id="report-type-options"></datalist></label>
+          <label>Status <input id="report-state" list="report-state-options" placeholder="All statuses"><datalist id="report-state-options"></datalist></label>
+          <label>Title or summary <input id="report-search" type="search" maxlength="200" placeholder="Search recorded activity"></label>
+          <div class="report-sections" role="group" aria-label="Report sections">
+            <strong>Include</strong>
+            <label><input type="checkbox" data-report-section value="activity" checked>Activity analysis</label>
+            <label><input type="checkbox" data-report-section value="readiness" checked>AI-First readiness</label>
+            <label><input type="checkbox" data-report-section value="evidence" checked>Evidence records</label>
+            <span class="report-note">Readiness is current; date/type/status/text filters apply to activity only.</span>
+          </div>
+        </form>
+        <p id="report-status" class="report-note" role="status" aria-live="polite">Choose filters and generate a report.</p>
+        <div id="report-results" hidden>
+          <p id="report-coverage" class="report-warning"></p>
+          <div id="report-kpis" class="report-kpis"></div>
+          <div id="report-activity" class="report-grid">
+            <section class="report-card report-wide"><h3>Activity over time</h3><p class="report-note">Daily UTC counts. Drag the zoom slider to inspect a smaller interval.</p><div id="report-trend" class="report-chart" role="img" aria-label="Recorded activity by UTC day"></div></section>
+            <section class="report-card"><h3>Projects</h3><p class="report-note">Top 12. Click a bar to set the project filter, then Generate.</p><div id="report-project-chart" class="report-chart" role="img" aria-label="Recorded activity by project"></div></section>
+            <section class="report-card"><h3>Recorded statuses</h3><p class="report-note">Top 12. Click to filter. Status is a source label, not a verified outcome.</p><div id="report-status-chart" class="report-chart" role="img" aria-label="Recorded activity by status"></div></section>
+          </div>
+          <section id="report-readiness" class="report-card">
+            <h3>AI-First · Current readiness</h3><p class="report-note">Known-score averages only. Unknown evidence is not treated as zero. Expand a project to inspect signals and recommended actions.</p>
+            <div id="report-readiness-chart" class="report-chart" role="img" aria-label="Current AI-First readiness dimensions"></div>
+            <div id="report-readiness-details"></div>
+          </section>
+          <section id="report-evidence" class="report-card" style="margin-top:14px">
+            <h3>Evidence records</h3><p class="report-note">Newest first. Expand a title for its recorded summary and stable activity ID.</p>
+            <div class="report-table-wrap"><table><thead><tr><th>UTC time</th><th>Project</th><th>Type</th><th>Status</th><th>Evidence</th></tr></thead><tbody id="report-evidence-body"></tbody></table></div>
+            <div class="report-pagination"><button id="report-prev" class="btn" onclick="ReportWorkspace.evidencePage(-1)" disabled>Previous</button><span id="report-page-label"></span><button id="report-next" class="btn" onclick="ReportWorkspace.evidencePage(1)" disabled>Next</button></div>
+          </section>
+        </div>
+      </div>
+      <details class="report-tools" id="report-ai-tools" ontoggle="ReportWorkspace.tools('ai',this.open)"><summary>Evidence packs, policy and signal tools</summary></details>
+      <details class="report-tools" id="report-legacy" ontoggle="ReportWorkspace.tools('legacy',this.open)"><summary>Legacy weekly reports, editable drafts and saved history</summary>
       <div class="section-header">
         <h2>Weekly Status Report</h2>
         <div class="briefing-toolbar">
@@ -4016,6 +4301,7 @@
           <span class="wsr-busy-spinner" aria-hidden="true"></span>
           <span id="wsr-busy-text">Generating...</span>
         </div>
+        </details>
       </div>
     </div>
 
@@ -4035,6 +4321,7 @@
           <button class="subtab-btn"        data-subtab="integrations" onclick="switchSettingsSubtab('integrations',this)">Integrations</button>
           <button class="subtab-btn"        data-subtab="delegation"   onclick="switchSettingsSubtab('delegation',this)">Delegation</button>
           <button class="subtab-btn"        data-subtab="security"     onclick="switchSettingsSubtab('security',this)">Security</button>
+          <button class="subtab-btn"        data-subtab="change-logs"  onclick="switchSettingsSubtab('change-logs',this)">Change Logs</button>
           <button class="subtab-btn"        data-subtab="upgrade"      onclick="switchSettingsSubtab('upgrade',this)">Upgrade</button>
           <button class="subtab-btn"        data-subtab="backup"       onclick="switchSettingsSubtab('backup',this)">Backup</button>
           <button class="subtab-btn"        data-subtab="report"       onclick="switchSettingsSubtab('report',this)">Report</button>
@@ -4221,16 +4508,50 @@
 
           <section class="settings-section" id="settings-section-security">
             <h2>Security</h2>
-            <p class="settings-hint">Authentication and access policy. Detailed user management lives on the User tab.</p>
+            <p class="settings-hint">Authentication and access policy. Manage users through User menu &gt; Administration &gt; Users and access.</p>
             <div class="settings-card">
               <div class="settings-row"><label>Authentication</label><span class="settings-value">JWT (local auth DB)</span></div>
-              <div class="settings-row"><label>Admin-only Pages</label><span class="settings-value">Dashboard, User, Audit, Graph, Settings</span></div>
+              <div class="settings-row"><label>Admin-only Pages</label><span class="settings-value">Administration, Dashboard, Automation, ADC, Audit and Graph</span></div>
             </div>
+            <div class="settings-card" style="margin-top:12px">
+              <h3>Audit retention</h3>
+              <p class="settings-hint">Preview before saving. Deletion is off by default. Keep or archive required evidence before enabling; backup-file retention is separate.</p>
+              <p id="retention-status" role="status">Not loaded.</p>
+              <p id="retention-last-run" class="settings-hint"></p>
+              <div class="settings-row"><label for="retention-enabled">Automatic cleanup</label><input id="retention-enabled" type="checkbox" onchange="retentionChanged()" /></div>
+              <div class="settings-row"><label for="retention-polling">Successful known polling requests (days)</label><input id="retention-polling" type="number" min="1" max="3650" value="7" oninput="retentionChanged()" /></div>
+              <div class="settings-row"><label for="retention-request">Other read requests (days)</label><input id="retention-request" type="number" min="1" max="3650" value="90" oninput="retentionChanged()" /></div>
+              <div class="settings-row"><label for="retention-protected">Writes, errors and sensitive events (days)</label><input id="retention-protected" type="number" min="90" max="36500" value="365" oninput="retentionChanged()" /></div>
+              <div class="settings-row"><label for="retention-batch">Rows per cleanup batch (up to five per run)</label><input id="retention-batch" type="number" min="100" max="5000" value="1000" oninput="retentionChanged()" /></div>
+              <p id="retention-preview-result" role="status">Preview is read-only.</p>
+              <div class="settings-actions">
+                <button class="btn btn-outline" onclick="previewAuditRetention()">Preview policy</button>
+                <button class="btn btn-primary" id="retention-save" onclick="saveAuditRetention()" disabled>Save policy</button>
+                <button class="btn btn-outline" id="retention-run" onclick="runAuditRetention()" disabled>Run cleanup</button>
+                <button class="btn btn-outline" onclick="loadAuditRetention()">Refresh capacity</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section" id="settings-section-change-logs">
+            <h2>Change Logs</h2>
+            <p class="settings-hint">Product version history, not request audit. Unreleased source changes are not proof of installation.</p>
+            <div id="change-logs-list" aria-live="polite">Not loaded.</div>
           </section>
 
           <section class="settings-section" id="settings-section-upgrade">
             <h2>Upgrade Center</h2>
             <p class="settings-hint">Review local upgrade readiness, compatibility signals, and the recommended execution path before replacing CGA runtime images.</p>
+            <div class="settings-card">
+              <h3>Online updates</h3>
+              <p id="online-update-status" role="status">Not checked. Updates are never installed without administrator confirmation.</p>
+              <div class="settings-actions">
+                <button class="btn btn-outline" onclick="checkForUpdates(true)">Check for updates</button>
+                <button class="btn btn-primary" id="online-update-review" onclick="showUpdateDetails()" disabled>Review changes</button>
+                <button class="btn btn-outline" onclick="cancelQueuedUpdate()">Cancel queued update</button>
+                <button class="btn btn-outline" onclick="switchSettingsSubtab('change-logs')">Change Logs</button>
+              </div>
+            </div>
 
             <div class="upgrade-hero">
               <div class="upgrade-score">
@@ -4537,10 +4858,23 @@
 
 <div id="toast-area"></div>
 
-<script src="/navigation.js"></script>
-<script src="/adc-versions.js"></script>
-<script src="/adc-collection.js"></script>
-<script src="/adc.js"></script>
+<script src="/navigation.js?v=1.30.131-user-menu.1"></script>
+<script src="/plugins.js?v=1.30.131-user-menu.1"></script>
+<dialog id="update-dialog" style="background:var(--panel);color:var(--text);border:1px solid var(--border);border-radius:12px;padding:20px;width:min(760px,94vw);max-height:90dvh">
+  <h2 id="update-dialog-title">CGA update</h2>
+  <pre id="update-dialog-notes" style="white-space:pre-wrap;overflow-wrap:anywhere;max-height:45dvh;overflow:auto"></pre>
+  <p id="update-dialog-status" role="status"></p>
+  <div class="settings-actions">
+    <button class="btn btn-primary" id="update-confirm" onclick="confirmOnlineUpdate()" disabled>Confirm upgrade</button>
+    <button class="btn btn-outline" onclick="document.getElementById('update-dialog').close()">Close</button>
+  </div>
+</dialog>
+<script src="/maintenance.js?v=1.30.132"></script>
+<link rel="stylesheet" href="/report-workspace.css?v=1.30.132-report.1">
+<script src="/report-workspace.js?v=1.30.132-report.1"></script>
+<script src="/adc-versions.js?v=1.30.132-adc-compact.1"></script>
+<script src="/adc-collection.js?v=1.30.132-adc-compact.1"></script>
+<script src="/adc.js?v=1.30.132-adc-compact.1"></script>
 <script>
 let _jwt = localStorage.getItem('cg_jwt') || '';
 let _me = null;
@@ -4727,6 +5061,7 @@ const SETTINGS_SUBTAB_ROUTES = Object.freeze({
   integrations: '/admin/settings/integrations',
   delegation: '/admin/settings/delegation',
   security: '/admin/settings/security',
+  'change-logs': '/admin/settings/change-logs',
   upgrade: '/admin/settings/upgrade',
   backup: '/admin/settings/backup',
   report: '/admin/settings/report',
@@ -4746,10 +5081,10 @@ const ADMIN_PATH_TABS = Object.freeze({
   '/admin/users': 'users',
   '/admin/user': 'users',
   '/admin/audit': 'audit',
-  '/admin/audit/ai-first': 'ai-first',
+  '/admin/audit/ai-first': 'report',
   '/admin/audit/report': 'report',
-  '/admin/ai-first': 'ai-first',
-  '/admin/aifirst': 'ai-first',
+  '/admin/ai-first': 'report',
+  '/admin/aifirst': 'report',
   '/admin/briefing': 'briefing',
   '/admin/report': 'report',
   '/admin/graph': 'viewer',
@@ -4759,20 +5094,24 @@ const ADMIN_PATH_TABS = Object.freeze({
 
 const AUDIT_TAB_PANELS = Object.freeze({
   audit: 'audit-events',
-  'ai-first': 'pane-ai-first',
   report: 'pane-report',
 });
 
 function enhanceAuditSections() {
   const root = document.getElementById('pane-audit');
   if (root.dataset.auditEnhanced) return;
-  for (const name of ['ai-first', 'report']) {
+  for (const name of ['report']) {
     const panel = document.getElementById(AUDIT_TAB_PANELS[name]);
     panel.classList.remove('pane');
     panel.classList.remove('active');
     panel.hidden = true;
     root.append(panel);
   }
+  const tools = document.getElementById('pane-ai-first');
+  tools.classList.remove('pane');
+  tools.classList.remove('active');
+  document.getElementById('report-ai-tools').append(tools);
+  tools.hidden = false;
   root.dataset.auditEnhanced = 'true';
 }
 
@@ -4815,7 +5154,8 @@ function settingsRouteForSubtab(name) {
 }
 
 function canOpenAdminTab(name) {
-  return name === 'projects' || _me?.role === 'admin';
+  return (name === 'projects' || _me?.role === 'admin')
+    && (typeof pluginAllowsTab !== 'function' || pluginAllowsTab(name));
 }
 
 function setAdminRoute(name, { replace = false } = {}) {
@@ -5389,6 +5729,8 @@ loadAppVersion();
 
 async function initApp() {
   try { _me = await api('GET', '/auth/me'); } catch { logout(); return; }
+  document.getElementById('user-admin-menu').hidden = _me.role !== 'admin';
+  closeUserMenu();
   enhanceSettingsSections();
   enhanceAuditSections();
   destroyLoginBackground();
@@ -5401,6 +5743,11 @@ async function initApp() {
   roleEl.className = 'role-tag' + (_me.role === 'admin' ? '' : ' developer');
   if (_me.role === 'admin') {
     try {
+      await loadPluginSelection();
+    } catch (error) {
+      toast('Plugin catalog unavailable; optional features remain hidden: ' + error.message, 'error');
+    }
+    try {
       const cfg = await api('GET', '/admin/runtime-config');
       _runtimeConfig = cfg;
       if (cfg?.falkordb_url) _falkordbUrl = cfg.falkordb_url;
@@ -5412,7 +5759,9 @@ async function initApp() {
     document.getElementById('tab-schedule-btn').style.display = '';
     document.getElementById('tab-viewer-btn').style.display = '';
     document.getElementById('tab-settings-btn').style.display = '';
+    document.getElementById('tab-users-btn').style.display = '';
     document.getElementById('tab-adc-btn').style.display = '';
+    applyPluginVisibility();
   }
   if (_me.role !== 'admin') {
     document.getElementById('new-project-btn').style.display = 'none';
@@ -5422,6 +5771,7 @@ async function initApp() {
   if (!_runtimeConfig?.indexing) await loadIndexingSummary({ silent: true });
   await loadProjects();
   switchTab(adminTabFromLocation(), null, { replace: true });
+  checkForUpdates();
 }
 
 window.addEventListener('popstate', () => {
@@ -5899,7 +6249,8 @@ async function saveIndexingSettings() {
 }
 
 function switchSettingsSubtab(name, btn, options = {}) {
-  const nextName = SETTINGS_SUBTAB_ROUTES[name] ? name : 'general';
+  const allowed = name !== 'report' || typeof pluginAllowsTab !== 'function' || pluginAllowsTab('report');
+  const nextName = SETTINGS_SUBTAB_ROUTES[name] && allowed ? name : 'general';
   document.querySelectorAll('#pane-settings .settings-section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('#settings-subnav .subtab-btn').forEach(b => b.classList.remove('active'));
   const section = document.getElementById('settings-section-' + nextName);
@@ -5912,6 +6263,9 @@ function switchSettingsSubtab(name, btn, options = {}) {
     setSettingsSubtabRoute(nextName, { replace: Boolean(options.replace) || nextName !== name });
   }
   if (nextName === 'upgrade') loadUpgradeStatus();
+  if (nextName === 'upgrade') checkForUpdates();
+  if (nextName === 'security') loadAuditRetention();
+  if (nextName === 'change-logs') loadChangeLogs();
   if (nextName === 'backup') loadBackups();
   if (nextName === 'delegation') loadMicrosoftAdoStatus();
   if (nextName === 'report') initWsrTemplateEditor();
@@ -6222,6 +6576,10 @@ function expireSession() {
 }
 
 function logout() {
+  if (typeof ReportWorkspace !== 'undefined') ReportWorkspace.reset();
+  stopMaintenancePolling();
+  closeUserMenu();
+  document.getElementById('user-admin-menu').hidden = true;
   clearInterval(_indexStatusPollInterval);
   clearInterval(_auditPollInterval);
   clearInterval(_briefingPollInterval);
@@ -6236,6 +6594,7 @@ function logout() {
   _msAdoPollTimer = null;
   _msAdoPollId = '';
   document.getElementById('graph-viewer-frame')?.removeAttribute('src');
+  disposePluginDetails();
   disposeAdcManager();
   document.getElementById('adc-manager').replaceChildren();
   document.getElementById('tab-adc-btn').style.display = 'none';
@@ -6253,10 +6612,14 @@ function toggleUserMenu() {
   const dd  = document.getElementById('user-dropdown');
   const open = dd.classList.toggle('open');
   btn.classList.toggle('open', open);
+  btn.setAttribute('aria-expanded', String(open));
 }
-function closeUserMenu() {
+function closeUserMenu(focus = false) {
   document.getElementById('user-dropdown').classList.remove('open');
-  document.getElementById('user-menu-btn').classList.remove('open');
+  const button = document.getElementById('user-menu-btn');
+  button.classList.remove('open');
+  button.setAttribute('aria-expanded', 'false');
+  if (focus) button.focus();
 }
 document.addEventListener('click', e => {
   if (!document.getElementById('user-menu-wrap')?.contains(e.target)) closeUserMenu();
@@ -6287,20 +6650,27 @@ async function submitProfile() {
 
 function switchTab(name, btn, options = {}) {
   if (!_jwt || !_me) return;
-  const requestedName = ADMIN_TAB_ROUTES[name] ? name : 'projects';
+  const requestedName = name === 'ai-first' ? 'report' : ADMIN_TAB_ROUTES[name] ? name : 'projects';
   const nextName = canOpenAdminTab(requestedName) ? requestedName : 'projects';
   const auditTab = Object.hasOwn(AUDIT_TAB_PANELS, nextName);
   const pane = document.getElementById('pane-' + (auditTab ? 'audit' : nextName));
   if (!pane) return;
   document.querySelectorAll('.pane').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.tab-btn, [data-admin-tab]').forEach(button => {
+    button.classList.remove('active');
+    button.removeAttribute('aria-current');
+  });
+  document.getElementById('user-menu-btn').classList.toggle('active', ['users', 'extensions', 'settings'].includes(nextName));
   pane.classList.add('active');
   if (auditTab) selectAuditSubtab(nextName);
   document.querySelector('.tab-content')?.classList.toggle('viewer-active', nextName === 'viewer');
   document.getElementById('app')?.classList.toggle('viewer-active', nextName === 'viewer');
   const activeBtn = auditTab ? document.getElementById('tab-audit-btn')
     : nextName === requestedName && btn ? btn : document.getElementById('tab-' + nextName + '-btn');
-  if (activeBtn) activeBtn.classList.add('active');
+  if (activeBtn) {
+    activeBtn.classList.add('active');
+    activeBtn.setAttribute('aria-current', 'page');
+  }
   if (options.updateUrl !== false) {
     setAdminRoute(nextName, { replace: Boolean(options.replace) || nextName !== requestedName });
   }
@@ -6336,12 +6706,7 @@ function switchTab(name, btn, options = {}) {
   }
   if (nextName === 'extensions') loadExtensions({ silent: true });
   if (nextName === 'briefing') {
-    loadWorkBriefing();
-    _briefingPollInterval = setInterval(() => {
-      if (document.getElementById('pane-briefing')?.classList.contains('active')) {
-        loadWorkBriefing({ preserveLimit: true });
-      }
-    }, 5000);
+    loadWorkBriefing({ useDefaults: true });
   }
   if (nextName === 'report') loadWorkReport();
   if (nextName === 'settings') {
@@ -6375,6 +6740,7 @@ let _projectNameById = {};
 let _scheduleTasks = [];
 let _scheduleRuns = [];
 let _scheduleEditingId = null;
+let _scheduleDefaultsRequest = 0;
 let _extensionsCatalog = [];
 let _selectedExtensionId = 'azure_policy_change_monitor';
 let _selectedExtensionProjectId = '';
@@ -7067,15 +7433,18 @@ function renderExtensionSelectors() {
 async function loadExtensions(options = {}) {
   if (_me?.role !== 'admin') return;
   try {
+    await loadPluginSelection();
+    await syncPluginDetailFromLocation();
     const catalog = await api('GET', '/admin/extensions');
     _extensionsCatalog = catalog.items || [];
     renderExtensionSelectors();
     setExtensionSummary(_extensionOverview);
-    if (_selectedExtensionId) {
+    if (_selectedExtensionId && !_pluginMonitorDirty) {
       await loadExtensionProject({ silent: options?.silent });
-    } else {
+    } else if (!_selectedExtensionId) {
       renderExtensionOverview(null);
     }
+    decoratePluginButtons();
   } catch (e) {
     if (!options?.silent) toast(e.message, 'error');
   }
@@ -7337,6 +7706,7 @@ async function saveSelectedExtensionConfig(btn) {
       config: readSelectedExtensionConfig(),
     });
     toast('Extension config saved');
+    _pluginMonitorDirty = false;
     await loadExtensionProject({ silent: true });
   } catch (e) {
     toast(e.message, 'error');
@@ -7372,7 +7742,7 @@ function scheduleSelectedExtension() {
   }
   const definition = selectedExtensionDefinition();
   switchTab('schedule');
-  openScheduleEditor();
+  openScheduleEditor(null, true);
   document.getElementById('schedule-task-type').value = 'extension_task';
   applyScheduleTypeDefaults(true);
   document.getElementById('schedule-name').value = `${definition?.name || 'Extension'} - Platform`;
@@ -7426,12 +7796,15 @@ function defaultBrowserTaskUrl() {
 
 function defaultBrowserTaskSpec(template = 'page_smoke') {
   const base = BROWSER_TASK_TEMPLATES[template] || BROWSER_TASK_TEMPLATES.page_smoke;
+  const defaults = typeof _pluginRuntimeSettings !== 'undefined' ? _pluginRuntimeSettings.browseragent : null;
   return {
     kind: base.kind,
     url: defaultBrowserTaskUrl(),
     goal: base.goal,
     assertions: [...base.assertions],
-    artifacts: { ...base.artifacts },
+    artifacts: template === 'page_smoke' && defaults
+      ? Object.fromEntries(['screenshot', 'console', 'metrics', 'dom_snapshot'].map(key => [key, defaults[key]]))
+      : { ...base.artifacts },
     ai: { provider: 'copilot_cli', summarize: true },
     safety: { destructive_actions: false },
   };
@@ -7521,15 +7894,18 @@ function applyBrowserTaskTemplate(template) {
 }
 
 function defaultSchedulePayload(type) {
-  if (type === 'agent_activation') return { action: 'activate_agent', params: {} };
-  if (type === 'http_request') return { ok: true };
+  const defaults = typeof _pluginRuntimeSettings !== 'undefined' ? _pluginRuntimeSettings.workflows : null;
+  if (type === 'agent_activation') return { action: 'activate_agent', params: {}, ...defaults?.payload };
+  if (type === 'http_request') return defaults ? { ...defaults.payload } : { ok: true };
   if (type === 'extension_task') return { extension_id: _selectedExtensionId || 'azure_policy_change_monitor', config_override: {} };
   return { browser_task: defaultBrowserTaskSpec() };
 }
 
 function defaultScheduleTarget(type) {
-  if (type === 'browseragent_task') return 'http://localhost:9876/command/batch';
-  if (type === 'agent_activation') return 'http://localhost:3002/activate';
+  const defaults = typeof _pluginRuntimeSettings !== 'undefined' ? _pluginRuntimeSettings : {};
+  if (type === 'browseragent_task') return defaults.browseragent?.target_url ?? 'http://localhost:9876/command/batch';
+  if (type === 'agent_activation') return defaults.workflows?.agent_url ?? 'http://localhost:3002/activate';
+  if (type === 'http_request') return defaults.workflows?.http_url ?? '';
   return '';
 }
 
@@ -7547,13 +7923,16 @@ function applyScheduleTypeDefaults(force = false) {
   const targetEl = document.getElementById('schedule-target-url');
   const payloadEl = document.getElementById('schedule-payload');
   const targetDefault = defaultScheduleTarget(type);
-  const knownTargets = ['', 'http://localhost:9876/command', 'http://localhost:9876/command/batch', 'http://localhost:3002/activate'];
   toggleBrowserTaskEditor(type);
-  if (targetEl && (force || !targetEl.value.trim() || knownTargets.includes(targetEl.value.trim()))) {
+  if (targetEl && (force || !targetEl.value.trim())) {
     targetEl.value = targetDefault;
   }
   if (payloadEl && (force || !payloadEl.value.trim())) {
     payloadEl.value = JSON.stringify(defaultSchedulePayload(type), null, 2);
+  }
+  if (force && !_scheduleEditingId && typeof _pluginRuntimeSettings !== 'undefined') {
+    const defaults = _pluginRuntimeSettings[type === 'browseragent_task' ? 'browseragent' : 'workflows'];
+    if (defaults) document.getElementById('schedule-timeout').value = defaults.timeout_seconds;
   }
   if (type === 'browseragent_task') {
     hydrateBrowserTaskEditor(browserTaskSpecFromPayload(readSchedulePayloadLenient()));
@@ -7561,29 +7940,71 @@ function applyScheduleTypeDefaults(force = false) {
   }
 }
 
-function openScheduleEditor(taskId = null) {
+function selectScheduleTab(name, focus = false) {
+  if (!['tasks', 'history'].includes(name)) throw new Error(`Unknown Automation view: ${name}`);
+  document.querySelectorAll('[data-schedule-tab]').forEach(button => {
+    const selected = button.dataset.scheduleTab === name;
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;
+    document.getElementById(button.getAttribute('aria-controls')).hidden = !selected;
+    if (selected && focus) button.focus();
+  });
+}
+
+function handleScheduleTabKey(event) {
+  const button = event.target.closest('[data-schedule-tab]');
+  if (!button || !['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+  event.preventDefault();
+  const name = event.key === 'Home' ? 'tasks' : event.key === 'End' ? 'history'
+    : button.dataset.scheduleTab === 'tasks' ? 'history' : 'tasks';
+  selectScheduleTab(name, true);
+}
+
+function openScheduleEditor(taskId = null, defaultsLoaded = false) {
   _scheduleEditingId = taskId;
   const task = taskId ? _scheduleTasks.find(item => item.id === taskId) : null;
+  const typeSelect = document.getElementById('schedule-task-type');
+  const taskType = task?.task_type || [...typeSelect.options].find(option => !option.disabled)?.value;
+  if (!taskType) {
+    toast('Install and enable a task adapter in Plugins before creating a schedule.', 'error');
+    return;
+  }
+  if (!task && !defaultsLoaded && typeof loadPluginRuntimeDefaults === 'function') {
+    const request = ++_scheduleDefaultsRequest;
+    const owner = taskType === 'browseragent_task' ? 'browseragent'
+      : ['agent_activation', 'http_request'].includes(taskType) ? 'workflows' : '';
+    if (owner) {
+      const owners = ['browseragent', 'workflows'].filter(id => _pluginSelection.enabled.includes(id));
+      Promise.all(owners.map(id => loadPluginRuntimeDefaults(id))).then(() => {
+        if (_jwt && _me && request === _scheduleDefaultsRequest && !_scheduleEditingId) openScheduleEditor(null, true);
+      }).catch(error => toast('Could not load task defaults: ' + error.message, 'error'));
+      return;
+    }
+  }
   renderScheduleProjectOptions(task?.project_id || '');
   document.getElementById('schedule-editor-title').textContent = task ? 'Edit scheduled task' : 'New scheduled task';
   document.getElementById('schedule-name').value = task?.name || '';
   document.getElementById('schedule-description').value = task?.description || '';
-  document.getElementById('schedule-task-type').value = task?.task_type || 'browseragent_task';
+  typeSelect.value = taskType;
   document.getElementById('schedule-agent-id').value = task?.agent_id || '';
   document.getElementById('schedule-target-url').value = task?.target_url || '';
   document.getElementById('schedule-cadence').value = task?.cadence_minutes || 60;
-  document.getElementById('schedule-timeout').value = task?.timeout_seconds || 30;
+  document.getElementById('schedule-timeout').value = task?.timeout_seconds
+    || (typeof _pluginRuntimeSettings !== 'undefined' ? _pluginRuntimeSettings[taskType === 'browseragent_task' ? 'browseragent' : 'workflows']?.timeout_seconds : null) || 30;
   document.getElementById('schedule-enabled').value = String(task ? !!task.enabled : true);
-  document.getElementById('schedule-payload').value = JSON.stringify(task?.payload || defaultSchedulePayload(task?.task_type || 'browseragent_task'), null, 2);
+  document.getElementById('schedule-payload').value = JSON.stringify(task?.payload || defaultSchedulePayload(taskType), null, 2);
   applyScheduleTypeDefaults(!task);
   const editor = document.getElementById('schedule-editor');
   if (editor) {
+    selectScheduleTab('tasks');
     editor.hidden = false;
-    try { editor.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+    editor.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    document.getElementById('schedule-name').focus({ preventScroll: true });
   }
 }
 
 function closeScheduleEditor() {
+  ++_scheduleDefaultsRequest;
   _scheduleEditingId = null;
   const editor = document.getElementById('schedule-editor');
   if (editor) editor.hidden = true;
@@ -7709,9 +8130,11 @@ function renderSchedules() {
     ]
       .join(' ').toLowerCase().includes(query);
   });
+  const expandedTasks = new Set([...tbody.querySelectorAll('details[data-schedule-details][open]')]
+    .map(details => details.dataset.scheduleDetails));
 
   if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">${_scheduleTasks.length ? 'No matching schedules' : 'No scheduled tasks yet'}</div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">${_scheduleTasks.length ? 'No matching schedules' : 'No scheduled tasks yet'}</div></td></tr>`;
   } else {
     tbody.innerHTML = rows.map(task => {
       const status = task.last_run_status || 'never';
@@ -7725,19 +8148,23 @@ function renderSchedules() {
       const toggleLabel = task.enabled ? 'Disable schedule' : 'Enable schedule';
       return `
         <tr>
-          <td>
+          <td class="schedule-task-name">
             <strong>${esc(task.name)}</strong>
             ${task.description ? `<div style="color:var(--muted);font-size:12px;margin-top:2px">${esc(task.description)}</div>` : ''}
-            ${browserTask?.url ? `<div class="mono" style="font-size:11px;margin-top:3px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(browserTask.url)}">${esc(browserTask.url)}</div>` : ''}
+            <div class="schedule-task-meta"><span class="pill pill-blue">${esc(scheduleTypeLabel(task.task_type))}</span><span>${esc(projectText)}</span></div>
+            <details class="schedule-task-details" data-schedule-details="${task.id}"${expandedTasks.has(String(task.id)) ? ' open' : ''}>
+              <summary>Task details</summary>
+              <div class="mono">Task ID: ${renderScheduleTaskIdWithCopy(task.task_id)}</div>
+              <div class="mono">Runner: ${esc(task.target_url || '—')}</div>
+              ${browserTask?.url ? `<div class="mono">Page: ${esc(browserTask.url)}</div>` : ''}
+            </details>
           </td>
-          <td style="text-align:center">${esc(projectText)}</td>
-          <td class="mono" style="text-align:center">${renderScheduleTaskIdWithCopy(task.task_id)}</td>
-          <td style="text-align:center"><span class="pill pill-blue">${esc(scheduleTypeLabel(task.task_type))}</span></td>
-          <td><div class="mono schedule-target-text" title="${esc(task.target_url || '')}">${esc(task.target_url || '—')}</div></td>
-          <td class="mono" style="text-align:center">${esc(String(task.cadence_minutes || 0))} min</td>
+          <td style="text-align:center">
+            <div class="mono schedule-cadence">Every ${esc(String(task.cadence_minutes || 0))} min</div>
+            <div class="schedule-last-run"><span class="pill ${task.enabled ? 'pill-green' : 'pill-gray'}">${task.enabled ? 'Enabled' : 'Disabled'}</span></div>
+          </td>
           <td class="mono" style="text-align:center">${esc(_fmtIso(task.next_run_at))}</td>
-          <td class="mono" style="text-align:center">${esc(_fmtIso(task.last_run_at))}</td>
-          <td style="text-align:center"><span class="pill ${statusCls}">${esc(status)}</span></td>
+          <td style="text-align:center"><span class="pill ${statusCls}">${esc(status)}</span><div class="mono schedule-last-run">${esc(_fmtIso(task.last_run_at))}</div></td>
           <td>
             <div class="project-actions schedule-actions">
               ${scheduleActionButton('run', 'Run schedule now', `runScheduleTask(${task.id},this)`, 'btn-accent')}
@@ -8792,815 +9219,9 @@ async function loadAudit() {
   }
 }
 
-function refreshWorkBriefing() {
-  loadWorkBriefing({ preserveLimit: true });
-}
-
-function loadMoreWorkBriefing() {
-  if (_workBriefingLoading) return;
-  _workBriefingRequestedLimit = Math.min(5000, _workBriefingRequestedLimit + WORK_BRIEFING_BATCH_SIZE);
-  loadWorkBriefing({ append: true });
-}
-
-function renderBriefingChips(counts, emptyLabel) {
-  const entries = Object.entries(counts || {});
-  if (!entries.length) {
-    return `<span class="briefing-subtle">${esc(emptyLabel)}</span>`;
-  }
-  return entries
-    .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0) || String(left[0]).localeCompare(String(right[0])))
-    .map(([label, value]) => `
-      <span class="briefing-chip">
-        <span>${esc(label || 'unknown')}</span>
-        <strong>${esc(String(value || 0))}</strong>
-      </span>
-    `)
-    .join('');
-}
-
-function renderBriefingTags(tags) {
-  if (!Array.isArray(tags) || !tags.length) return '';
-  return `
-    <div class="briefing-tag-list">
-      ${tags.map(tag => `<span class="briefing-tag">${esc(String(tag || ''))}</span>`).join('')}
-    </div>
-  `;
-}
-
-const BRIEFING_EVENT_ICONS = {
-  milestone: '🎯',
-  risk: '⚠️',
-  status_update: '📌',
-  workflow_complete: '✅',
-  documentation: '📚',
-  documentation_update: '📝',
-  decision: '🧩',
-  bug: '🐛',
-  release: '🚀',
-  test: '🧪',
-  deployment: '📦',
-};
-
-function renderBriefingEventIcon(eventType) {
-  const key = String(eventType || '').toLowerCase();
-  const icon = BRIEFING_EVENT_ICONS[key] || '🔹';
-  const label = key || 'event';
-  return `<span class="briefing-event-icon" title="${esc(label)}" aria-label="${esc(label)}">${icon}</span>`;
-}
-
-function _briefingStatusClass(key) {
-  if (key === 'done' || key === 'completed' || key === 'closed') return 'is-done';
-  if (key === 'in_progress' || key === 'in-progress' || key === 'active') return 'is-progress';
-  if (key === 'open' || key === 'new' || key === 'pending') return 'is-open';
-  if (key === 'blocked' || key === 'failed' || key === 'error') return 'is-blocked';
-  return '';
-}
-
-function _normalizeBriefingStatuses(status) {
-  const raw = String(status || '').trim();
-  if (!raw) return [];
-  const parts = raw.split(/[|,;/]+/).map(p => p.trim()).filter(Boolean);
-  const seen = new Set();
-  return parts.filter(p => {
-    const key = p.toLowerCase();
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function renderBriefingStatusDot(status) {
-  const key = String(status || '').toLowerCase();
-  const cls = _briefingStatusClass(key);
-  const label = key || 'no status';
-  return `<span class="briefing-status-dot ${cls}" title="${esc(label)}" aria-label="status ${esc(label)}"></span>`;
-}
-
-function renderBriefingStatusText(status) {
-  const labels = _normalizeBriefingStatuses(status);
-  if (!labels.length) {
-    return `<span class="briefing-status-text" title="no status" aria-label="status no status">No status</span>`;
-  }
-  return labels.map(label => {
-    const key = label.toLowerCase();
-    const pretty = label.replaceAll('_', ' ');
-    const cls = _briefingStatusClass(key);
-    return `<span class="briefing-status-text ${cls}" title="${esc(pretty)}" aria-label="status ${esc(pretty)}">${esc(pretty)}</span>`;
-  }).join('');
-}
-
-function getWorkBriefingActivityCriteria() {
-  return {
-    projectId: document.getElementById('briefing-filter-project')?.value || '',
-    eventType: document.getElementById('briefing-filter-type')?.value || '',
-    status: document.getElementById('briefing-filter-status')?.value || '',
-    query: (document.getElementById('briefing-filter-search')?.value || '').trim().toLowerCase(),
-    range: document.getElementById('briefing-filter-range')?.value || 'all',
-    sort: document.getElementById('briefing-sort-order')?.value || WORK_BRIEFING_DEFAULT_SORT,
-  };
-}
-
-function onWorkBriefingActivityFiltersChanged() {
-  renderWorkBriefing(_workBriefingSummary, { preserveViewport: true });
-}
-
-function clearWorkBriefingActivityFilters() {
-  const projectSelect = document.getElementById('briefing-filter-project');
-  const typeSelect = document.getElementById('briefing-filter-type');
-  const statusSelect = document.getElementById('briefing-filter-status');
-  const searchInput = document.getElementById('briefing-filter-search');
-  const rangeSelect = document.getElementById('briefing-filter-range');
-  const sortSelect = document.getElementById('briefing-sort-order');
-  if (projectSelect) projectSelect.value = '';
-  if (typeSelect) typeSelect.value = '';
-  if (statusSelect) statusSelect.value = '';
-  if (searchInput) searchInput.value = '';
-  if (rangeSelect) rangeSelect.value = 'all';
-  if (sortSelect) sortSelect.value = WORK_BRIEFING_DEFAULT_SORT;
-  renderWorkBriefing(_workBriefingSummary, { preserveViewport: true });
-}
-
-function _workBriefingCountMapValue(map, value) {
-  const key = String(value || '').trim();
-  if (!key) return;
-  map.set(key, (map.get(key) || 0) + 1);
-}
-
-function _workBriefingHumanizeFilterLabel(value) {
-  return String(value || '')
-    .replaceAll('_', ' ')
-    .replaceAll('-', ' ')
-    .replace(/\s+/g, ' ')
-    .trim() || 'Unknown';
-}
-
-function _workBriefingProjectFilterLabel(projectId) {
-  const id = String(projectId || '').trim();
-  const name = _projectNameById[id] || '';
-  return name ? `${id} - ${name}` : id;
-}
-
-function _workBriefingSortedCountEntries(counts) {
-  return [...counts.entries()]
-    .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0) || WORK_BRIEFING_COLLATOR.compare(String(left[0]), String(right[0])));
-}
-
-function _workBriefingRenderSelectOptions(selectId, allLabel, entries, selectedValue, labelFn) {
-  const select = document.getElementById(selectId);
-  if (!select) return;
-  const selected = String(selectedValue || '');
-  const items = entries.map(([value, count]) => [String(value), Number(count || 0)]);
-  if (selected && !items.some(([value]) => value === selected)) {
-    items.unshift([selected, 0]);
-  }
-  select.innerHTML = `<option value="">${esc(allLabel)}</option>` + items.map(([value, count]) => {
-    const baseLabel = labelFn ? labelFn(value) : _workBriefingHumanizeFilterLabel(value);
-    const countLabel = count ? ` (${count})` : '';
-    return `<option value="${esc(value)}">${esc(baseLabel + countLabel)}</option>`;
-  }).join('');
-  select.value = selected;
-}
-
-function _workBriefingActivityTimestamp(activity) {
-  const parsed = Date.parse(activity?.occurred_at || activity?.synced_at || '');
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function _workBriefingActivityStatusKeys(activity) {
-  const statuses = _normalizeBriefingStatuses(activity?.status).map(status => status.toLowerCase());
-  return statuses.length ? statuses : ['no status'];
-}
-
-function _workBriefingActivityMatches(activity, criteria, nowMs) {
-  if (criteria.projectId && String(activity?.project_id || '') !== criteria.projectId) return false;
-  if (criteria.eventType && String(activity?.event_type || '') !== criteria.eventType) return false;
-  if (criteria.status && !_workBriefingActivityStatusKeys(activity).includes(criteria.status)) return false;
-
-  const rangeMs = WORK_BRIEFING_DATE_FILTER_MS[criteria.range];
-  if (rangeMs) {
-    const occurredMs = _workBriefingActivityTimestamp(activity);
-    if (!occurredMs || occurredMs < nowMs - rangeMs) return false;
-  }
-
-  if (criteria.query) {
-    const haystack = [
-      activity?.project_id,
-      _projectNameById[String(activity?.project_id || '')],
-      activity?.workspace_name,
-      activity?.event_type,
-      activity?.title,
-      activity?.summary,
-      activity?.body_text,
-      activity?.status,
-      activity?.priority,
-      activity?.owner,
-      ...(Array.isArray(activity?.tags) ? activity.tags : []),
-    ].filter(Boolean).join(' ').toLowerCase();
-    if (!haystack.includes(criteria.query)) return false;
-  }
-
-  return true;
-}
-
-function _workBriefingCompareText(left, right) {
-  return WORK_BRIEFING_COLLATOR.compare(String(left || ''), String(right || ''));
-}
-
-function getFilteredWorkBriefingActivities(activities, criteria) {
-  const nowMs = Date.now();
-  const filtered = activities.filter(activity => _workBriefingActivityMatches(activity, criteria, nowMs));
-  filtered.sort((left, right) => {
-    const leftTime = _workBriefingActivityTimestamp(left);
-    const rightTime = _workBriefingActivityTimestamp(right);
-    if (criteria.sort === 'occurred_asc') return leftTime - rightTime;
-    if (criteria.sort === 'project_asc') return _workBriefingCompareText(left?.project_id, right?.project_id) || rightTime - leftTime;
-    if (criteria.sort === 'type_asc') return _workBriefingCompareText(left?.event_type, right?.event_type) || rightTime - leftTime;
-    if (criteria.sort === 'status_asc') return _workBriefingCompareText(left?.status, right?.status) || rightTime - leftTime;
-    if (criteria.sort === 'title_asc') return _workBriefingCompareText(left?.title, right?.title) || rightTime - leftTime;
-    return rightTime - leftTime;
-  });
-  return filtered;
-}
-
-function renderWorkBriefingActivityControls(activities, visibleCount, totalAvailable, criteria) {
-  const projectCounts = new Map();
-  const typeCounts = new Map();
-  const statusCounts = new Map();
-  activities.forEach(activity => {
-    _workBriefingCountMapValue(projectCounts, activity?.project_id);
-    _workBriefingCountMapValue(typeCounts, activity?.event_type);
-    const statuses = _normalizeBriefingStatuses(activity?.status);
-    if (statuses.length) {
-      statuses.forEach(status => _workBriefingCountMapValue(statusCounts, status.toLowerCase()));
-    } else {
-      _workBriefingCountMapValue(statusCounts, 'no status');
-    }
-  });
-
-  _workBriefingRenderSelectOptions('briefing-filter-project', 'All loaded projects', _workBriefingSortedCountEntries(projectCounts), criteria.projectId, _workBriefingProjectFilterLabel);
-  _workBriefingRenderSelectOptions('briefing-filter-type', 'All event types', _workBriefingSortedCountEntries(typeCounts), criteria.eventType, _workBriefingHumanizeFilterLabel);
-  _workBriefingRenderSelectOptions('briefing-filter-status', 'All statuses', _workBriefingSortedCountEntries(statusCounts), criteria.status, _workBriefingHumanizeFilterLabel);
-
-  const rangeSelect = document.getElementById('briefing-filter-range');
-  if (rangeSelect) rangeSelect.value = criteria.range || 'all';
-  const sortSelect = document.getElementById('briefing-sort-order');
-  if (sortSelect) sortSelect.value = criteria.sort || WORK_BRIEFING_DEFAULT_SORT;
-
-  const filterActive = !!(criteria.projectId || criteria.eventType || criteria.status || criteria.query || (criteria.range && criteria.range !== 'all'));
-  const active = !!(filterActive || (criteria.sort && criteria.sort !== WORK_BRIEFING_DEFAULT_SORT));
-  const clearBtn = document.getElementById('briefing-clear-filters-btn');
-  if (clearBtn) clearBtn.disabled = !active;
-  const summaryEl = document.getElementById('briefing-activity-filter-summary');
-  if (summaryEl) {
-    const loadedCount = activities.length;
-    const totalLabel = totalAvailable > loadedCount ? `, ${totalAvailable} total available` : '';
-    summaryEl.textContent = filterActive
-      ? `Showing ${visibleCount} of ${loadedCount} loaded${totalLabel}`
-      : `Showing ${loadedCount} loaded${totalLabel}`;
-  }
-}
-
-function getWorkBriefingTemplateProjectId(payload) {
-  const raw = document.getElementById('briefing-project-id')?.value.trim();
-  const explicit = raw ? (_projectIdByName[raw] || raw) : '';
-  if (explicit) return explicit;
-  if (payload?.project_id) return String(payload.project_id);
-  const projectCounts = Object.entries(payload?.project_counts || {})
-    .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0) || String(left[0]).localeCompare(String(right[0])));
-  return projectCounts[0]?.[0] || 'PROJECT_ID';
-}
-
-function buildWorkBriefingJsonTemplate(payload) {
-  const projectId = getWorkBriefingTemplateProjectId(payload);
-  return {
-    project_id: projectId,
-    workspace_name: payload?.activities?.find(activity => activity?.project_id === projectId)?.workspace_name || projectId,
-    event_type: 'workflow_complete',
-    external_id: `sample:${projectId.toLowerCase()}:workflow-complete`,
-    title: 'Completed workflow validation',
-    summary: 'Published the latest workflow completion state into CGA.',
-    status: 'completed',
-    tags: ['sample', 'cga', 'briefing'],
-    metadata: {
-      workflowName: 'wf-sample',
-      workflowRunId: '20260526-run1',
-      sourceRepo: projectId,
-    },
-  };
-}
-
-function buildWorkBriefingPowerShellTemplate(payload) {
-  const projectId = getWorkBriefingTemplateProjectId(payload);
-  const endpoint = `${window.location.origin}/api/project/work-briefing/activity`;
-  const jsonPayload = JSON.stringify(buildWorkBriefingJsonTemplate(payload), null, 2);
-  return [
-    `$headers = @{`,
-    `  Authorization = \"Bearer $env:CONTEXTGRAPH_MCP_TOKEN\"`,
-    `  \"X-Project-ID\" = \"${projectId}\"`,
-    `}`,
-    `$body = @'`,
-    jsonPayload,
-    `'@`,
-    `Invoke-RestMethod -Uri \"${endpoint}\" -Method Post -Headers $headers -ContentType \"application/json\" -Body $body`,
-  ].join('\n');
-}
-
-function buildWorkBriefingPythonTemplate(payload) {
-  const projectId = getWorkBriefingTemplateProjectId(payload);
-  const endpoint = `${window.location.origin}/api/project/work-briefing/activity`;
-  const jsonPayload = JSON.stringify(buildWorkBriefingJsonTemplate(payload), null, 2);
-  return [
-    `import json`,
-    `from urllib import request`,
-    ``,
-    `payload = ${jsonPayload}`,
-    `req = request.Request(`,
-    `    \"${endpoint}\",`,
-    `    data=json.dumps(payload).encode(\"utf-8\"),`,
-    `    method=\"POST\",`,
-    `    headers={`,
-    `        \"Authorization\": \"Bearer <CONTEXTGRAPH_MCP_TOKEN>\",`,
-    `        \"X-Project-ID\": \"${projectId}\",`,
-    `        \"Content-Type\": \"application/json\",`,
-    `    },`,
-    `)`,
-    `with request.urlopen(req, timeout=10) as response:`,
-    `    print(response.read().decode(\"utf-8\"))`,
-  ].join('\n');
-}
-
-function renderWorkBriefingQuickStart() {
-  const host = document.getElementById('briefing-quick-start');
-  if (!host) return;
-  host.setAttribute('data-briefing-section', 'quick-start');
-  host.classList.add('briefing-collapsible');
-
-  const steps = [
-    {
-      label: 'STEP 1',
-      title: 'Add Project',
-      body: 'Open the Project tab, create the project, and set the repository path CGA should track.',
-    },
-    {
-      label: 'STEP 2',
-      title: "Create Project's MCP Server Token",
-      body: 'Expand the project row, create an mcp token, and copy the token value before closing the dialog.',
-    },
-    {
-      label: 'STEP 3',
-      title: 'Full Index',
-      body: 'Run Full Index for the project so CGA has the complete repository graph before agent use.',
-    },
-    {
-      label: 'STEP 4',
-      title: 'Add using CGA into Agent.md',
-      body: 'Add the CGA usage note to Agent.md so the agent queries this project context during work.',
-    },
-  ];
-
-  host.innerHTML = `
-    <div class="briefing-collapsible-head">
-      <div>
-        <span class="briefing-kicker">Quick Start</span>
-        <h3>Prepare a repository for CGA-assisted agents</h3>
-      </div>
-      ${renderBriefingCollapseButton('quick-start', 'Quick Start')}
-    </div>
-    <div id="${esc(briefingSectionBodyId('quick-start'))}" data-briefing-section-content>
-      <p>Follow these steps once per repository before asking an agent to rely on CGA context.</p>
-      <ol class="briefing-quick-start-grid">
-        ${steps.map(step => `
-          <li class="briefing-quick-start-step">
-            <span>${esc(step.label)}</span>
-            <strong>${esc(step.title)}</strong>
-            <p>${esc(step.body)}</p>
-          </li>
-        `).join('')}
-      </ol>
-    </div>
-  `;
-  applyBriefingSectionCollapse('quick-start');
-}
-
-function renderWorkBriefingRequestTemplates(payload) {
-  const host = document.getElementById('briefing-request-templates');
-  if (!host) return;
-  host.setAttribute('data-briefing-section', 'integration-templates');
-  host.classList.add('briefing-collapsible');
-
-  const projectId = getWorkBriefingTemplateProjectId(payload);
-  const jsonTemplate = JSON.stringify(buildWorkBriefingJsonTemplate(payload), null, 2);
-  const powerShellTemplate = buildWorkBriefingPowerShellTemplate(payload);
-  const pythonTemplate = buildWorkBriefingPythonTemplate(payload);
-  const copyTemplates = {
-    powershell: { value: powerShellTemplate, label: 'PowerShell template' },
-    python: { value: pythonTemplate, label: 'Python template' },
-    json: { value: jsonTemplate, label: 'JSON payload' },
-  };
-
-  host.innerHTML = `
-    <div class="briefing-collapsible-head">
-      <div>
-        <span class="briefing-kicker">Integration Templates</span>
-        <h3>Post activity into CGA from other repos</h3>
-      </div>
-      ${renderBriefingCollapseButton('integration-templates', 'Integration Templates')}
-    </div>
-    <div id="${esc(briefingSectionBodyId('integration-templates'))}" data-briefing-section-content>
-      <p>Use any active project-scoped token for <strong>${esc(projectId)}</strong>. These snippets target the live CGA endpoint and can be copied directly into repo helpers, scripts, or local validation steps.</p>
-      <div class="briefing-command-pill-row">
-        <span class="briefing-command-pill"><span>Endpoint</span><strong>/api/project/work-briefing/activity</strong></span>
-        <span class="briefing-command-pill"><span>Project</span><strong>${esc(projectId)}</strong></span>
-        <span class="briefing-command-pill"><span>Token</span><strong>mcp</strong></span>
-      </div>
-      <div class="briefing-template-grid">
-        <section class="briefing-template-block">
-          <div class="briefing-template-head">
-            <div>
-              <strong>PowerShell</strong>
-              <span>BrowserAgent / ADC scripts</span>
-            </div>
-            <button class="btn btn-sm btn-ghost" data-copy-template="powershell">Copy</button>
-          </div>
-          <pre class="briefing-template-code">${esc(powerShellTemplate)}</pre>
-        </section>
-        <section class="briefing-template-block">
-          <div class="briefing-template-head">
-            <div>
-              <strong>Python</strong>
-              <span>WorkAssist / services</span>
-            </div>
-            <button class="btn btn-sm btn-ghost" data-copy-template="python">Copy</button>
-          </div>
-          <pre class="briefing-template-code">${esc(pythonTemplate)}</pre>
-        </section>
-        <section class="briefing-template-block">
-          <div class="briefing-template-head">
-            <div>
-              <strong>Payload JSON</strong>
-              <span>Minimal event contract</span>
-            </div>
-            <button class="btn btn-sm btn-ghost" data-copy-template="json">Copy</button>
-          </div>
-          <pre class="briefing-template-code">${esc(jsonTemplate)}</pre>
-        </section>
-      </div>
-    </div>
-  `;
-
-  host.querySelectorAll('[data-copy-template]').forEach(button => {
-    button.addEventListener('click', () => {
-      const key = button.getAttribute('data-copy-template');
-      const template = key ? copyTemplates[key] : null;
-      if (!template) return;
-      copyText(template.value, template.label);
-    });
-  });
-  applyBriefingSectionCollapse('integration-templates');
-}
-
-function renderWorkBriefing(summary = _workBriefingSummary) {
-  const preserveViewport = arguments.length > 1 && !!arguments[1]?.preserveViewport;
-  const payload = summary || {
-    project_id: null,
-    total_events: 0,
-    total_available: 0,
-    has_more: false,
-    duplicate_signal_count: 0,
-    suspected_duplicates: [],
-    event_type_counts: {},
-    status_counts: {},
-    project_counts: {},
-    activities: [],
-  };
-
-  const activities = Array.isArray(payload.activities) ? payload.activities : [];
-  const activityCriteria = getWorkBriefingActivityCriteria();
-  const filteredActivities = getFilteredWorkBriefingActivities(activities, activityCriteria);
-  const projectCounts = payload.project_counts || {};
-  const eventEntries = Object.entries(payload.event_type_counts || {})
-    .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0) || String(left[0]).localeCompare(String(right[0])));
-  const topProjects = Object.entries(projectCounts)
-    .sort((left, right) => Number(right[1] || 0) - Number(left[1] || 0) || String(left[0]).localeCompare(String(right[0])))
-    .slice(0, 3);
-  const commandCenter = document.getElementById('briefing-command-center');
-  const workloadShape = document.getElementById('briefing-workload-shape');
-  const tableWrap = document.getElementById('briefing-section-activity-log-body');
-  const duplicateWrap = document.getElementById('briefing-section-duplicate-signals-body');
-  const currentSignature = JSON.stringify({
-    total_events: payload.total_events || 0,
-    total_available: payload.total_available || 0,
-    duplicate_signal_count: payload.duplicate_signal_count || 0,
-    activity_criteria: activityCriteria,
-    activities: activities.map(activity => [activity.activity_id, activity.project_id, activity.event_type, activity.title, activity.summary, activity.occurred_at, activity.synced_at, activity.status, activity.suspected_duplicate ? 1 : 0]),
-    suspected_duplicates: (payload.suspected_duplicates || []).map(group => [group.group_key, group.duplicate_count]),
-  });
-  if (preserveViewport && currentSignature === _workBriefingRenderSignature) {
-    const loadMoreBtn = document.getElementById('briefing-load-more-btn');
-    if (loadMoreBtn) loadMoreBtn.disabled = false;
-    return;
-  }
-  const scrollY = preserveViewport ? window.scrollY : null;
-  const tableScrollTop = preserveViewport && tableWrap ? tableWrap.scrollTop : null;
-  const duplicateScrollTop = preserveViewport && duplicateWrap ? duplicateWrap.scrollTop : null;
-
-  if (commandCenter) {
-    commandCenter.setAttribute('data-briefing-section', 'command-center');
-    commandCenter.classList.add('briefing-collapsible');
-    const topActivities = activities.slice(0, 3);
-    commandCenter.innerHTML = `
-      <div class="briefing-collapsible-head">
-        <div>
-          <span class="briefing-kicker">Command Center</span>
-          <h3>${payload.project_id ? `Focus on <span class="project-id-inline">${esc(payload.project_id)}${renderCopyIdButton(payload.project_id, 'copy-id-btn-sm')}</span>` : 'Cross-project work pulse'}</h3>
-        </div>
-        ${renderBriefingCollapseButton('command-center', 'Command Center')}
-      </div>
-      <div id="${esc(briefingSectionBodyId('command-center'))}" data-briefing-section-content>
-        <p>${payload.total_events
-          ? `Tracking ${esc(String(payload.total_events))} recent event${Number(payload.total_events) === 1 ? '' : 's'} across the current dashboard scope.`
-          : 'No work events have been captured yet. Once MCP activity arrives, this panel will summarize what deserves attention first.'}</p>
-        <div class="briefing-command-pill-row">
-          <span class="briefing-command-pill"><span>Scope</span><strong>${payload.project_id ? `<span class="project-id-inline">${esc(payload.project_id)}${renderCopyIdButton(payload.project_id, 'copy-id-btn-sm')}</span>` : 'All projects'}</strong></span>
-          <span class="briefing-command-pill"><span>Projects</span><strong>${esc(String(Object.keys(projectCounts).length))}</strong></span>
-          <span class="briefing-command-pill"><span>Latest</span><strong>${esc(activities[0]?.occurred_at ? relativeTimeLabel(activities[0].occurred_at) : 'none')}</strong></span>
-        </div>
-        <div class="briefing-focus-list">
-          ${topActivities.length
-            ? topActivities.map(activity => `
-              <article class="briefing-focus-item">
-                <strong>${esc(activity.title || activity.event_type || 'Activity')}</strong>
-                <span>${activity.project_id ? `<span class="project-id-inline">${esc(activity.project_id)}${renderCopyIdButton(activity.project_id, 'copy-id-btn-sm')}</span>` : 'unknown project'} · ${esc(activity.summary || activity.body_text || 'No summary provided')}</span>
-              </article>
-            `).join('')
-            : `<div class="briefing-empty">Recent focus items will appear here after activity is recorded.</div>`}
-        </div>
-      </div>
-    `;
-  }
-
-  if (workloadShape) {
-    workloadShape.setAttribute('data-briefing-section', 'workload-shape');
-    workloadShape.classList.add('briefing-collapsible');
-    workloadShape.innerHTML = `
-      <div class="briefing-collapsible-head">
-        <div>
-          <span class="briefing-kicker">Workload Shape</span>
-          <h3>Activity distribution</h3>
-        </div>
-        ${renderBriefingCollapseButton('workload-shape', 'Workload Shape')}
-      </div>
-      <div id="${esc(briefingSectionBodyId('workload-shape'))}" data-briefing-section-content>
-        <p>${topProjects.length
-          ? `<span class="project-id-inline">${esc(topProjects[0][0])}${renderCopyIdButton(topProjects[0][0], 'copy-id-btn-sm')}</span> currently leads this snapshot with ${esc(String(topProjects[0][1]))} event${Number(topProjects[0][1]) === 1 ? '' : 's'}.`
-          : 'Project and event concentration will render here once the dashboard has data.'}</p>
-        <div class="briefing-shape-list">
-          ${eventEntries.length
-            ? eventEntries.slice(0, 4).map(([label, value]) => {
-                const percent = payload.total_events ? Math.max(8, Math.round((Number(value || 0) / Math.max(1, Number(payload.total_events || 0))) * 100)) : 0;
-                return `
-                  <div class="briefing-shape-row">
-                    <label>${esc(label)}</label>
-                    <div class="briefing-shape-track"><div class="briefing-shape-fill" style="width:${percent}%"></div></div>
-                    <span class="briefing-shape-value">${esc(String(value || 0))}</span>
-                  </div>
-                `;
-              }).join('')
-            : `<div class="briefing-empty">No event types recorded yet.</div>`}
-        </div>
-      </div>
-    `;
-  }
-
-  renderWorkBriefingQuickStart();
-  renderWorkBriefingRequestTemplates(payload);
-  renderWorkBriefingDuplicateSignals(payload);
-
-  document.getElementById('briefing-total-events').textContent = String(payload.total_events || 0);
-  document.getElementById('briefing-selected-project').innerHTML = payload.project_id
-    ? renderProjectIdWithCopy(payload.project_id, { extraClass: 'copy-id-btn-sm' })
-    : 'all projects';
-  document.getElementById('briefing-project-total').textContent = String(Object.keys(projectCounts).length);
-  document.getElementById('briefing-project-counts').innerHTML = renderBriefingChips(projectCounts, 'No project activity yet');
-  document.getElementById('briefing-event-types').innerHTML = renderBriefingChips(payload.event_type_counts || {}, 'No event types recorded');
-  document.getElementById('briefing-status-counts').innerHTML = renderBriefingChips(payload.status_counts || {}, 'No statuses recorded');
-
-  const briefingPane = document.getElementById('pane-briefing') || document;
-  bindBriefingCollapseButtons(briefingPane);
-  applyAllBriefingSectionCollapse();
-
-  const tbody = document.getElementById('briefing-activities-body');
-  const loadMoreBtn = document.getElementById('briefing-load-more-btn');
-  const totalAvailable = Math.max(Number(payload.total_available || 0), activities.length);
-  const hasMore = !!payload.has_more || totalAvailable > activities.length;
-  renderWorkBriefingActivityControls(activities, filteredActivities.length, totalAvailable, activityCriteria);
-  if (!activities.length) {
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">No work activity found for the current scope</div></td></tr>`;
-    if (loadMoreBtn) loadMoreBtn.hidden = true;
-    _workBriefingRenderSignature = currentSignature;
-    if (preserveViewport) {
-      if (tableWrap && tableScrollTop != null) tableWrap.scrollTop = tableScrollTop;
-      if (duplicateWrap && duplicateScrollTop != null) duplicateWrap.scrollTop = duplicateScrollTop;
-      if (scrollY != null) window.scrollTo(0, scrollY);
-    }
-    return;
-  }
-  if (!filteredActivities.length) {
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">No loaded events match the current filters</div></td></tr>`;
-    if (loadMoreBtn) {
-      loadMoreBtn.hidden = !hasMore;
-      loadMoreBtn.disabled = _workBriefingLoading;
-      loadMoreBtn.textContent = hasMore
-        ? `Load ${Math.min(WORK_BRIEFING_BATCH_SIZE, Math.max(0, totalAvailable - activities.length)) || WORK_BRIEFING_BATCH_SIZE} more (${activities.length}/${totalAvailable})`
-        : `All ${activities.length} loaded`;
-    }
-    _workBriefingRenderSignature = currentSignature;
-    if (preserveViewport) {
-      if (tableWrap && tableScrollTop != null) tableWrap.scrollTop = tableScrollTop;
-      if (duplicateWrap && duplicateScrollTop != null) duplicateWrap.scrollTop = duplicateScrollTop;
-      if (scrollY != null) window.scrollTo(0, scrollY);
-    }
-    return;
-  }
-
-  tbody.innerHTML = filteredActivities.map(activity => {
-    const workspaceLabel = activity.workspace_name || '';
-    const summaryText = activity.summary || activity.body_text || '';
-    const occurredAt = activity.occurred_at || '';
-    const activityTags = activity.suspected_duplicate
-      ? ['possible-duplicate', ...(Array.isArray(activity.tags) ? activity.tags : [])]
-      : activity.tags;
-    const projectCell = activity.project_id
-      ? `<div class="briefing-activity-cell">
-           <div class="row1">${renderProjectIdWithCopy(activity.project_id, { extraClass: 'copy-id-btn-sm' })}</div>
-           ${workspaceLabel ? `<div class="row2" title="${esc(workspaceLabel)}">${esc(workspaceLabel)}</div>` : ''}
-         </div>`
-      : '—';
-    return `
-      <tr class="briefing-activity-row">
-        <td style="text-align:left">${projectCell}</td>
-        <td style="text-align:center">
-          <div class="briefing-icon-stack">
-            ${renderBriefingEventIcon(activity.event_type)}
-            ${renderBriefingStatusText(activity.status)}
-          </div>
-        </td>
-        <td>
-          <div class="briefing-activity-text">
-            <strong title="${esc(activity.title || '')}">${esc(activity.title || 'Untitled activity')}</strong>
-            ${summaryText ? `<div class="briefing-activity-summary" title="${esc(summaryText)}">${esc(summaryText)}</div>` : ''}
-            ${renderBriefingTags(activityTags)}
-          </div>
-        </td>
-        <td class="briefing-when-cell" title="${esc(occurredAt)}">
-          <div>${esc(relativeTimeLabel(occurredAt))}</div>
-          ${(() => {
-            const pdt = formatPdtTimestampParts(occurredAt);
-            if (!pdt) return '';
-            return `<div class="briefing-when-stamp">${esc(pdt.date)}</div>
-            <div class="briefing-when-stamp">${esc(pdt.time)}</div>
-            <div class="briefing-when-stamp">${esc(pdt.tz)}</div>`;
-          })()}
-        </td>
-      </tr>
-    `;
-  }).join('');
-
-  if (loadMoreBtn) {
-    loadMoreBtn.hidden = !hasMore;
-    loadMoreBtn.disabled = _workBriefingLoading;
-    loadMoreBtn.textContent = hasMore
-      ? `Load ${Math.min(WORK_BRIEFING_BATCH_SIZE, Math.max(0, totalAvailable - activities.length)) || WORK_BRIEFING_BATCH_SIZE} more (${activities.length}/${totalAvailable})`
-      : `All ${activities.length} loaded`;
-  }
-  _workBriefingRenderSignature = currentSignature;
-  if (preserveViewport) {
-    if (tableWrap && tableScrollTop != null) tableWrap.scrollTop = tableScrollTop;
-    if (duplicateWrap && duplicateScrollTop != null) duplicateWrap.scrollTop = duplicateScrollTop;
-    if (scrollY != null) window.scrollTo(0, scrollY);
-  }
-}
-
-function renderWorkBriefingDuplicateSignals(payload) {
-  const summaryEl = document.getElementById('briefing-duplicates-summary');
-  const tbody = document.getElementById('briefing-duplicates-body');
-  if (!summaryEl || !tbody) return;
-
-  const groups = Array.isArray(payload?.suspected_duplicates) ? payload.suspected_duplicates : [];
-  if (!groups.length) {
-    summaryEl.textContent = 'No duplicate signals detected in the current dashboard slice.';
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">No duplicate clusters detected.</div></td></tr>`;
-    return;
-  }
-
-  summaryEl.textContent = `${groups.length} duplicate signal ${groups.length === 1 ? 'group' : 'groups'} detected in the current slice.`;
-  tbody.innerHTML = groups.slice(0, 10).map(group => {
-    const projectCell = group.project_id
-      ? renderProjectIdWithCopy(group.project_id, { extraClass: 'copy-id-btn-sm' })
-      : '—';
-    const sourceHint = Array.isArray(group.source_item_ids) && group.source_item_ids.length
-      ? `<div class="briefing-activity-summary" title="${esc(group.source_item_ids.join(', '))}">sources: ${esc(group.source_item_ids.slice(0, 3).join(', '))}${group.source_item_ids.length > 3 ? ' ...' : ''}</div>`
-      : '';
-    const memberDetails = Array.isArray(group.members) && group.members.length
-      ? `
-        <details style="margin-top:6px">
-          <summary style="cursor:pointer;color:var(--muted);font-size:12px">Show member details</summary>
-          <div style="margin-top:6px;display:grid;gap:6px">
-            ${group.members.map(member => `
-              <div style="border:1px solid var(--border);border-radius:6px;padding:6px 8px;background:rgba(10,14,22,.55)">
-                <div style="font-size:11px;color:var(--muted)">source: ${esc(member.source_item_id || '—')}</div>
-                <div style="font-size:11px;color:var(--muted)">hash: ${esc(member.content_hash || '—')}</div>
-                <div style="font-size:11px;color:var(--muted)">occurred: ${esc(member.occurred_at || '—')} · synced: ${esc(member.synced_at || '—')}</div>
-                ${member.summary ? `<div class="briefing-activity-summary" title="${esc(member.summary)}">${esc(member.summary)}</div>` : ''}
-              </div>
-            `).join('')}
-          </div>
-        </details>
-      `
-      : '';
-    return `
-      <tr class="briefing-activity-row">
-        <td style="text-align:left">${projectCell}</td>
-        <td style="text-align:center">
-          <div class="briefing-icon-stack">
-            ${renderBriefingEventIcon(group.event_type)}
-            <span class="briefing-status-dot is-open" title="duplicate signal" aria-label="duplicate signal"></span>
-          </div>
-        </td>
-        <td>
-          <div class="briefing-activity-text">
-            <strong title="${esc(group.title || '')}">${esc(group.title || 'Duplicate signal')}</strong>
-            <div class="briefing-activity-summary">${esc(group.reason || 'Possible duplicate activity cluster')} (${esc(String(group.duplicate_count || 0))} records)</div>
-            ${sourceHint}
-            ${memberDetails}
-          </div>
-        </td>
-        <td class="briefing-when-cell" title="${esc(group.occurred_on || '')}">
-          <div>${esc(group.occurred_on || '—')}</div>
-        </td>
-      </tr>
-    `;
-  }).join('');
-}
-
-// ===== Weekly Status Report (WSR) =====
-const WSR_LOOP_URL = 'https://loop.cloud.microsoft/p/eyJ3Ijp7InUiOiJodHRwczovL21pY3Jvc29mdC5zaGFyZXBvaW50LmNvbS8%2FbmF2PWN6MGxNa1ltWkQxaUlVcERhbVJNVEdkVFRsVnhXV1JRZVRkc2EwbEJNVWM0WDBOdFRqaFhNVUpPWjJJeU1scHVSVXRNWVRGdlJXOXdZblJOYkhsVVMxSlBZVWRhUTNGc05UVW1aajB3TVVSQlZWQk9WVkpHTlVkQ05rOWFNMFUzUWtSSlJrdGFTRmRCUlVoVlVETk5KbU05Sm1ac2RXbGtQVEUlM0QiLCJyIjpmYWxzZX0sInAiOnsidSI6Imh0dHBzOi8vbWljcm9zb2Z0LnNoYXJlcG9pbnQuY29tL2NvbnRlbnRzdG9yYWdlL0NTUF8yY2RkMjgyNC0xMmI4LTRhMzUtOTg3NC1mY2JiOTY0MjAwZDQvRG9jdW1lbnQlMjBMaWJyYXJ5L0xvb3BBcHBEYXRhL01pY2FoJTIwUmlja3MlMjAxLmxvb3A%2FbmF2PWN6MGxNa1pqYjI1MFpXNTBjM1J2Y21GblpTVXlSa05UVUY4eVkyUmtNamd5TkMweE1tSTRMVFJoTXpVdE9UZzNOQzFtWTJKaU9UWTBNakF3WkRRbVpEMWlJVXBEYW1STVRHZFRUbFZ4V1dSUWVUZHNhMGxCTVVjNFgwTnRUamhYTVVKT1oySXlNbHB1UlV0TVlURnZSVzl3WW5STmJIbFVTMUpQWVVkYVEzRnNOVFVtWmowd01VUkJWVkJPVlZNMVJWb3pWVFJQUjAweVVrRkpTVkpEVWs5TVRVMU5RMVUxSm1NOUpUSkdKbVpzZFdsa1BURSUzRCIsInIiOmZhbHNlfSwiaSI6eyJpIjoiZDcxMTU2MGItMmViNy00NGZiLWJlYjYtMWZmZDBlZmIzNGM2In19';
-const WSR_STORAGE_KEY = 'cga_wsr_last';
-const WSR_HISTORY_KEY = 'cga_wsr_history';
-const WSR_HISTORY_MAX = 104;
-const WSR_HISTORY_BATCH_SIZE = 25;
-const WSR_TEMPLATE_STORAGE_KEY = 'cga_wsr_template';
-const WSR_DEFAULT_TEMPLATE = [
-  '# {{title}}',
-  '',
-  '**Window:** {{window_start}} → {{window_end}}  ',
-  '**Generated:** {{generated_at}}  ',
-  '**Source:** CGA (Context Graph Agent) Work Dashboard',
-  '',
-  '## Summary',
-  '- Events in window: **{{total_events}}**',
-  '- Projects active: **{{active_projects}}** (of {{total_projects}} total)',
-  '- Project names: **{{project_names}}**',
-  '- Project tags: {{project_tags}}',
-  '- Distinct event types: **{{event_types_count}}**',
-  '',
-  '## Highlights',
-  '{{highlights}}',
-  '',
-  '## By Project',
-  '{{by_project}}',
-  '',
-  '## By Event Type',
-  '{{by_type}}',
-  '',
-  '## By Status',
-  '{{by_status}}',
-  '',
-  '---',
-  '_Paste into the linked Microsoft Loop page._',
-].join('\n');
 let _wsrAutoTimer = null;
-let _wsrLastMarkdown = '';
-let _wsrLastMarkdownPrev = '';
-let _wsrHistoryVisibleCount = WSR_HISTORY_BATCH_SIZE;
-let _wsrGenerating = false;
-let _wsrBusyDepth = 0;
-let _wsrBusyWatchdog = null;
-let _wsrAutoGeneratedOnce = false;
-let _wsrWindowEventCounts = new Map();
-let _wsrHistoryStatusRefreshedAt = 0;
-let _wsrActiveSnapshot = null;
 let _msAdoPollTimer = null;
 let _msAdoPollId = '';
-
-function openWsrLoopPage() {
-  window.open(WSR_LOOP_URL, '_blank', 'noopener');
-}
-
-function setWsrStatus(msg) {
-  const el = document.getElementById('wsr-status');
-  if (el) el.textContent = msg;
-}
 
 function setMicrosoftAdoStatus(message, tone = 'neutral') {
   const el = document.getElementById('ms-ado-status');
@@ -9686,7 +9307,10 @@ function pollMicrosoftAdoDevice(intervalSeconds = 5) {
       setMicrosoftAdoDeviceMessage('');
       await loadMicrosoftAdoStatus();
       toast('Microsoft account connected');
-      generateWorkReport();
+      if (_pluginSelection.enabled.includes('reports')) {
+        await loadPluginAsset('reports');
+        if (_jwt && _me) generateWorkReport();
+      }
     } catch (e) {
       if (_msAdoPollId !== pollId) return;
       _msAdoPollId = '';
@@ -9709,1085 +9333,7 @@ async function disconnectMicrosoftAdo() {
   }
 }
 
-function _wsrSetGenerateButtonBusy(isBusy) {
-  const btn = document.getElementById('wsr-generate-btn');
-  if (!btn) return;
-  btn.disabled = !!isBusy;
-  btn.textContent = isBusy ? 'Generating...' : 'Generate';
-}
 
-function showWsrBusy(message = 'Generating...') {
-  _wsrBusyDepth += 1;
-  const overlay = document.getElementById('wsr-busy-overlay');
-  const textEl = document.getElementById('wsr-busy-text');
-  if (textEl) textEl.textContent = message;
-  if (overlay) overlay.hidden = false;
-  _wsrSetGenerateButtonBusy(true);
-  if (_wsrBusyWatchdog) clearTimeout(_wsrBusyWatchdog);
-  _wsrBusyWatchdog = setTimeout(() => {
-    _wsrBusyDepth = 0;
-    const ov = document.getElementById('wsr-busy-overlay');
-    if (ov) ov.hidden = true;
-    _wsrSetGenerateButtonBusy(false);
-    _wsrSetBusyMessage('Generating...');
-    if (_wsrGenerating) {
-      _wsrGenerating = false;
-      setWsrStatus('Failed: Generate timed out, please retry.');
-    }
-  }, 45000);
-}
-
-function _wsrSetBusyMessage(message) {
-  const textEl = document.getElementById('wsr-busy-text');
-  if (textEl) textEl.textContent = message;
-}
-
-function _wsrWithTimeout(promise, timeoutMs, message) {
-  let timer = null;
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error(message || 'Request timed out')), Math.max(1000, Number(timeoutMs || 25000)));
-    }),
-  ]).finally(() => {
-    if (timer) clearTimeout(timer);
-  });
-}
-
-async function _wsrFetchSummary(limit) {
-  const safeLimit = Math.min(5000, Math.max(500, Number(limit || 500)));
-  const params = new URLSearchParams({ limit: String(safeLimit), include_external: 'true' });
-  return _wsrWithTimeout(
-    api('GET', '/admin/work-briefing?' + params.toString()),
-    25000,
-    'Generate timed out after 25s'
-  );
-}
-
-function hideWsrBusy(force = false) {
-  if (force) _wsrBusyDepth = 1;
-  _wsrBusyDepth = Math.max(0, _wsrBusyDepth - 1);
-  if (_wsrBusyDepth > 0) return;
-  if (_wsrBusyWatchdog) {
-    clearTimeout(_wsrBusyWatchdog);
-    _wsrBusyWatchdog = null;
-  }
-  const overlay = document.getElementById('wsr-busy-overlay');
-  if (overlay) overlay.hidden = true;
-  _wsrSetGenerateButtonBusy(false);
-  _wsrSetBusyMessage('Generating...');
-}
-
-function _wsrFormatDate(d) {
-  return d.toISOString().slice(0, 10);
-}
-
-function _wsrFormatWindowEndInclusive(endExclusive) {
-  const t = new Date(endExclusive);
-  if (!Number.isFinite(t.getTime())) return _wsrFormatDate(new Date());
-  return _wsrFormatDate(new Date(t.getTime() - 86400000));
-}
-
-function _wsrStartOfDay(d) {
-  const t = new Date(d);
-  t.setHours(0, 0, 0, 0);
-  return t;
-}
-
-function _wsrStartOfThuWeek(d) {
-  const t = _wsrStartOfDay(d);
-  const day = t.getDay(); // 0=Sun ... 4=Thu
-  const delta = (day - 4 + 7) % 7;
-  t.setDate(t.getDate() - delta);
-  return t;
-}
-
-function _wsrGetReportWeekWindow(anchor) {
-  const weekStart = _wsrStartOfThuWeek(anchor || new Date()); // Thu 00:00
-  const weekEnd = new Date(weekStart.getTime() + 7 * 86400000); // Next Thu 00:00, displayed as Wed
-  return { weekStart, weekEnd };
-}
-
-function _wsrGetEventTimeValue(event) {
-  return event?.occurred_at || event?.created_at || event?.timestamp || event?.ts || event?.synced_at || 0;
-}
-
-function _wsrSummarizeEvents(events, startMs, endMs) {
-  const filtered = (Array.isArray(events) ? events : []).filter(e => {
-    const t = Date.parse(_wsrGetEventTimeValue(e));
-    if (!Number.isFinite(t)) return false;
-    return t >= startMs && t < endMs;
-  });
-  const byProject = new Map();
-  const byType = new Map();
-  const byStatus = new Map();
-  filtered.forEach(e => {
-    const proj = _wsrProjectDisplayName(e);
-    const type = e.event_type || e.kind || 'event';
-    const status = e.status || e.state || '';
-    byProject.set(proj, (byProject.get(proj) || 0) + 1);
-    byType.set(type, (byType.get(type) || 0) + 1);
-    if (status) byStatus.set(status, (byStatus.get(status) || 0) + 1);
-  });
-  return { filtered, byProject, byType, byStatus };
-}
-
-async function _wsrEnsureProjectNameMap() {
-  if (Object.keys(_projectNameById).length) return;
-  try {
-    const projects = _allProjects.length ? _allProjects : await api('GET', '/auth/projects');
-    if (!_allProjects.length) _allProjects = projects;
-    _projectNameById = {};
-    _projectIdByName = {};
-    projects.forEach(p => {
-      if (p.project_id && p.project_name) {
-        _projectNameById[p.project_id] = p.project_name;
-        _projectIdByName[p.project_name] = p.project_id;
-      }
-    });
-  } catch {}
-}
-
-function _wsrProjectDisplayName(event) {
-  const projectId = event?.project_id || event?.project_external_id || '';
-  return _projectNameById[projectId]
-    || event?.workspace_name
-    || event?.project_name
-    || projectId
-    || 'unscoped';
-}
-
-function _wsrMapToBullets(map) {
-  const entries = [...map.entries()].sort((a, b) => b[1] - a[1]);
-  if (!entries.length) return '- _(none)_';
-  return entries.map(([k, v]) => `- **${k}** — ${v}`).join('\n');
-}
-
-function _wsrProjectEntries(map) {
-  return [...map.entries()].sort((a, b) => (b[1] - a[1]) || String(a[0]).localeCompare(String(b[0])));
-}
-
-function _wsrProjectNamesText(map) {
-  const names = _wsrProjectEntries(map).map(([name]) => String(name || '').trim()).filter(Boolean);
-  return names.length ? names.join(', ') : '(none)';
-}
-
-function _wsrProjectTagsText(map) {
-  const tags = _wsrProjectEntries(map).map(([name]) => {
-    const slug = String(name || 'unscoped')
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '');
-    return `#${slug || 'unscoped'}`;
-  });
-  return tags.length ? tags.join(' ') : '(none)';
-}
-
-function _wsrMetadata(activity) {
-  const raw = activity?.raw_metadata || activity?.metadata || {};
-  if (raw && typeof raw === 'object') return raw;
-  try { return JSON.parse(String(raw || '{}')); } catch { return {}; }
-}
-
-function _wsrExternalRefs(activity) {
-  const metadata = _wsrMetadata(activity);
-  if (Array.isArray(activity?.external_refs)) return activity.external_refs;
-  if (Array.isArray(metadata.external_refs)) return metadata.external_refs;
-  return [];
-}
-
-function _wsrCompactText(value, maxLen = 260) {
-  const entityMap = { nbsp: ' ', amp: '&', lt: '<', gt: '>' };
-  const text = String(value || '')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&(nbsp|amp|lt|gt);/gi, (_, entity) => entityMap[entity.toLowerCase()] || '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  if (!text) return '';
-  return text.length > maxLen ? `${text.slice(0, Math.max(0, maxLen - 3)).trimEnd()}...` : text;
-}
-
-function _wsrNormalizeText(value) {
-  return _wsrCompactText(value, 1000).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-}
-
-function _wsrIsSimilarText(a, b) {
-  const left = _wsrNormalizeText(a);
-  const right = _wsrNormalizeText(b);
-  if (!left || !right) return false;
-  return left === right || left.includes(right) || right.includes(left);
-}
-
-function _wsrAddDetailLine(lines, seen, label, value, maxLen = 260) {
-  const text = _wsrCompactText(value, maxLen);
-  if (!text) return;
-  const key = _wsrNormalizeText(text);
-  if (!key || seen.has(key)) return;
-  seen.add(key);
-  lines.push(`${label}: ${text}`);
-}
-
-function _wsrWorkRefLabel(activity) {
-  const metadata = _wsrMetadata(activity);
-  if (_wsrExternalRefs(activity).length) return true;
-  const text = [
-    activity?.event_type,
-    activity?.title,
-    activity?.summary,
-    activity?.body_text,
-    activity?.source_item_id,
-    activity?.source_url,
-    JSON.stringify(metadata),
-  ].join(' ');
-  return /\b(ado|pbi|pr|pull request|work item|workitems|_workitems)\b/i.test(text) || /\b\d{7,}\b/.test(text);
-}
-
-function _wsrAdoDetailLine(activity) {
-  const metadata = _wsrMetadata(activity);
-  const resolved = _wsrExternalRefs(activity).find(ref => ref?.provider === 'azure_devops' && ref?.type === 'work_item' && ref?.status === 'ok');
-  if (resolved) {
-    const pieces = [];
-    const label = `${resolved.work_item_type || 'ADO item'} ${resolved.id || ''}`.trim();
-    if (label) pieces.push(label);
-    if (resolved.title) pieces.push(_wsrCompactText(resolved.title, 180));
-    if (resolved.state) pieces.push(`state ${resolved.state}`);
-    if (resolved.assigned_to) pieces.push(`owner ${resolved.assigned_to}`);
-    if (resolved.iteration_path) pieces.push(`iteration ${resolved.iteration_path}`);
-    return pieces.join('; ');
-  }
-  const ado = metadata.ado && typeof metadata.ado === 'object' ? metadata.ado : metadata;
-  const adoId = ado.ado_id || ado.pbi_id || metadata.ado_id || metadata.pbi_id || '';
-  const adoType = ado.ado_type || ado.work_item_type || metadata.ado_type || metadata.work_item_type || '';
-  const adoState = ado.ado_state || ado.state || metadata.ado_state || metadata.state || '';
-  const pieces = [];
-  if (adoType || adoId) pieces.push(`${adoType || 'ADO item'}${adoId ? ` ${adoId}` : ''}`);
-  if (adoState) pieces.push(`state ${adoState}`);
-  if (ado.ado_iteration_path || metadata.ado_iteration_path) pieces.push(`iteration ${ado.ado_iteration_path || metadata.ado_iteration_path}`);
-  if (ado.ado_area_path || metadata.ado_area_path) pieces.push(`area ${ado.ado_area_path || metadata.ado_area_path}`);
-  if (ado.ado_changed_date || metadata.ado_changed_date) pieces.push(`changed ${ado.ado_changed_date || metadata.ado_changed_date}`);
-  return pieces.join('; ');
-}
-
-function _wsrPrDetailLines(activity) {
-  const metadata = _wsrMetadata(activity);
-  const lines = [];
-  _wsrExternalRefs(activity)
-    .filter(ref => ref?.provider === 'azure_devops' && ref?.type === 'pull_request')
-    .slice(0, 3)
-    .forEach(ref => {
-      const id = ref.id || '';
-      const title = _wsrCompactText(ref.title || '', 180);
-      const status = ref.state ? ` (${ref.state})` : '';
-      const detail = ref.status === 'ok'
-        ? `ADO PR${id ? ` ${id}` : ''}${status}${title ? `: ${title}` : ''}`
-        : `ADO PR${id ? ` ${id}` : ''}: ${ref.status || 'not resolved'}`;
-      lines.push(detail);
-    });
-  const pullRequests = Array.isArray(metadata.pull_requests) ? metadata.pull_requests : [];
-  pullRequests.slice(0, 3).forEach(pr => {
-    const id = pr.id || pr.number || pr.pullRequestId || '';
-    const title = _wsrCompactText(pr.title || pr.name || '', 180);
-    const status = pr.status ? ` (${pr.status})` : '';
-    if (id || title) lines.push(`ADO PR${id ? ` ${id}` : ''}${status}${title ? `: ${title}` : ''}`);
-  });
-  if (metadata.pr && typeof metadata.pr === 'object') {
-    const pr = metadata.pr;
-    const id = pr.number || pr.id || pr.pullRequestId || '';
-    const branch = pr.branch ? ` branch ${pr.branch}` : '';
-    const commit = pr.commit ? ` commit ${pr.commit}` : '';
-    if (id || branch || commit) lines.push(`PR${id ? ` #${id}` : ''}:${branch}${commit}`.replace(/:\s*$/, ''));
-  }
-  if (Array.isArray(metadata.prs) && metadata.prs.length) {
-    lines.push(`Related PRs: ${metadata.prs.slice(0, 8).map(pr => `#${pr}`).join(', ')}`);
-  }
-  if (Array.isArray(metadata.inferred_pbis) && metadata.inferred_pbis.length) {
-    lines.push(`Related PBIs: ${metadata.inferred_pbis.slice(0, 8).join(', ')}`);
-  }
-  if (metadata.pbi_id) lines.push(`PBI: ${metadata.pbi_id}`);
-  return lines;
-}
-
-function _wsrActivityDetailLines(activity, title) {
-  const lines = [];
-  const seen = new Set();
-  const summary = _wsrCompactText(activity?.summary, 320);
-  const bodyText = _wsrCompactText(activity?.body_text || activity?.description, 360);
-  if (summary && !_wsrIsSimilarText(summary, title)) _wsrAddDetailLine(lines, seen, 'Details', summary, 320);
-  if (bodyText && !_wsrIsSimilarText(bodyText, title) && !_wsrIsSimilarText(bodyText, summary)) _wsrAddDetailLine(lines, seen, 'Evidence', bodyText, 360);
-  const adoDetail = _wsrAdoDetailLine(activity);
-  _wsrAddDetailLine(lines, seen, 'ADO', adoDetail, 320);
-  _wsrPrDetailLines(activity).forEach(line => _wsrAddDetailLine(lines, seen, 'Linkage', line, 260));
-  if (activity?.source_url) _wsrAddDetailLine(lines, seen, 'Source', activity.source_url, 260);
-  return lines;
-}
-
-function _wsrFormatHighlight(activity) {
-  const proj = _wsrProjectDisplayName(activity);
-  const title = _wsrCompactText(activity?.title || activity?.summary || activity?.event_type || 'activity', 220);
-  const lines = [`- [${proj}] ${title}`];
-  if (_wsrWorkRefLabel(activity)) {
-    _wsrActivityDetailLines(activity, title).forEach(line => lines.push(`  - ${line}`));
-  }
-  return lines.join('\n');
-}
-
-function getWsrTemplate() {
-  try {
-    const stored = localStorage.getItem(WSR_TEMPLATE_STORAGE_KEY);
-    if (stored && stored.trim()) return stored;
-  } catch {}
-  return WSR_DEFAULT_TEMPLATE;
-}
-
-function initWsrTemplateEditor() {
-  const ta = document.getElementById('wsr-template');
-  if (!ta) return;
-  if (ta.value) return;
-  ta.value = getWsrTemplate();
-  const status = document.getElementById('wsr-template-status');
-  if (status) {
-    const usingCustom = !!localStorage.getItem(WSR_TEMPLATE_STORAGE_KEY);
-    status.textContent = usingCustom ? 'Loaded custom template from local storage.' : 'Template loaded from defaults.';
-  }
-}
-
-function saveWsrTemplate() {
-  const ta = document.getElementById('wsr-template');
-  if (!ta) return;
-  try {
-    localStorage.setItem(WSR_TEMPLATE_STORAGE_KEY, ta.value);
-    const status = document.getElementById('wsr-template-status');
-    if (status) status.textContent = 'Template saved at ' + new Date().toISOString();
-    toast('Template saved');
-    generateWorkReport();
-  } catch (e) {
-    toast('Save failed: ' + (e?.message || e), 'error');
-  }
-}
-
-function resetWsrTemplate() {
-  try { localStorage.removeItem(WSR_TEMPLATE_STORAGE_KEY); } catch {}
-  const ta = document.getElementById('wsr-template');
-  if (ta) ta.value = WSR_DEFAULT_TEMPLATE;
-  const status = document.getElementById('wsr-template-status');
-  if (status) status.textContent = 'Template reset to defaults.';
-  toast('Template reset');
-  generateWorkReport();
-}
-
-function renderWsrTemplate(tpl, ctx) {
-  return String(tpl || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (m, key) => {
-    return Object.prototype.hasOwnProperty.call(ctx, key) ? String(ctx[key]) : m;
-  });
-}
-
-function buildWsrMarkdown(summary, opts) {
-  // opts: { days, windowStart?: Date, windowEnd?: Date, weekRef?: Date, titleOverride?: string }
-  if (typeof opts === 'number') opts = { days: opts };
-  opts = opts || {};
-  const end = opts.windowEnd ? new Date(opts.windowEnd) : new Date();
-  const days = Math.max(1, Number(opts.days || 7));
-  const start = opts.windowStart ? new Date(opts.windowStart) : new Date(end.getTime() - days * 24 * 3600 * 1000);
-  const events = summary?.activities || summary?.recent_events || summary?.events || [];
-  const { filtered, byProject, byType, byStatus } = _wsrSummarizeEvents(events, start.getTime(), end.getTime());
-  const projTotal = summary?.project_total ?? byProject.size;
-  const projectEntries = _wsrProjectEntries(byProject);
-  const primaryProjectName = projectEntries.length ? String(projectEntries[0][0]) : '(none)';
-  const projectNames = _wsrProjectNamesText(byProject);
-  const projectTags = _wsrProjectTagsText(byProject);
-  const highlights = filtered.slice(0, 10).map(e => _wsrFormatHighlight(e)).join('\n') || '- _(no activity in window)_';
-
-  const wkRef = opts.weekRef ? new Date(opts.weekRef) : end;
-  const wk = _wsrIsoWeek(wkRef);
-  const title = opts.titleOverride || `Week ${wk.week}, ${wk.year}`;
-  const ctx = {
-    title,
-    week: String(wk.week),
-    week_year: String(wk.year),
-    week_label: `Week ${wk.week}, ${wk.year}`,
-    window_start: _wsrFormatDate(start),
-    window_end: _wsrFormatWindowEndInclusive(end),
-    generated_at: new Date().toISOString(),
-    days: String(days),
-    total_events: String(filtered.length),
-    active_projects: String(byProject.size),
-    total_projects: String(projTotal),
-    project_name: primaryProjectName,
-    project_names: projectNames,
-    project_tags: projectTags,
-    project_name_tags: projectTags,
-    event_types_count: String(byType.size),
-    highlights,
-    by_project: _wsrMapToBullets(byProject),
-    by_type: _wsrMapToBullets(byType),
-    by_status: _wsrMapToBullets(byStatus),
-  };
-  const tpl = (document.getElementById('wsr-template')?.value) || getWsrTemplate();
-  return renderWsrTemplate(tpl, ctx);
-}
-
-function _wsrIsoWeek(d) {
-  // ISO 8601 week number (week starts Monday; week 1 contains the first Thursday).
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = t.getUTCDay() || 7;
-  t.setUTCDate(t.getUTCDate() + 4 - day);
-  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  const week = Math.ceil(((t - yearStart) / 86400000 + 1) / 7);
-  return { year: t.getUTCFullYear(), week };
-}
-
-function _wsrSetTitle(d) {
-  const el = document.getElementById('wsr-title');
-  if (!el) return;
-  const wk = _wsrIsoWeek(new Date((d || new Date()).getTime() - 1));
-  el.textContent = `Week ${wk.week}, ${wk.year}`;
-}
-
-function _wsrBuildWeeklyHistoryEntries(summary, rangeDays, anchorEnd, stamp) {
-  const dayMs = 86400000;
-  const weekMs = 7 * dayMs;
-  const end = anchorEnd ? _wsrStartOfDay(anchorEnd) : _wsrStartOfThuWeek(new Date());
-  const rangeStart = new Date(end.getTime() - Math.max(1, Number(rangeDays || 7)) * dayMs);
-  const events = summary?.activities || summary?.recent_events || summary?.events || [];
-  const entries = [];
-  let windowEnd = new Date(end);
-
-  while (windowEnd > rangeStart) {
-    const windowStart = new Date(Math.max(rangeStart.getTime(), windowEnd.getTime() - weekMs));
-    const prevEnd = new Date(windowStart);
-    const prevStart = new Date(prevEnd.getTime() - weekMs);
-    const actualDays = Math.max(1, Math.ceil((windowEnd.getTime() - windowStart.getTime()) / dayMs));
-    const weekRef = new Date(windowEnd.getTime() - 1);
-    const totalEvents = _wsrSummarizeEvents(events, windowStart.getTime(), windowEnd.getTime()).filtered.length;
-
-    entries.push({
-      md: buildWsrMarkdown(summary, { days: actualDays, windowStart, windowEnd, weekRef }),
-      mdPrev: buildWsrMarkdown(summary, {
-        days: 7,
-        windowStart: prevStart,
-        windowEnd: prevEnd,
-        weekRef: new Date(prevEnd.getTime() - 1),
-      }),
-      stamp,
-      days: actualDays,
-      totalEvents,
-      dataStatusVersion: 2,
-      title: `Week ${_wsrIsoWeek(weekRef).week}, ${_wsrIsoWeek(weekRef).year}`,
-      windowStart: _wsrFormatDate(windowStart),
-      windowEnd: _wsrFormatDate(windowEnd),
-    });
-
-    windowEnd = windowStart;
-  }
-
-  return entries;
-}
-
-async function generateWorkReport() {
-  if (_wsrGenerating) {
-    setWsrStatus('Generating…');
-    return;
-  }
-  _wsrGenerating = true;
-  showWsrBusy('Loading data...');
-  const rangeEl = document.getElementById('wsr-range');
-  const days = Math.max(1, Number(rangeEl?.value || 7));
-  setWsrStatus('Loading data…');
-  try {
-    await _wsrEnsureProjectNameMap();
-    const summary = await _wsrFetchSummary(days * 25);
-    _wsrSetBusyMessage('Building report...');
-    setWsrStatus('Building report…');
-    const now = new Date();
-    const reportWindow = _wsrGetReportWeekWindow(now);
-    const thisStart = reportWindow.weekStart;
-    const thisEnd = reportWindow.weekEnd;
-    const prevEnd = thisStart;
-    const prevStart = new Date(prevEnd.getTime() - 7 * 86400000);
-    const md = buildWsrMarkdown(summary, { days: 7, windowStart: thisStart, windowEnd: thisEnd });
-    const mdPrev = buildWsrMarkdown(summary, { days: 7, windowStart: prevStart, windowEnd: prevEnd, weekRef: new Date(prevEnd.getTime() - 1) });
-    _wsrLastMarkdown = md;
-    _wsrLastMarkdownPrev = mdPrev;
-    _wsrSetTitle(thisEnd);
-    _wsrSetPreviewText('this', md);
-    _wsrSetPreviewText('prev', mdPrev);
-    const prevLabel = document.getElementById('wsr-prev-label');
-    if (prevLabel) {
-      const wkP = _wsrIsoWeek(new Date(prevEnd.getTime() - 1));
-      prevLabel.textContent = `Last week (Week ${wkP.week}, ${wkP.year})`;
-    }
-    const thisLabel = document.getElementById('wsr-this-label');
-    if (thisLabel) {
-      const wkT = _wsrIsoWeek(new Date(thisEnd.getTime() - 1));
-      thisLabel.textContent = `This week (Week ${wkT.week}, ${wkT.year})`;
-    }
-    const stamp = now.toISOString();
-    const genEl = document.getElementById('wsr-generated-at');
-    if (genEl) genEl.textContent = stamp;
-    _wsrSetBusyMessage('Saving history...');
-    setWsrStatus('Saving history…');
-    const currentMeta = _wsrBuildSnapshotMeta(thisStart, thisEnd, { stamp, days: 7, dataStatusVersion: 2 });
-    _wsrSetActiveSnapshotMeta(currentMeta);
-    _wsrWriteCachedReport({ md, mdPrev, stamp, days, dataStatusVersion: 2, windowStart: currentMeta.windowStart, windowEnd: currentMeta.windowEnd });
-    appendWorkReportToHistory(_wsrBuildWeeklyHistoryEntries(summary, days, thisEnd, stamp));
-    setWsrStatus('Ready.');
-  } catch (e) {
-    setWsrStatus('Failed: ' + (e?.message || e));
-  } finally {
-    _wsrGenerating = false;
-    hideWsrBusy(true);
-  }
-}
-
-function readWorkReportHistory() {
-  try {
-    const raw = localStorage.getItem(WSR_HISTORY_KEY);
-    if (!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
-  } catch { return []; }
-}
-
-function writeWorkReportHistory(list) {
-  try { localStorage.setItem(WSR_HISTORY_KEY, JSON.stringify(list.slice(0, WSR_HISTORY_MAX))); } catch {}
-}
-
-function _wsrHistoryKey(entry) {
-  if (entry?.windowStart && entry?.windowEnd) return `${entry.windowStart}|${entry.windowEnd}`;
-  return `${entry?.stamp || ''}|${entry?.days || ''}|${entry?.title || ''}`;
-}
-
-function _wsrFirstHeading(md) {
-  const m = String(md || '').match(/^#\s+(.+)$/m);
-  return m ? m[1].trim() : '(untitled)';
-}
-
-function appendWorkReportToHistory(entry) {
-  const incoming = (Array.isArray(entry) ? entry : [entry]).filter(e => e?.md);
-  if (!incoming.length) return;
-  const merged = new Map();
-  readWorkReportHistory().forEach(e => merged.set(_wsrHistoryKey(e), e));
-  incoming.forEach(e => {
-    const wk = _wsrIsoWeek(e.stamp ? new Date(e.windowEnd || e.stamp) : new Date());
-    const normalized = {
-      ...e,
-      title: e.title || `Week ${wk.week}, ${wk.year}`,
-    };
-    merged.set(_wsrHistoryKey(normalized), normalized);
-  });
-  const list = [...merged.values()].sort((a, b) => {
-    const at = Date.parse(a?.windowEnd || a?.stamp || 0);
-    const bt = Date.parse(b?.windowEnd || b?.stamp || 0);
-    return bt - at;
-  });
-  writeWorkReportHistory(list);
-  renderWorkReportHistory();
-}
-
-function _wsrHistoryWindowLabel(entry) {
-  if (entry?.windowStart && entry?.windowEnd) {
-    const end = new Date(entry.windowEnd);
-    const endInclusive = Number.isFinite(end.getTime()) ? _wsrFormatWindowEndInclusive(end) : entry.windowEnd;
-    return `${entry.windowStart} -> ${endInclusive}`;
-  }
-  return `${entry?.days ?? '—'}d`;
-}
-
-function _wsrWindowKey(windowStart, windowEnd) {
-  return `${windowStart || ''}|${windowEnd || ''}`;
-}
-
-async function _wsrRefreshHistoryDataStatusFromApi(force = false) {
-  const now = Date.now();
-  if (!force && (now - _wsrHistoryStatusRefreshedAt) < 300000) return;
-  const list = readWorkReportHistory();
-  if (!list.length) return;
-  try {
-    const summary = await _wsrFetchSummary(5000);
-    const events = summary?.activities || summary?.recent_events || summary?.events || [];
-    const next = new Map();
-    const refreshedList = list.map((e) => {
-      if (!e?.windowStart || !e?.windowEnd) return e;
-      const windowStart = new Date(e.windowStart);
-      const windowEnd = new Date(e.windowEnd);
-      const totalEvents = _wsrSummarizeEvents(events, windowStart.getTime(), windowEnd.getTime()).filtered.length;
-      next.set(_wsrWindowKey(e.windowStart, e.windowEnd), totalEvents);
-      return { ...e, totalEvents, dataStatusVersion: 2 };
-    });
-    writeWorkReportHistory(refreshedList);
-    _wsrWindowEventCounts = next;
-    _wsrHistoryStatusRefreshedAt = now;
-    renderWorkReportHistory();
-  } catch {}
-}
-
-function _wsrGetEntryTotalEvents(entry) {
-  const key = _wsrWindowKey(entry?.windowStart, entry?.windowEnd);
-  if (_wsrWindowEventCounts.has(key)) return _wsrWindowEventCounts.get(key);
-  const direct = Number(entry?.totalEvents);
-  if (Number.isFinite(direct) && direct >= 0 && Number(entry?.dataStatusVersion || 0) >= 2) return direct;
-  return null;
-}
-
-function _wsrDataStatus(entry) {
-  const totalEvents = _wsrGetEntryTotalEvents(entry);
-  if (totalEvents === null) {
-    return { label: 'Refresh needed', cls: 'pill pill-amber', title: 'This cached snapshot has not been checked against current CGA activity data yet.' };
-  }
-  if (totalEvents === 0) {
-    return { label: 'Missing data', cls: 'pill pill-red', title: 'No activity events were found in this window.' };
-  }
-  return { label: `${totalEvents} events`, cls: 'pill pill-green', title: 'Activity exists for this window.' };
-}
-
-function _wsrSetPreviewLabels(currentEnd, prevEnd) {
-  const prevLabel = document.getElementById('wsr-prev-label');
-  if (prevLabel) {
-    const wkP = _wsrIsoWeek(new Date(prevEnd.getTime() - 1));
-    prevLabel.textContent = `Last week (Week ${wkP.week}, ${wkP.year})`;
-  }
-  const thisLabel = document.getElementById('wsr-this-label');
-  if (thisLabel) {
-    const wkT = _wsrIsoWeek(new Date(currentEnd.getTime() - 1));
-    thisLabel.textContent = `This week (Week ${wkT.week}, ${wkT.year})`;
-  }
-}
-
-function _wsrPreviewKind(which) {
-  return which === 'prev' ? 'prev' : 'this';
-}
-
-function _wsrPreviewId(which) {
-  return _wsrPreviewKind(which) === 'prev' ? 'wsr-preview-prev' : 'wsr-preview';
-}
-
-function _wsrSaveButtonId(which) {
-  return _wsrPreviewKind(which) === 'prev' ? 'wsr-save-prev-btn' : 'wsr-save-btn';
-}
-
-function _wsrPreviewLabel(which) {
-  return _wsrPreviewKind(which) === 'prev' ? 'Last week WSR' : 'This week WSR';
-}
-
-function _wsrGetPreviewText(which) {
-  const el = document.getElementById(_wsrPreviewId(which));
-  if (!el) return '';
-  if (typeof el.value === 'string') return el.value;
-  return el.innerText || el.textContent || '';
-}
-
-function _wsrSetPreviewText(which, markdown, clean = true) {
-  const el = document.getElementById(_wsrPreviewId(which));
-  if (!el) return;
-  const text = String(markdown || '');
-  if (typeof el.value === 'string') el.value = text;
-  else el.textContent = text;
-  if (clean) _wsrSetPreviewDirty(which, false);
-}
-
-function _wsrSetPreviewDirty(which, isDirty) {
-  const kind = _wsrPreviewKind(which);
-  const btn = document.getElementById(_wsrSaveButtonId(kind));
-  const editor = document.getElementById(_wsrPreviewId(kind));
-  if (btn) btn.disabled = !isDirty;
-  if (editor) editor.classList.toggle('is-dirty', !!isDirty);
-}
-
-function markWorkReportDirty(which) {
-  _wsrSetPreviewDirty(which, true);
-  setWsrStatus(`${_wsrPreviewLabel(which)} has unsaved edits.`);
-}
-
-function handleWorkReportEditorKeydown(event, which) {
-  if (!event || !(event.ctrlKey || event.metaKey) || String(event.key || '').toLowerCase() !== 's') return;
-  event.preventDefault();
-  saveWorkReportEdit(which);
-}
-
-function _wsrBuildSnapshotMeta(windowStart, windowEnd, extra = {}) {
-  const start = new Date(windowStart);
-  const end = new Date(windowEnd);
-  const meta = { ...extra };
-  if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())) {
-    meta.windowStart = _wsrFormatDate(start);
-    meta.windowEnd = _wsrFormatDate(end);
-    meta.prevWindowEnd = meta.windowStart;
-    meta.prevWindowStart = _wsrFormatDate(new Date(start.getTime() - 7 * 86400000));
-  }
-  return meta;
-}
-
-function _wsrSetActiveSnapshotMeta(meta = {}) {
-  _wsrActiveSnapshot = { ...meta };
-}
-
-function _wsrReadCachedReport() {
-  try {
-    const raw = localStorage.getItem(WSR_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch { return {}; }
-}
-
-function _wsrWriteCachedReport(patch) {
-  const next = { ..._wsrReadCachedReport(), ...patch };
-  try { localStorage.setItem(WSR_STORAGE_KEY, JSON.stringify(next)); } catch {}
-  return next;
-}
-
-function _wsrFindHistoryEntry(windowStart, windowEnd) {
-  const key = _wsrWindowKey(windowStart, windowEnd);
-  return readWorkReportHistory().find(entry => _wsrWindowKey(entry?.windowStart, entry?.windowEnd) === key) || null;
-}
-
-function saveWorkReportEdit(which = 'this') {
-  const kind = _wsrPreviewKind(which);
-  _wsrLastMarkdown = _wsrGetPreviewText('this');
-  _wsrLastMarkdownPrev = _wsrGetPreviewText('prev');
-  const savedAt = new Date().toISOString();
-  const active = _wsrActiveSnapshot || {};
-  const cached = _wsrReadCachedReport();
-  const cachePatch = {
-    md: _wsrLastMarkdown,
-    mdPrev: _wsrLastMarkdownPrev,
-    stamp: savedAt,
-    editedAt: savedAt,
-    days: active.days || cached.days || 7,
-    dataStatusVersion: active.dataStatusVersion || cached.dataStatusVersion || 2,
-  };
-  if (active.windowStart && active.windowEnd) {
-    cachePatch.windowStart = active.windowStart;
-    cachePatch.windowEnd = active.windowEnd;
-  }
-  _wsrWriteCachedReport(cachePatch);
-
-  const historyUpdates = [];
-  if (active.windowStart && active.windowEnd) {
-    historyUpdates.push({
-      ...active,
-      ...cachePatch,
-      title: active.title,
-      totalEvents: active.totalEvents,
-    });
-  }
-  if (kind === 'prev' && active.prevWindowStart && active.prevWindowEnd) {
-    const existingPrev = _wsrFindHistoryEntry(active.prevWindowStart, active.prevWindowEnd) || {};
-    historyUpdates.push({
-      ...existingPrev,
-      md: _wsrLastMarkdownPrev,
-      mdPrev: existingPrev.mdPrev || '',
-      stamp: savedAt,
-      editedAt: savedAt,
-      days: existingPrev.days || 7,
-      windowStart: active.prevWindowStart,
-      windowEnd: active.prevWindowEnd,
-      dataStatusVersion: existingPrev.dataStatusVersion || active.dataStatusVersion || 2,
-    });
-  }
-  if (historyUpdates.length) appendWorkReportToHistory(historyUpdates);
-  else renderWorkReportHistory();
-
-  _wsrSetActiveSnapshotMeta({ ...active, ...cachePatch });
-  _wsrSetPreviewDirty(kind, false);
-  const stampEl = document.getElementById('wsr-generated-at');
-  if (stampEl) stampEl.textContent = savedAt;
-  setWsrStatus(`${_wsrPreviewLabel(kind)} saved.`);
-  toast(`${_wsrPreviewLabel(kind)} saved`);
-}
-
-function _wsrResetHistoryPagination() {
-  _wsrHistoryVisibleCount = WSR_HISTORY_BATCH_SIZE;
-}
-
-function loadMoreWorkReportHistory() {
-  const total = readWorkReportHistory().length;
-  _wsrHistoryVisibleCount = Math.min(total, _wsrHistoryVisibleCount + WSR_HISTORY_BATCH_SIZE);
-  renderWorkReportHistory();
-}
-
-function renderWorkReportHistory() {
-  const tbody = document.getElementById('wsr-history-body');
-  const countEl = document.getElementById('wsr-history-count');
-  const loadMoreBtn = document.getElementById('wsr-history-load-more-btn');
-  if (!tbody) return;
-  const list = readWorkReportHistory();
-  const visible = list.slice(0, Math.max(0, _wsrHistoryVisibleCount));
-  if (countEl) countEl.textContent = `${list.length} entr${list.length === 1 ? 'y' : 'ies'}`;
-  if (!list.length) {
-    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">No reports stored yet.</div></td></tr>`;
-    if (loadMoreBtn) loadMoreBtn.hidden = true;
-    return;
-  }
-  tbody.innerHTML = visible.map((e, idx) => {
-    const stamp = esc(e.stamp || '');
-    const wk = e.windowEnd ? _wsrIsoWeek(new Date(e.windowEnd)) : (e.stamp ? _wsrIsoWeek(new Date(e.stamp)) : null);
-    const weekLabel = wk ? `Week ${wk.week}, ${wk.year}` : (e.title || _wsrFirstHeading(e.md));
-    const title = esc(weekLabel);
-    const windowLabel = esc(_wsrHistoryWindowLabel(e));
-    const dataStatus = _wsrDataStatus(e);
-    return `<tr>
-      <td>${title}</td>
-      <td class="mono" style="text-align:center">${stamp}</td>
-      <td class="mono" style="text-align:center">${windowLabel}</td>
-      <td style="text-align:center"><span class="${dataStatus.cls}" title="${esc(dataStatus.title)}">${esc(dataStatus.label)}</span></td>
-      <td class="actions-col">
-        <button class="btn btn-sm" onclick="viewWorkReportFromHistory(${idx})">View</button>
-        <button class="btn btn-sm" onclick="regenerateWorkReportFromHistory(${idx})" title="Re-run WSR for the same window length">Regenerate</button>
-        <button class="btn btn-sm" onclick="copyWorkReportFromHistory(${idx})">Copy</button>
-        <button class="btn btn-sm btn-danger" onclick="deleteWorkReportFromHistory(${idx})">Delete</button>
-      </td>
-    </tr>`;
-  }).join('');
-
-  if (loadMoreBtn) {
-    const remaining = Math.max(0, list.length - visible.length);
-    const loadNext = Math.min(WSR_HISTORY_BATCH_SIZE, remaining);
-    loadMoreBtn.hidden = remaining <= 0;
-    loadMoreBtn.disabled = remaining <= 0;
-    loadMoreBtn.textContent = remaining > 0
-      ? `Load ${loadNext} more (${visible.length}/${list.length})`
-      : `All ${list.length} loaded`;
-  }
-}
-
-function viewWorkReportFromHistory(idx) {
-  const list = readWorkReportHistory();
-  const e = list[idx];
-  if (!e) return;
-  _wsrLastMarkdown = e.md;
-  _wsrLastMarkdownPrev = e.mdPrev || '';
-  if (e.windowEnd) _wsrSetTitle(new Date(e.windowEnd));
-  _wsrSetPreviewText('this', e.md);
-  _wsrSetPreviewText('prev', e.mdPrev || '_(no previous-week snapshot stored)_');
-  if (e.windowEnd) {
-    const currentEnd = new Date(e.windowEnd);
-    const prevEnd = e.windowStart ? new Date(e.windowStart) : new Date(currentEnd.getTime() - 7 * 86400000);
-    _wsrSetPreviewLabels(currentEnd, prevEnd);
-    _wsrSetActiveSnapshotMeta(_wsrBuildSnapshotMeta(prevEnd, currentEnd, { ...e }));
-  } else {
-    _wsrSetActiveSnapshotMeta({ ...e });
-  }
-  const stampEl = document.getElementById('wsr-generated-at');
-  if (stampEl) stampEl.textContent = e.stamp || '—';
-  setWsrStatus('Viewing snapshot from ' + (e.stamp || 'history') + '.');
-  try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch {}
-}
-
-async function copyWorkReportFromHistory(idx) {
-  const list = readWorkReportHistory();
-  const e = list[idx];
-  if (!e?.md) return;
-  try {
-    await navigator.clipboard.writeText(e.md);
-    toast('WSR snapshot copied');
-  } catch (err) {
-    toast('Copy failed: ' + (err?.message || err), 'error');
-  }
-}
-
-async function regenerateWorkReportFromHistory(idx) {
-  const list = readWorkReportHistory();
-  const e = list[idx];
-  if (!e) return;
-  if (!e.windowStart || !e.windowEnd) {
-    await generateWorkReport();
-    return;
-  }
-  showWsrBusy('Regenerating...');
-  setWsrStatus('Generating…');
-  try {
-    await _wsrEnsureProjectNameMap();
-    const days = Math.max(1, Number(e.days || 7));
-    const summary = await _wsrFetchSummary(days * 25);
-    const windowStart = new Date(e.windowStart);
-    const windowEnd = new Date(e.windowEnd);
-    const totalEvents = _wsrSummarizeEvents(summary?.activities || summary?.recent_events || summary?.events || [], windowStart.getTime(), windowEnd.getTime()).filtered.length;
-    const prevEnd = new Date(windowStart);
-    const prevStart = new Date(prevEnd.getTime() - 7 * 86400000);
-    const refreshed = {
-      ...e,
-      md: buildWsrMarkdown(summary, { days, windowStart, windowEnd, weekRef: new Date(windowEnd.getTime() - 1) }),
-      mdPrev: buildWsrMarkdown(summary, { days: 7, windowStart: prevStart, windowEnd: prevEnd, weekRef: new Date(prevEnd.getTime() - 1) }),
-      stamp: new Date().toISOString(),
-      totalEvents,
-      dataStatusVersion: 2,
-    };
-    appendWorkReportToHistory(refreshed);
-    viewWorkReportFromHistory(readWorkReportHistory().findIndex(item => _wsrHistoryKey(item) === _wsrHistoryKey(refreshed)));
-    setWsrStatus('Ready.');
-  } catch (err) {
-    setWsrStatus('Failed: ' + (err?.message || err));
-  } finally {
-    hideWsrBusy(true);
-  }
-}
-
-function deleteWorkReportFromHistory(idx) {
-  const list = readWorkReportHistory();
-  if (!list[idx]) return;
-  if (!confirm('Delete this WSR snapshot?')) return;
-  list.splice(idx, 1);
-  writeWorkReportHistory(list);
-  renderWorkReportHistory();
-}
-
-function clearWorkReportHistory() {
-  if (!confirm('Delete ALL stored WSR snapshots? This cannot be undone.')) return;
-  try { localStorage.removeItem(WSR_HISTORY_KEY); } catch {}
-  _wsrResetHistoryPagination();
-  renderWorkReportHistory();
-}
-
-async function regenerateAllWorkReports() {
-  const list = readWorkReportHistory();
-  if (!list.length) {
-    toast('No history to regenerate');
-    return;
-  }
-  if (!confirm(`Regenerate all ${list.length} stored WSR snapshots?`)) return;
-  showWsrBusy('Regenerating all...');
-  setWsrStatus('Regenerating all snapshots…');
-  try {
-    await _wsrEnsureProjectNameMap();
-    const summary = await _wsrFetchSummary(5000);
-    const events = summary?.activities || summary?.recent_events || summary?.events || [];
-    const refreshedList = list.map((e) => {
-      if (!e?.windowStart || !e?.windowEnd) return e;
-      const windowStart = new Date(e.windowStart);
-      const windowEnd = new Date(e.windowEnd);
-      const days = Math.max(1, Number(e.days || Math.ceil((windowEnd.getTime() - windowStart.getTime()) / 86400000) || 7));
-      const totalEvents = _wsrSummarizeEvents(events, windowStart.getTime(), windowEnd.getTime()).filtered.length;
-      const prevEnd = new Date(windowStart);
-      const prevStart = new Date(prevEnd.getTime() - 7 * 86400000);
-      return {
-        ...e,
-        days,
-        md: buildWsrMarkdown(summary, { days, windowStart, windowEnd, weekRef: new Date(windowEnd.getTime() - 1) }),
-        mdPrev: buildWsrMarkdown(summary, { days: 7, windowStart: prevStart, windowEnd: prevEnd, weekRef: new Date(prevEnd.getTime() - 1) }),
-        stamp: new Date().toISOString(),
-        totalEvents,
-        dataStatusVersion: 2,
-      };
-    });
-    writeWorkReportHistory(refreshedList);
-    _wsrResetHistoryPagination();
-    renderWorkReportHistory();
-    viewWorkReportFromHistory(0);
-    setWsrStatus('Ready.');
-    toast(`Regenerated ${refreshedList.length} snapshots`);
-  } catch (err) {
-    setWsrStatus('Failed: ' + (err?.message || err));
-    toast('Regenerate all failed: ' + (err?.message || err), 'error');
-  } finally {
-    hideWsrBusy(true);
-  }
-}
-
-async function copyWorkReport() {
-  if (!_wsrLastMarkdown) { await generateWorkReport(); }
-  _wsrLastMarkdown = _wsrGetPreviewText('this') || _wsrLastMarkdown;
-  try {
-    await navigator.clipboard.writeText(_wsrLastMarkdown || '');
-    toast('This week WSR copied');
-  } catch (e) {
-    toast('Copy failed: ' + (e?.message || e), 'error');
-  }
-}
-
-async function copyWorkReportPrev() {
-  if (!_wsrLastMarkdownPrev) { await generateWorkReport(); }
-  _wsrLastMarkdownPrev = _wsrGetPreviewText('prev') || _wsrLastMarkdownPrev;
-  try {
-    await navigator.clipboard.writeText(_wsrLastMarkdownPrev || '');
-    toast('Last week WSR copied');
-  } catch (e) {
-    toast('Copy failed: ' + (e?.message || e), 'error');
-  }
-}
-
-function updateWsrAutoSchedule() {
-  const sel = document.getElementById('wsr-auto');
-  const interval = Math.max(0, Number(sel?.value || 0));
-  if (_wsrAutoTimer) { clearInterval(_wsrAutoTimer); _wsrAutoTimer = null; }
-  if (interval > 0) {
-    _wsrAutoTimer = setInterval(() => { generateWorkReport(); }, interval);
-  }
-}
-
-function loadWorkReport() {
-  if (!_wsrGenerating) hideWsrBusy(true);
-  // Populate the template textarea (from storage or default) on every entry.
-  initWsrTemplateEditor();
-  const reportWindow = _wsrGetReportWeekWindow(new Date());
-  _wsrSetTitle(reportWindow.weekEnd);
-  _wsrSetPreviewLabels(reportWindow.weekEnd, reportWindow.weekStart);
-  _wsrSetActiveSnapshotMeta(_wsrBuildSnapshotMeta(reportWindow.weekStart, reportWindow.weekEnd, { days: 7, dataStatusVersion: 2 }));
-  _wsrResetHistoryPagination();
-  renderWorkReportHistory();
-  // Restore last cached report so the tab is not blank.
-  if (!_wsrLastMarkdown) {
-    try {
-      const cached = _wsrReadCachedReport();
-      if (cached?.md) {
-        _wsrLastMarkdown = cached.md;
-        _wsrLastMarkdownPrev = cached.mdPrev || '';
-        _wsrSetPreviewText('this', cached.md);
-        if (cached.mdPrev) _wsrSetPreviewText('prev', cached.mdPrev);
-        const stampEl = document.getElementById('wsr-generated-at');
-        if (stampEl) stampEl.textContent = cached.stamp || '—';
-        if (cached.windowStart && cached.windowEnd) {
-          _wsrSetActiveSnapshotMeta(_wsrBuildSnapshotMeta(cached.windowStart, cached.windowEnd, { ...cached }));
-        }
-      }
-    } catch {}
-  }
-  updateWsrAutoSchedule();
-  _wsrRefreshHistoryDataStatusFromApi();
-  if (!_wsrAutoGeneratedOnce && !_wsrLastMarkdown) {
-    _wsrAutoGeneratedOnce = true;
-    generateWorkReport();
-  }
-}
-
-async function loadWorkBriefing(options = {}) {
-  const append = !!options?.append;
-  const preserveLimit = !!options?.preserveLimit;
-  if (_workBriefingLoading) return;
-  _workBriefingLoading = true;
-  const tbody = document.getElementById('briefing-activities-body');
-  const loadMoreBtn = document.getElementById('briefing-load-more-btn');
-  if (tbody && !append) {
-    if (!preserveLimit) {
-      tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state">Loading dashboard…</div></td></tr>`;
-    }
-  }
-  if (loadMoreBtn) {
-    loadMoreBtn.disabled = true;
-    if (append) loadMoreBtn.textContent = 'Loading…';
-  }
-
-  try {
-    const rawProjectInput = document.getElementById('briefing-project-id')?.value.trim() || '';
-    // Input value may be a project name (highlighted in datalist) — resolve to project_id.
-    const projectId = _projectIdByName[rawProjectInput] || rawProjectInput;
-    const configuredBatch = Math.max(1, Math.min(Number(document.getElementById('briefing-limit')?.value || WORK_BRIEFING_BATCH_SIZE), WORK_BRIEFING_BATCH_SIZE));
-    if ((!append && !preserveLimit) || projectId !== _workBriefingCurrentProjectId) {
-      _workBriefingRequestedLimit = configuredBatch;
-      _workBriefingCurrentProjectId = projectId;
-    }
-    const limit = Math.max(1, Math.min(_workBriefingRequestedLimit, 5000));
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (projectId) params.set('project_id', projectId);
-    _workBriefingSummary = await api('GET', '/admin/work-briefing?' + params.toString());
-    renderWorkBriefing(_workBriefingSummary, { preserveViewport: preserveLimit });
-  } catch (e) {
-    toast(e.message, 'error');
-    renderWorkBriefing();
-  } finally {
-    _workBriefingLoading = false;
-  }
-}
 
 function openNewUser() {
   ['nu-user','nu-pass'].forEach(id=>document.getElementById(id).value='');

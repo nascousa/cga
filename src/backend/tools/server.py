@@ -58,8 +58,7 @@ from backend.graph.query_policy import (
     select_query_tool,
 )
 from backend.indexer.paths import RepositoryPathError, resolve_changed_path
-from backend.perf.context_quality import benchmark_context_quality as run_context_quality_benchmark
-from backend.perf.token_efficiency import benchmark_token_efficiency as run_token_efficiency_benchmark
+from backend.plugins.host import execution, is_enabled, require_enabled
 from backend.tools.producer import MCPProducer
 from backend.queue.streams import JobConsumer
 from backend.workbriefing.service import WorkActivityValidationError, WorkBriefingService
@@ -70,7 +69,21 @@ def _csv_env(name: str) -> list[str]:
     return [part.strip() for part in os.getenv(name, "").split(",") if part.strip()]
 
 
-mcp = FastMCP(
+class PluginAwareMCP(FastMCP):
+    async def list_tools(self):
+        plugin_tools = {
+            "run_eval": "evaluation",
+            "benchmark_token_efficiency": "evaluation",
+            "benchmark_context_quality": "evaluation",
+            "workassist_get_activity_briefing": "briefing",
+        }
+        return [
+            tool for tool in await super().list_tools()
+            if tool.name not in plugin_tools or is_enabled(plugin_tools[tool.name])
+        ]
+
+
+mcp = PluginAwareMCP(
     "cga-mcp-server",
     instructions=(
         "Use query_graph for policy-routed one-hop relationships: the admin policy "
@@ -329,7 +342,7 @@ def _cached_read(tool: str, args: dict, fetch_fn, trace_args: dict | None = None
     latency_ms = (time.perf_counter() - t0) * 1000.0
     if cache is not None:
         cache.set(tool, cache_args, result)
-    if _recorder:
+    if _recorder and is_enabled("evaluation"):
         _recorder.record(tool, trace_args or args, result, latency_ms)
     return result
 
@@ -1084,11 +1097,13 @@ def get_stats() -> dict:
 @mcp.tool()
 def run_eval() -> dict:
     """Run the P@5 + latency benchmark and return the report."""
+    require_enabled("evaluation")
     if not _graph:
         raise RuntimeError("MCP server not initialized")
     from backend.eval.runner import EvalRunner
-    runner = EvalRunner(_registry.get(_resolve_project_name()))
-    return runner.run().as_dict()
+    with execution("evaluation"):
+        runner = EvalRunner(_registry.get(_resolve_project_name()))
+        return runner.run().as_dict()
 
 
 @mcp.tool()
@@ -1116,6 +1131,8 @@ def benchmark_token_efficiency(
 
     This tool is repository-agnostic and intended for cross-project efficiency benchmarking.
     """
+    require_enabled("evaluation")
+    from backend.perf.token_efficiency import benchmark_token_efficiency as run_token_efficiency_benchmark
     payload = {
         "query": query,
         "notes": notes,
@@ -1137,7 +1154,8 @@ def benchmark_token_efficiency(
     if cg_file_paths:
         payload["cg"]["filePaths"] = cg_file_paths
 
-    return run_token_efficiency_benchmark(payload=payload, repo_root=authorized_repo_root())
+    with execution("evaluation"):
+        return run_token_efficiency_benchmark(payload=payload, repo_root=authorized_repo_root())
 
 
 @mcp.tool()
@@ -1150,10 +1168,13 @@ def benchmark_context_quality(
     Cases should provide goldItems plus baseline/cg chunks with evidence IDs.
     This is deterministic and scores context risk before an LLM answer is generated.
     """
+    require_enabled("evaluation")
+    from backend.perf.context_quality import benchmark_context_quality as run_context_quality_benchmark
     payload = {"cases": cases or []}
     if weights:
         payload["weights"] = weights
-    return run_context_quality_benchmark(payload=payload, repo_root=authorized_repo_root())
+    with execution("evaluation"):
+        return run_context_quality_benchmark(payload=payload, repo_root=authorized_repo_root())
 
 
 # ---------------------------------------------------------------------------
@@ -1784,6 +1805,7 @@ async def workassist_list_recent_activity(project_id: str | None = None, limit: 
 @mcp.tool()
 async def workassist_get_activity_briefing(project_id: str | None = None, limit: int = 25) -> dict:
     """Summarize recent activity for the authenticated MCP project."""
+    require_enabled("briefing")
     service = _require_work_briefing_service()
     resolved_project_id = _resolve_project_external_id(project_id)
     safe_limit = max(1, min(int(limit), 100))

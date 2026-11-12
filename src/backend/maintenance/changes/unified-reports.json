@@ -1,0 +1,13 @@
+{
+  "summary": "Unified interactive reporting workspace",
+  "changes": {
+    "Changed": [
+      "Merged Report and AI-First into one filter-driven workspace, retaining evidence/policy tools and legacy saved reports in collapsed sections.",
+      "Date/project/type/status/text filters apply before the bounded activity sample; current readiness is explicitly separate from historical activity."
+    ],
+    "Added": [
+      "Local ECharts interactive charts with matching dark/light themes, evidence drill-down and snapshot-bound CSV/JSON exports.",
+      "Downloadable Mermaid-led PDF reports and diagram sources; PDF evidence is explicitly limited while CSV/JSON retain the complete generated snapshot."
+    ]
+  }
+}
