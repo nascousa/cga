@@ -8,7 +8,7 @@ This file defines all domain-specific terminology, abbreviations, and shortcuts 
 |---|---|---|
 | **CPMD** | Checkin/Push/Merge/Deploy | Four-step git workflow: `git add -A`, `git commit -m "..."`, `git push origin main`, then deploy via CI/CD pipeline |
 | **TDD** | Test-Driven Development | Development methodology: write failing tests first, then implement to pass, then refactor with tests passing |
-| **ADC** | Autonomous Development Constitution | Standardized framework for managing project governance, AI instructions, and developer context in `.adc/` folder |
+| **ADC** | Agent Development Constitution | Standardized framework for managing project governance, AI instructions, and developer context in `.adc/` folder |
 | **GHC** | GitHub Copilot | Standard abbreviation for GitHub Copilot in this project documentation and discussion |
 | **MCP** | Model Context Protocol | Protocol for AI agents (like Copilot, Claude) to access external tools and data sources |
 | **ContextGraph** | ContextGraph | Central repository and artifact management system; use `ContextGraph` as shorthand in code/docs |
@@ -27,7 +27,7 @@ This file defines all domain-specific terminology, abbreviations, and shortcuts 
 
 | Term | Definition |
 |---|---|
-| **.adc/** | Hidden "Autonomous Development Constitution" directory at project root containing governance, AI instructions, and agent workspace |
+| **.adc/** | Hidden "Agent Development Constitution" directory at project root containing governance, AI instructions, and agent workspace |
 | **src/** | Source code directory containing all application logic, utilities, and build scripts |
 | **src/dist/** | Compiled/bundled output directory with subdirs: `release/` (production artifacts), `staging/` (pre-prod), `build/` (cache) |
 | **docs/** | User-facing, publishable project documentation (separate from `.adc/`) |

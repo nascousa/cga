@@ -2,14 +2,28 @@
 
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.128
-- **Status:** ADC governance check-in; merge and deployment pending; Windows release signing pending
+- **Version:** 1.30.132
+- **Status:** Plugin controls, compact ADC, unified reports, maintenance controls and cross-platform Relay source prepared for review; formal releases remain subject to approval and signing gates
 - **Author:** Nate Scott
-- **Date:** 2026-10-06 (CGA-managed ADC authority and pinned project adoption provenance)
+- **Date:** 2026-11-11 (release-readiness status)
+
+The source/runtime version above is not a published-release claim. The latest
+published GitHub release is
+[v1.30.113](https://github.com/nascousa/cga/releases/tag/v1.30.113);
+v1.30.125 remains an unpublished draft. See
+[current release readiness](docs/PUBLISHING.md#current-release-readiness-2026-11-10)
+for verified checks and the remaining signing gate.
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
 CGA is dedicated to AI-FIRST engineering teams that want local, evidence-backed context for agentic development workflows.
+
+**ADC** stands for **Agent Development Constitution**, CGA's centrally managed
+framework for agent development rules and project governance.
+The central ADC master is **1.2.4** (2026-11-11), adding mandatory fixed project
+ports, including previews and ownership-safe conflict cleanup. Existing project
+adoption remains explicit; see the [ADC governance notes](docs/adc-framework.md#fixed-project-ports-and-conflict-cleanup)
+and [local endpoint policy](docs/runtime-operations.md#fixed-local-endpoint).
 
 In the published 2026-06-02 live multi-project benchmark, CGA reduced prompt tokens by **90.44%** on average while lowering Hallucination Pressure Score by **13.34%** across **102 real-code cases**. This is a historical pre-answer HPS snapshot; it is not a model task-completion result.
 
@@ -45,6 +59,10 @@ Remote clients can read approved ADC through the authenticated MCP endpoint or
 Desktop Relay, including revision history, diffs and file hashes. Relay provides
 preview-first local synchronization; local edits are never silently overwritten.
 See [remote ADC interfaces](docs/adc-framework.md#remote-adc-interfaces).
+
+For macOS CLI, Linux tray, user services and
+signed-release prerequisites, see the [Desktop Relay guide](src/cga-relay/README.md).
+Unix source/candidate support does not imply a signed public platform release.
 
 ### Option A: Docker Desktop Release
 
@@ -91,15 +109,99 @@ That stack opens the Admin UI at `http://localhost:18001/admin`.
 
 ## What You Get
 
+Admin navigation follows the daily workflow: **Dashboard → Project → Graph →
+Automation → ADC → Audit**. The user dropdown separates **Profile** and
+**Sign out** from an admin-only **Administration** group: **Users and access**,
+**Plugin management**, and **System settings**. Administration entries retain
+their existing routes, active-page indicators and SVG icons. Navigation remains
+subject to the existing role permissions.
+Dashboard, Automation and Report entry points also depend on enabled plugins.
+
+### Maintenance Controls (Source Candidate)
+
+- **Security > Audit retention:** capacity and cleanup status, policy-bound
+  preview and bounded cleanup. Automatic deletion defaults off; enabling it
+  requires explicit administrator confirmation.
+- **Change Logs:** frozen product history and clearly separated Unreleased
+  changes; product-change notes are checked in CI and frozen by version iteration.
+- **Upgrade:** newer formal release detection and change notifications, with
+  confirmation-gated installation through an independent host executor. Trusted
+  signed metadata, compatible schemas, fresh backups and original-port/image
+  rollback checks are required; the ordinary API receives no Docker socket.
+
+These features are implemented in source, **not deployed to the current local
+1.30.132 runtime**. Online installation additionally requires operator provisioning
+and a newer signed release; it supports single-process JSON Docker Compose first,
+not Relay/native installers or automatic schema migrations. See
+[maintenance operations](docs/runtime-operations.md#audit-retention-change-logs-and-confirmed-updates)
+and [release-note/signing workflow](docs/PUBLISHING.md#change-logs-and-trusted-update-manifests).
+
+### Selectable First-Party Plugins
+
+Open **User menu → Administration → Plugin management** to install, enable, disable or uninstall
+optional capabilities. Existing installations default to all bundled plugins;
+new distributions can contain only the plugins their users need.
+Choose a plugin on the left to open its settings in the right-hand panel.
+Search, filters and installation selections stay visible on desktop; narrow
+screens show one pane at a time. Larger settings use tabs without losing edits.
+Installation selection,
+runtime defaults and browser-local report preferences are saved separately.
+Installed-but-disabled plugins remain configurable; configuration checks do
+not execute external jobs or claim provider connectivity.
+The overview supports search, category/status filters and sorting without
+discarding pending installation or enable changes.
+
+| Plugin | Capability |
+|---|---|
+| `automation` | Scheduled-task management and run history |
+| `browseragent` | BrowserAgent page checks and browser artifacts |
+| `workflows` | External agent activation and HTTP workflows |
+| `azure_policy_change_monitor` | Read-only Azure Policy monitoring |
+| `briefing` | Work Dashboard and activity summaries |
+| `reports` | Unified interactive reports, PDF/data exports and retained weekly history |
+| `notifications` | Optional webhook and SMTP delivery |
+| `evaluation` | Context benchmarks and background trace evaluation |
+
+**ADC governance and system Audit remain core, not plugins.** Graph/MCP,
+identity, projects, agent memory, backups and the scheduling engine also remain
+core. Uninstalling an optional plugin retains its settings and history. Reports
+work without the briefing plugin and retain existing browser-local templates
+and saved reports. See the [plugin guide](extensions/README.md) for selective
+Docker builds, APIs, compatibility and restart requirements.
+
+### Core and Optional Features
+
+Plugin development now has a paired [standard and approval policy](extensions/README.md#plugin-development-approval-and-sdk)
+and [Python developer SDK](sdk/cga-plugin-sdk/README.md), packaged together with
+schemas, examples and license/checksum evidence. The v1 candidate supports
+reviewed first-party source integrations, not third-party hot loading. Formal
+publication requires independent current-commit reviews and passing checks;
+draft artifacts are not approved API/Relay updates.
+
 - **Admin Dashboard:** project registration, user access groups, indexing status, settings, schedules, and operational views.
+- **Central ADC Management:** Constitution, Amendments and Versions subtabs; compact document/change-picker and editor workspaces, collapsed publishing/baseline/history/collection tools, immutable project revisions and collection receipts, and a right-aligned ECharts Sankey for baseline-to-project revision relationships. See [ADC governance](docs/adc-framework.md).
 - **3D Graph Viewer:** visual exploration of repository relationships and graph layout controls.
 - **Expired login sessions:** an authenticated API response of HTTP 401 returns Admin to sign-in and stops authenticated polling. An empty graph project list with an authentication error requires signing in again; it does not mean the registered projects have been deleted.
 - **MCP-compatible API:** agent-facing retrieval tools for symbols, files, dependencies, imports, variable flow, and architecture queries.
-- **CGA-Relay:** one developer-machine `cga-relay`, enforced by a machine-wide OS mutex, with backend health alerts, stdio MCP gateway, local scan/sync, branch/ref graph routing and promotion, and safe config examples. See [docs/cga-relay.md](docs/cga-relay.md).
+- **CGA-Relay:** local Rust relay with a Windows notification-area UI, macOS CLI and Linux AppIndicator companion, plus a headless loopback gateway. Single-instance enforcement is machine-wide on Windows and per-user on Unix. Includes backend health alerts, stdio MCP, local scan/sync, branch/ref graph routing and promotion, and OS-protected account credentials. Unix source/candidate support is not a signed-release claim. See [docs/cga-relay.md](docs/cga-relay.md).
 - **Work Briefing Aggregation:** WA-compatible activity capture and briefing summaries inside CGA.
 - **Harness-neutral agent memory:** project-scoped MCP and authenticated HTTP interfaces for retrieving memory and recording bounded, evidence-referenced learning candidates. See [harness integration](docs/harness-memory-integration.md).
 - **AI-First Readiness And Evidence:** Admin APIs for readiness snapshots, GitHub/Azure DevOps/verification signals, evidence packs, PR evidence links, and policy-derived gates that combine graph, indexing, ADC, governance, and work activity signals.
+- **Unified Report workspace (source implementation):** Audit → Report combines
+  work activity, current AI-First readiness and expandable evidence. Filter by
+  projects, UTC dates, type, status and text, then generate an immutable-in-session
+  snapshot. Locally bundled ECharts charts support drill-down and dark/light/system
+  themes. Export Mermaid-led, print-light PDF, CSV, JSON or Mermaid source.
+  Activity is capped at 10,000 matching records with explicit partial-sample
+  warnings; readiness is current, not a historical trend or proven AI ROI.
+  PDF evidence is shortened and capped at 100 rows; CSV/JSON retain the complete
+  generated snapshot. Existing policy/evidence tools and weekly drafts/history
+  remain in collapsed panels. See [report operations](docs/runtime-operations.md#unified-report-workspace).
 - **Schedule Automation:** admin-defined recurring jobs for BrowserAgent page tests, agent activation calls, generic HTTP tasks, and project extensions.
+  The workspace opens on tasks, with execution history in a separate tab and
+  advanced task fields collapsed. Project policy and PR/CI/benchmark evidence
+  inputs belong to **Audit → Report → Evidence packs, policy and signal tools**,
+  not Automation.
 - **Project Extensions:** project-scoped extension pages and runs, starting with Azure Policy Change Monitor for cloud parity, GUID/version consistency, risky-effect scans, and Docker Desktop `/repos` path mapping.
 - **Runtime Backup:** PostgreSQL and FalkorDB snapshots for local-first persistence and recovery.
 - **Safe Graph Updates:** isolated generation builds retain the last successful graph on failure, with versioned parse evidence and deterministic cross-file relationships. See [graph integrity and recovery](docs/graph-reliability.md).

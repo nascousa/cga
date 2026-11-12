@@ -4,6 +4,8 @@ import os
 import unittest
 import zipfile
 import asyncio
+import tempfile
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
@@ -16,6 +18,7 @@ from backend.adc.service import (
     onboarding, project_revision, publish, read_release, save_revision,
 )
 from backend.adc.router import router
+from backend.adc import collection
 from backend.auth.database import get_db
 from backend.auth.dependencies import get_current_user
 from backend.auth.pgshim import Connection
@@ -64,7 +67,9 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             await self.db.close()
             raise RuntimeError("ADC destructive integration fixture requires database named adc_test")
         await self.db.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public")
-        await self.db.execute("CREATE TABLE projects(id BIGSERIAL PRIMARY KEY, is_active INTEGER NOT NULL DEFAULT 1)")
+        await self.db.execute("""CREATE TABLE projects(
+            id BIGSERIAL PRIMARY KEY, is_active INTEGER NOT NULL DEFAULT 1,
+            project_name TEXT NOT NULL DEFAULT 'Project', repo_path TEXT NOT NULL DEFAULT '')""")
         await self.db.execute("""
             CREATE TABLE user_groups(id BIGINT PRIMARY KEY, is_active INTEGER);
             CREATE TABLE user_group_members(user_id BIGINT, group_id BIGINT);
@@ -129,6 +134,55 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         await onboarding(self.db, self.project, "admin")
         self.assertEqual(await self.db.fetchval("SELECT count(*) FROM adc_project_revisions"), 1)
 
+    async def test_rule_collection_provenance_conflicts_and_version_inventory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / ".adc").mkdir()
+            source = root / ".adc" / "index.md"
+            source.write_text("Reviewed project rules", encoding="utf-8")
+            await self.db.execute("UPDATE projects SET repo_path=$1 WHERE id=$2", directory, self.project)
+            blocked = await self.db.fetchval("INSERT INTO projects DEFAULT VALUES RETURNING id")
+            plan = await collection.preview(self.db)
+            self.assertEqual([p["status"] for p in plan], ["ready", "blocked"])
+            body = collection.CollectRequest(
+                release_id=plan[0]["release_id"], expected_revision=0,
+                snapshot_sha256=plan[0]["snapshot_sha256"], reason="Centralize reviewed rules")
+            source.write_text("Changed after preview", encoding="utf-8")
+            with self.assertRaises(HTTPException) as stale_source:
+                await collection.collect(self.db, self.project, body, "admin")
+            self.assertEqual(stale_source.exception.status_code, 409)
+            self.assertEqual(await self.db.fetchval("SELECT count(*) FROM adc_project_revisions"), 0)
+            source.write_text("Reviewed project rules", encoding="utf-8")
+            saved = await collection.collect(self.db, self.project, body, "admin")
+            self.assertEqual(saved["revision"], 1)
+            self.assertEqual(source.read_text(encoding="utf-8"), "Reviewed project rules")
+            state = await project_revision(self.db, self.project)
+            self.assertEqual(state["documents"][".adc/index.md"], "Reviewed project rules")
+            self.assertEqual((await collection.preview(self.db))[0]["status"], "managed")
+            with self.assertRaises(HTTPException) as stale_revision:
+                await collection.collect(self.db, self.project, body, "admin")
+            self.assertEqual(stale_revision.exception.status_code, 409)
+            inventory = await collection.versions(self.db)
+            self.assertEqual(len(inventory["projects"]), 2)
+            self.assertEqual(inventory["revisions"][0]["snapshot_sha256"], body.snapshot_sha256)
+            self.assertNotIn("documents", inventory["releases"][0])
+            self.assertIn(blocked, [p["id"] for p in inventory["projects"]])
+            with self.assertRaises(asyncpg.exceptions.RaiseError):
+                await self.db.execute("DELETE FROM adc_rule_collections WHERE project_id=$1", self.project)
+            newer = await publish(self.db, ReleaseCreate(
+                version="2.0.0", documents=DOCS, reason="Different baseline"), "admin")
+            with self.assertRaises(HTTPException) as implicit_upgrade:
+                await collection.collect(self.db, self.project, collection.CollectRequest(
+                    release_id=newer["id"], expected_revision=1,
+                    snapshot_sha256=body.snapshot_sha256, reason="Must not upgrade during collection"), "admin")
+            self.assertEqual(implicit_upgrade.exception.status_code, 409)
+            empty = root / "no-local-adc"
+            empty.mkdir()
+            await self.db.execute("UPDATE projects SET repo_path=$1 WHERE id=$2", str(empty), blocked)
+            self.assertEqual((await collection.preview(self.db))[1]["status"], "blocked")
+            await onboarding(self.db, blocked, "admin")
+            self.assertEqual((await collection.preview(self.db))[1]["status"], "no_local_rules")
+
     async def test_concurrent_writes_have_one_winner(self):
         other = await asyncpg.connect(os.environ["ADC_TEST_DSN"])
         body = ProjectUpdate(release_id=self.r1["id"], expected_revision=0, reason="Concurrent adoption")
@@ -173,8 +227,16 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         app.dependency_overrides[get_db] = database
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             self.assertEqual((await client.get("/api/adc/releases")).status_code, 401)
+            self.assertEqual((await client.get("/api/adc/versions")).status_code, 401)
+            self.assertEqual((await client.get("/api/adc/rules/preview")).status_code, 401)
             app.dependency_overrides[get_current_user] = lambda: {"id": 7, "username": "dev", "role": "developer"}
             self.assertEqual((await client.post("/api/adc/releases", json={"version":"3.0.0","documents":DOCS,"reason":"Test"})).status_code, 403)
+            self.assertEqual((await client.get("/api/adc/versions")).status_code, 403)
+            self.assertEqual((await client.get("/api/adc/rules/preview")).status_code, 403)
+            self.assertEqual((await client.post(f"/api/adc/projects/{self.project}/rules/collect", json={
+                "release_id": self.r1["id"], "expected_revision": 0,
+                "snapshot_sha256": "a" * 64, "reason": "Not authorized",
+            })).status_code, 403)
             await self.db.execute("INSERT INTO user_groups VALUES(1,1)")
             self.assertEqual((await client.get(f"/api/adc/projects/{self.project}")).status_code, 403)
             self.assertEqual((await client.get(f"/api/adc/projects/{self.project}/download")).status_code, 403)

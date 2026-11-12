@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cga-plugin-sdk"
+version = "1.0.0"
+description = "Contracts, scaffolding and deterministic packaging for reviewed CGA first-party plugins"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+dependencies = ["pydantic>=2.9,<3"]
+
+[project.scripts]
+cga-plugin = "cga_plugin_sdk.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+cga_plugin_sdk = ["LICENSE"]

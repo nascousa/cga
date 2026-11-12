@@ -1,10 +1,109 @@
-# Autonomous Development Constitution Notes
+# Agent Development Constitution Notes
 
-The Autonomous Development Constitution (ADC) is the project-context governance model used by CGA. It keeps architecture, conventions, domain knowledge, and AI instructions close to the code while separating them from ordinary product documentation.
+The Agent Development Constitution (ADC) is the project-context governance model used by CGA. It keeps architecture, conventions, domain knowledge, and AI instructions close to the code while separating them from ordinary product documentation.
+
+ADC means **Agent Development Constitution**. The earlier expansion is retired
+for current documentation, templates and new master releases. Immutable older
+releases and pinned adoption snapshots retain their original wording for
+provenance; the naming correction does not silently upgrade existing projects.
+
+The local CGA master catalog published this terminology-only correction as
+**ADC 1.2.2** on 2026-11-10, derived from 1.2.1. Twelve documents changed; all
+three earlier releases and existing project revisions were verified unchanged.
+Projects can review and explicitly adopt 1.2.2 through **Amendments**.
+
+### Inline Information And Rich Tooltips
+
+The central master **ADC 1.2.3** adds the mandatory **Inline Information and
+Rich Tooltips** section to `.adc/standards/conventions/frontend.md`. Any
+explanation that is not clear in one short, single-line sentence must move into
+an info-icon tooltip. The icon is immediately to the right of its associated
+text, on the same line. Rich text must retain meaningful paragraphs, emphasis,
+lists, code and line breaks; a native plain-text `title` is not sufficient.
+
+Help must support hover, focus and click/touch, accessible naming and description,
+Escape dismissal, hoverable/selectable content, viewport containment and active
+theme colors. Essential errors/actions remain visible as concise summaries.
+Untrusted content must not be interpreted as HTML.
+
+The ADC interface uses structured DOM content (bold headings and lists) for
+inline help, including governance, provenance, editing/import, adoption and
+collection explanations. Tooltip nodes/listeners are disposed on sign-out.
+Info circles are visually 14px, inside transparent 24px buttons that retain
+usable pointer/touch targets without enlarging the displayed icon.
+Master 1.2.3 changes only this frontend policy document; earlier releases and
+all existing project bindings/revisions remain unchanged. Adoption is explicit.
+
+### Fixed Project Ports And Conflict Cleanup
+
+The central master **ADC 1.2.4**, published on 2026-11-11, adds **Fixed Project
+Ports and Conflict Cleanup** to `.adc/standards/conventions/devops.md` and a
+mandatory instruction in `.adc/prompt-rules.md`. Development, previews, UI
+validation, test servers and deployments must retain the configured ports and
+original URL. Healthy existing instances are reused, not duplicated on another
+port. Port changes require explicit user approval.
+
+On conflict, identify the exact listener, project ownership and startup source.
+Stop/remove only a confirmed obsolete same-project instance by its PID, service
+or container ID, removing obsolete auto-start registrations when necessary and
+preserving data, configuration and recovery. Never kill a shared Docker host
+process or unrelated service. Uncertain ownership or missing permissions is a
+blocker, not permission to choose another port. Verify health at the original URL.
+
+Only these two master documents changed; the other 43 documents, five prior
+releases and existing project bindings/revisions were verified unchanged.
+The [automatically loaded project instruction](../.github/instructions/runtime-ports.instructions.md)
+enforces this rule immediately for CGA on port **18001**, without rewriting its
+approved adoption snapshot or silently upgrading other projects.
 
 ## Integrated ADC Governance
 
 CGA administrators manage the complete ADC document catalog at `/admin/adc`.
+The manager has three independent subtabs:
+
+- **Constitution** places a narrow, searchable document menu on the left and
+  the document editor on the right. A compact release/provenance toolbar replaces
+  stacked headings; document path and staging actions sit above the editor.
+  **Publish & import** is collapsed by default, with JSON import nested inside.
+  The selected document is highlighted;
+  filtering retains the current editor draft. Switching documents asks before
+  discarding unstaged edits. Stage documents before publishing a new immutable
+  Constitution release. Narrow screens stack the menu above the editor.
+  Historical Windows line endings are normalized only when comparing editor
+  drafts, avoiding false unsaved-change prompts without rewriting release data.
+- **Amendments** selects a project and manages its pinned baseline and changes,
+  history, rollback and rule collection from registered checkouts.
+  A compact project/summary/download toolbar leads to a left-side change picker
+  and right-side editor. Path/type and justification/expiry share rows on desktop.
+  Staging actions and the revision reason/save bar stay beside the editing flow.
+  **Baseline & review**, **Revision history** and **Collect project rules** are
+  collapsed by default, keeping low-frequency tools out of the main form.
+  Inspecting history opens the review output; collapsing tools retains their
+  DOM values and drafts. Baseline preview/acknowledgement remains required for
+  upgrades even when its tools are collapsed. Small screens stack the columns.
+  The label covers existing amendment, override and exemption types; it does
+  not change their semantics or rename stored project revisions.
+- **Versions** shows active projects, including unbound projects, with current
+  revisions by default. Filter by project name or ID, or select **All history**
+  to inspect every immutable project revision. Both the table and graph use the
+  same filter; filtering does not change any project binding or delete history.
+  Its Apache ECharts Sankey uses `nodeAlign: right`:
+  baseline release -> project revision -> project. Link width counts revisions,
+  not compliance, usage or source-code size. Selecting a revision opens its
+  historical content without changing the project's current binding.
+
+The version inventory also has a text table. Chart colors follow the Admin
+theme, resize with the panel, and are disposed on sign-out. The pinned ECharts
+6.0.0 asset loads on demand from jsDelivr with SHA-384 integrity verification.
+Project data remains in the browser; it is not sent to the CDN. If loading fails,
+the UI reports the error and retains the version table.
+Labels truncate to fit narrow panels, while tooltips retain full node details.
+Changing documents or projects prompts before discarding unstaged edits.
+Saving a project revision requires staging edited change fields first; restoring
+or collecting rules also protects local project drafts. Reload/close prompts
+when drafts are present. Drafts remain browser-memory-only, not durable storage;
+sign-out intentionally disposes the editor and chart.
+
 The bundled initial release is the locally available ADC **1.1.23** package
 (44 documents), not a claim that upstream GitHub has no newer release. Its
 provenance, publisher, publication timestamp and SHA256 are recorded. The
@@ -73,6 +172,50 @@ No graph schema migration or reindex is required. The complete seed is stored
 in `src/backend/adc/seed.json`; the validated local release importer is
 `src/scripts/import-adc-release.py`. Existing published seed content must not
 be overwritten; later changes are new releases.
+
+### Central Collection of Project Rules
+
+CGA / ADC is the rule authority. Project `.adc` files are working/distribution
+copies, not a second release catalog. Use **Amendments > Preview all
+project rules**, review each result, then **Collect available rule snapshots**
+with an administrator's justification.
+
+Collection reads only the registered checkout and includes `.adc/index.md`,
+`bootstrap.md`, `prompt-rules.md`, root tool-rule pointers, and files under
+`.adc/standards/`, `.adc/rules/` and `.adc/.github/`. It excludes the provenance
+lock, credentials, Relay/edge-agent configuration, scratchpads, planning status
+and knowledge context. It never executes a rule or imported workflow.
+
+The preview identifies missing/unreadable roots explicitly. An unregistered
+checkout must be registered first; an empty repository path must be corrected
+in project settings. CGA does not guess another project's location by name.
+Every active registered project with local rules must be `managed` before
+claiming complete collection; `blocked` projects are not silently counted as
+migrated. A visible checkout without `.adc` is reported as `no_local_rules`
+only if it already has a centrally pinned baseline, not as a collected snapshot.
+
+Each collection rechecks the preview's snapshot SHA256 and expected project
+revision. Local edits or concurrent CGA updates return 409 without a committed
+revision. Existing bindings retain their baseline; unbound projects explicitly
+adopt the previewed baseline. Matching master rules are inherited; differences
+become project overrides/amendments. Unrelated changes and central-only rules
+are preserved. Collection is not an implicit baseline upgrade or deletion.
+
+The new immutable revision and its `adc_rule_collections` receipt commit
+atomically. Receipts record the registered source path, snapshot hash and
+per-document SHA256 manifest; they are part of PostgreSQL backups. Published
+master releases are never mutated. Original files are retained for offline
+agents and source-control review, not deleted or rewritten during collection.
+After collecting, make future rule changes in CGA and distribute approved
+bundles using the existing preview-first Relay workflow.
+
+Admin-only account endpoints:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/adc/versions` | Consistent release/project/revision inventory without document contents |
+| `GET /api/adc/rules/preview` | Preview rule snapshots for every active registered checkout |
+| `POST /api/adc/projects/{id}/rules/collect` | Collect the previewed snapshot using `release_id`, `expected_revision`, `snapshot_sha256`, and `reason` |
 
 ## Remote ADC Interfaces
 

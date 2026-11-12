@@ -1,7 +1,7 @@
 ---
 project-name: "Agentic Boilerplate Project"
 version: "1.0.0"
-description: "A reference implementation of the Autonomous Development Constitution (ADC)."
+description: "A reference implementation of the Agent Development Constitution (ADC)."
 tech-stack:
   - React 18
   - Node.js 20
@@ -29,6 +29,14 @@ This project **MUST** integrate with the ContextGraph ecosystem:
 - **Initial ContextGraph Indexing**: Immediately after CGA-Relay + CGA MCP Server integration, run full-project indexing once so retrieval/review tools can access the entire repository context.
 
 ContextGraph MCP access is endpoint-first by default. A local MCP implementation is optional and repository-specific.
+
+## Research Report Formats
+
+Keep the existing report format and the evidence-driven ECharts interactive
+format as parallel choices. All reports require dark-mode support, and charts
+must follow the active theme. See
+[Research Report Formats](standards/conventions/research-reports.md)
+for layout, evidence, offline packaging, preservation and validation requirements.
 
 ## Environment Requirements
 Refer to `bootstrap.md` for exact start-up commands.

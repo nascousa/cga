@@ -25,7 +25,7 @@ $Files = @{
 ---
 project-name: "Agentic Boilerplate Project"
 version: "1.0.0"
-description: "A reference implementation of the Autonomous Development Constitution (ADC)."
+description: "A reference implementation of the Agent Development Constitution (ADC)."
 tech-stack:
   - React 18
   - Node.js 20

@@ -409,6 +409,15 @@ class WorkBriefingService:
     async def count_recent(self, project_id: str | None = None) -> int:
         return await self._store.count_recent(project_id=project_id)
 
+    async def report_rows(
+        self, *, start: datetime, end: datetime, project_ids: list[str],
+        event_type: str, status: str, search: str, limit: int,
+    ) -> tuple[list[WorkActivity], bool]:
+        rows = await self._store.report_rows(
+            start=start, end=end, project_ids=project_ids, event_type=event_type,
+            status=status, search=search, limit=limit + 1,
+        )
+        return [row for row in rows[:limit] if self._is_safe_activity(row)], len(rows) > limit
     async def cleanup_exact_duplicates(self, project_id: str | None = None, dry_run: bool = True) -> dict[str, Any]:
         return await self._store.cleanup_exact_duplicates(project_id=project_id, dry_run=dry_run)
 

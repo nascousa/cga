@@ -1,0 +1,49 @@
+.topbar-nav {
+  --nav-text-padding: 12px;
+  flex: 0 1 auto;
+  min-width: 0;
+  gap: 2px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.topbar-nav::-webkit-scrollbar { display: none; }
+.topbar-nav .tab-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  white-space: nowrap;
+  padding-inline: var(--nav-text-padding);
+}
+.topbar-nav .nav-icon { display: block; flex: 0 0 auto; margin-right: 6px; }
+.topbar-nav.is-compact .tab-btn { width: 34px; min-height: 34px; padding: 7px; }
+.topbar-nav.is-compact .nav-icon { margin-right: 0; }
+.topbar-nav.is-compact .nav-label {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: max-content;
+  visibility: hidden;
+  pointer-events: none;
+}
+.topbar-nav .tab-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.topbar .user-badge { flex: 0 0 auto; }
+#app-version { flex: 0 0 auto; white-space: nowrap; }
+.topbar-nav-tooltip {
+  position: fixed;
+  z-index: 100;
+  max-width: calc(100vw - 16px);
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--panel-elevated);
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35);
+  pointer-events: none;
+}

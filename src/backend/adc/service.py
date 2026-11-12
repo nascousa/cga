@@ -32,6 +32,14 @@ CREATE TABLE IF NOT EXISTS adc_project_revisions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY(project_id, revision)
 );
+CREATE TABLE IF NOT EXISTS adc_rule_collections (
+    project_id BIGINT NOT NULL,
+    revision INTEGER NOT NULL,
+    source_path TEXT NOT NULL, snapshot_sha256 TEXT NOT NULL,
+    manifest_json TEXT NOT NULL,
+    PRIMARY KEY(project_id, revision),
+    FOREIGN KEY(project_id, revision) REFERENCES adc_project_revisions(project_id, revision)
+);
 CREATE OR REPLACE FUNCTION adc_reject_mutation() RETURNS trigger AS $$
 BEGIN RAISE EXCEPTION 'ADC history is immutable; append a new release or revision'; END;
 $$ LANGUAGE plpgsql;
@@ -42,6 +50,10 @@ DO $$ BEGIN
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='adc_revisions_immutable' AND tgrelid='adc_project_revisions'::regclass) THEN
         CREATE TRIGGER adc_revisions_immutable BEFORE UPDATE OR DELETE ON adc_project_revisions
+        FOR EACH ROW EXECUTE FUNCTION adc_reject_mutation();
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname='adc_collections_immutable' AND tgrelid='adc_rule_collections'::regclass) THEN
+        CREATE TRIGGER adc_collections_immutable BEFORE UPDATE OR DELETE ON adc_rule_collections
         FOR EACH ROW EXECUTE FUNCTION adc_reject_mutation();
     END IF;
 END $$;

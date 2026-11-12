@@ -54,6 +54,12 @@ class ActivityStore(Protocol):
     async def count_recent(self, project_id: str | None = None) -> int:
         ...
 
+    async def report_rows(
+        self, *, start: datetime, end: datetime, project_ids: list[str],
+        event_type: str, status: str, search: str, limit: int,
+    ) -> list[WorkActivity]:
+        ...
+
     async def find_by_content_hash(
         self,
         *,
@@ -361,6 +367,34 @@ class PgVectorActivityStore:
         async with pool.acquire() as conn:
             rows = await conn.fetch(sql, *params)
 
+        return [self._activity_from_row(row) for row in rows]
+
+    async def report_rows(
+        self, *, start: datetime, end: datetime, project_ids: list[str],
+        event_type: str, status: str, search: str, limit: int,
+    ) -> list[WorkActivity]:
+        await self.ensure_schema()
+        pool = await self._get_pool()
+        filters = ["occurred_at >= $1", "occurred_at < $2"]
+        params: list[Any] = [start, end]
+        for expression, value in (
+            ("project_id = ANY({}::text[])", project_ids),
+            ("event_type = {}", event_type),
+            ("COALESCE(status, 'unspecified') = {}", status),
+            ("strpos(lower(title || ' ' || summary), lower({})) > 0", search),
+        ):
+            if value:
+                params.append(value)
+                filters.append(expression.format(f"${len(params)}"))
+        params.append(min(max(limit, 1), 10001))
+        async with pool.acquire() as conn:
+            async with conn.transaction(readonly=True):
+                await conn.execute("SET LOCAL statement_timeout = '15s'")
+                rows = await conn.fetch(
+                    f"SELECT {_ACTIVITY_COLUMNS} FROM {self._qualified('work_activities')} WHERE "
+                    + " AND ".join(filters)
+                    + f" ORDER BY occurred_at DESC, activity_id LIMIT ${len(params)}", *params,
+                )
         return [self._activity_from_row(row) for row in rows]
 
     async def count_recent(self, project_id: str | None = None) -> int:

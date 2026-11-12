@@ -33,7 +33,10 @@ CGA owns extension configuration, project scope, scheduling, run history, snapsh
 
 ## Quick Start
 
-1. Start CGA with its database and `schedule_worker` runtime module enabled.
+1. Start CGA with its database and `schedule_worker` runtime module enabled. In
+   **Plugins**, enable `azure_policy_change_monitor`;
+   enable `notifications` separately if delivery is required. Existing full
+   installations retain both by default. See the [plugin guide](../README.md).
 2. Open **Extensions**, select **Azure Policy Change Monitor**, and choose repository, Azure, or both sources.
 3. For Azure collection, set exactly one effective scope with `subscription_id`, `management_group_id`, or `azure_scope`.
 4. Select an authentication mode. Managed identity is recommended for Azure-hosted CGA; Azure CLI is intended for local development.
@@ -115,6 +118,10 @@ The model receives at most 100 recursively redacted findings. Returned items are
 ## Notifications
 
 Set `notifications_enabled=true`, choose `notification_min_severity`, and configure at least one channel:
+
+The separate CGA `notifications` plugin must also be installed and enabled.
+Removing it retains channel configuration and records unavailable delivery
+without changing the deterministic monitor outcome.
 
 - Webhook: set `notification_webhook_env` to the name of an environment variable containing an absolute HTTPS webhook URL.
 - Email: set `notification_email_recipients` and configure SMTP through CGA runtime settings. Supply the password only through `CGA_SMTP_PASSWORD`; attempts to persist `smtp.password` are rejected.

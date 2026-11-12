@@ -37,6 +37,8 @@ class IndexerConsumer:
         self._idle.set()
 
     async def start(self) -> None:
+        from backend.maintenance.spool import pending as update_pending
+
         if self._stopping:
             return
         self._running = True
@@ -50,8 +52,13 @@ class IndexerConsumer:
                         log.info("indexer.consumer.started")
                     if not self._running:
                         break
+                    if update_pending():
+                        await asyncio.sleep(1)
+                        continue
                     jobs = await self._consumer.consume(count=1, block_ms=3_000)
                     for msg_id, job in jobs:
+                        while self._running and update_pending():
+                            await asyncio.sleep(1)
                         if not self._running:
                             break
                         await self._process(msg_id, job)

@@ -1,0 +1,106 @@
+name: Plugin SDK release
+
+on:
+  workflow_dispatch:
+    inputs:
+      approval_pr:
+        description: Merged PR with independent current-head maintainer and security approvals
+        required: true
+        type: string
+      version:
+        description: SDK version matching pyproject.toml
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: read
+    outputs:
+      commit: ${{ steps.review.outputs.commit }}
+      head: ${{ steps.review.outputs.head }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - name: Resolve and verify approved merged source
+        id: review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVAL_PR: ${{ inputs.approval_pr }}
+          CGA_PLUGIN_MAINTAINERS: ${{ vars.CGA_PLUGIN_MAINTAINERS }}
+          CGA_PLUGIN_SECURITY_REVIEWERS: ${{ vars.CGA_PLUGIN_SECURITY_REVIEWERS }}
+          CGA_PLUGIN_REQUIRED_CHECKS: ${{ vars.CGA_PLUGIN_REQUIRED_CHECKS || 'Plugin SDK tests' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$APPROVAL_PR" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid PR number"; exit 1; }
+          head="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$APPROVAL_PR" --jq .head.sha)"
+          commit="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$APPROVAL_PR" --jq .merge_commit_sha)"
+          python src/scripts/check_plugin_approval.py --pr "$APPROVAL_PR" --head-sha "$head" --release-commit "$commit"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: plugin-sdk-release
+    permissions:
+      contents: write
+      pull-requests: read
+      checks: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.verify.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.11"
+      - name: Install approved SDK and test/build tools
+        run: python -m pip install ./sdk/cga-plugin-sdk pytest build==1.6.1 setuptools==81.0.0
+      - name: Verify contracts and rebuild the joint kit
+        env:
+          SDK_VERSION: ${{ inputs.version }}
+        run: |
+          python -m pytest --noconftest sdk/cga-plugin-sdk/tests src/tests/test_plugin_approval.py -q -o addopts=''
+          python src/scripts/build_plugin_sdk.py --version "$SDK_VERSION" --output "$RUNNER_TEMP/plugin-sdk"
+      - name: Recheck live approval before attestation/publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVAL_PR: ${{ inputs.approval_pr }}
+          APPROVED_HEAD: ${{ needs.verify.outputs.head }}
+          APPROVED_COMMIT: ${{ needs.verify.outputs.commit }}
+          CGA_PLUGIN_MAINTAINERS: ${{ vars.CGA_PLUGIN_MAINTAINERS }}
+          CGA_PLUGIN_SECURITY_REVIEWERS: ${{ vars.CGA_PLUGIN_SECURITY_REVIEWERS }}
+          CGA_PLUGIN_REQUIRED_CHECKS: ${{ vars.CGA_PLUGIN_REQUIRED_CHECKS || 'Plugin SDK tests' }}
+        run: python src/scripts/check_plugin_approval.py --pr "$APPROVAL_PR" --head-sha "$APPROVED_HEAD" --release-commit "$APPROVED_COMMIT"
+      - uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: ${{ runner.temp }}/plugin-sdk/*
+      - name: Publish new immutable developer-tool release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SDK_VERSION: ${{ inputs.version }}
+          APPROVED_COMMIT: ${{ needs.verify.outputs.commit }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="plugin-sdk-v$SDK_VERSION"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release already exists; choose a new version instead of replacing assets"
+            exit 1
+          fi
+          gh release create "$tag" "$RUNNER_TEMP"/plugin-sdk/* \
+            --target "$APPROVED_COMMIT" --latest=false \
+            --title "CGA Plugin Development Kit v$SDK_VERSION" \
+            --notes "Joint standards, independent approval policy, Python SDK, schema and guide. Verify SHA-256 and GitHub artifact attestations. This is not a CGA API/Relay update."

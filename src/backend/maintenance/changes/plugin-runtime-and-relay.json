@@ -1,0 +1,13 @@
+{
+  "summary": "Optional first-party plugin controls and cross-platform Relay source support",
+  "changes": {
+    "Added": [
+      "Selectable first-party plugin packaging, administrator enable/install controls and focused plugin settings with execution-aware disable safeguards.",
+      "Linux tray and user-service packaging plus macOS CLI packaging, native credential backends and explicit session-only credential mode."
+    ],
+    "Changed": [
+      "Automation, browser tasks, workflows, reports, notifications and evaluation retain their existing integration contracts behind optional-plugin host checks.",
+      "Cross-platform Relay release workflows require their platform signing and notarization prerequisites; source candidates do not imply published platform releases."
+    ]
+  }
+}

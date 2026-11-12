@@ -4,6 +4,350 @@ This guide keeps operational details out of the README while preserving the setu
 
 ## Supported Local Runtimes
 
+### Fixed Local Endpoint
+
+CGA retains its configured host port **18001** and existing bind addresses.
+Use `http://127.0.0.1:18001/admin` for the application, previews and UI validation;
+do not create alternate preview ports such as 18770/18771 or silently rewrite
+port mappings. Changing a port requires explicit user approval. A healthy
+existing instance should be reused.
+
+For a conflict, identify the exact listener, owning project and startup source
+before stopping anything. Remove only a confirmed obsolete same-project
+instance and its obsolete auto-start registration when necessary, preserving
+data, configuration and recovery. Never terminate shared Docker host processes
+or unrelated services. If ownership or permissions are unclear, report the
+blocker instead of changing ports; verify the original URL and health afterward.
+See the [ADC 1.2.4 policy](adc-framework.md#fixed-project-ports-and-conflict-cleanup).
+
+### Selectable First-Party Plugins
+
+The runtime supports eight optional plugins managed through
+**User menu > Administration > Plugin management**.
+The local runtime cutover below is verified.
+See the [plugin guide](../extensions/README.md) for the catalog, authenticated
+selection API, selective Docker builds and adapter-specific scheduling APIs.
+
+- Unconfigured installations keep all bundled plugins enabled for compatibility.
+  Selection is persisted under `plugins` in the existing runtime-config file;
+  startup environment defaults do not override a saved selection.
+- Disabling or uninstalling retains configuration, scheduled tasks, run history,
+  snapshots and browser-local report history. Existing tasks whose adapter is
+  unavailable record failed runs rather than making network requests.
+- The scheduler, system Audit and ADC governance remain core. Removing Automation
+  management does not stop jobs owned by still-enabled adapter plugins.
+- Saving a selection reloads Admin. Disabling an actively executing plugin is
+  rejected with HTTP 409; wait for its work to finish. Execution counters are
+  process-local: this host is intended for the existing single-process API,
+  not coordinated multi-worker activation.
+- Enabling evaluation after starting with it disabled requires an API restart
+  to start background trace recording/evaluation. Direct benchmarks are usable
+  immediately; disabling pauses an already-started worker.
+- Before replacing an existing distribution with a leaner image, save a selection
+  containing only plugins bundled in the new image. A saved selection referencing
+  absent plugins is rejected explicitly, rather than silently discarded.
+
+These are in-process first-party plugins, not an arbitrary-code marketplace or
+separately installed Python wheels. Build-time selection removes optional
+implementations/assets; common Python dependencies remain shared.
+
+#### Verified Local Plugin Cutover (2026-11-10)
+
+- Admin entry: `http://127.0.0.1:18001/admin/extensions`. All eight bundled
+  plugins are installed/enabled through the compatibility default; existing
+  runtime-config contents were preserved byte-for-byte.
+- Persistent Compose API image:
+  `cga-local:1.30.131-plugins-20261110-201608`, image
+  `sha256:179a4b321c2163038a6881a7e952797b3a9cc30523b7c568a3da1373006740b1`.
+  This is a local feature overlay, not a signed/public release.
+- Plugin-only patches were applied to the deployed files, retaining unrelated
+  live functionality. ADC scripts were not replaced and matched their original
+  bytes. Only the API service was recreated; all other **26 containers** retained
+  their IDs and start times. Ports and mounts matched before/after.
+- Normal configured-administrator login verified the eight-entry plugin catalog,
+  Automation, extension listing, briefing/report source, and system Audit APIs.
+  Anonymous plugin management returned HTTP 401. Plugin host/assets, deep links
+  and health returned HTTP 200; Docker health was `healthy`.
+- **27 projects** and ADC/configuration inventory hashes were unchanged. All
+  **20 published graphs** retained node/edge counts. Temporary
+  `__cga_stage__*` build graphs were excluded consistently from both snapshots;
+  their creation/removal is normal indexing activity, not data loss.
+- The initial readiness timeout coincided with the existing scheduled database
+  dump holding schema locks; the original image was automatically restored.
+  After the dump finished, startup and authenticated verification passed.
+  Conservative inventory checks also rolled back on temporary graph changes
+  before their filtering was corrected. No unrelated process was terminated.
+- Rollback image: `cga-local:rollback-plugins-20261110-201608`.
+  Original Compose/runtime settings, ADC assets and verification inventories are
+  retained under
+  `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-plugins-20261110-201608`.
+  The pre-cutover PostgreSQL archive is
+  `backups\cga-desktop\auth\auth-20261111T041855Z-949e94845d594588ac43afa6cd49e26e.sql.gz`;
+  gzip integrity passed, SHA256
+  `d6d78bf27de5c6a76ae7fac6cc7c703554ca7376d0239d8c8f35100bc2e60d14`.
+  No full restore rehearsal or plugin-driven data migration was performed.
+  Preserve later administrator edits and history when rolling back.
+- Source validation remains 179 tests and 14 subtests passed. The actual scoped
+  image additionally passed isolated activation/API/assets/MCP checks, and its
+  staged frontend passed syntax, report generation/history, lazy-loading and
+  adapter-default tests. External BrowserAgent, cloud and notification-provider
+  delivery were not newly exercised as part of this deployment.
+
+#### Verified Extension Layout Update (2026-11-10)
+
+- Live Extension now opens a responsive **Plugins** card catalog. The separate
+  **Policy monitor** workspace contains its scan actions and configuration,
+  rather than placing all forms below the catalog. Cards expose categories,
+  explicit state, labeled controls and a sticky save bar with unsaved-change
+  feedback. Section switching preserves pending selections.
+- Only the deployed Admin HTML and plugin host JavaScript were overlaid.
+  Backend code, data, runtime settings, ports and mounts were not changed.
+  All **27 other running containers** retained IDs and start times.
+- Persistent image:
+  `cga-local:1.30.131-extension-layout-20261110-203743`, image
+  `sha256:3f86aea495813e25c97d7f7595b3a025536f78464cd320d93524838e9834f2ef`.
+  Docker health passed; served HTML/JavaScript matched the validated candidate
+  byte-for-byte. This remains a local overlay, not a public release.
+- Twenty targeted UI tests passed, including existing navigation, policy
+  monitor, settings and logout behavior. Browser preview verified three-column
+  and single-column layouts without content overflow, checkbox coupling,
+  unsaved status and section switching without lost edits.
+- Rollback: `cga-local:rollback-extension-layout-20261110-203743`. Original
+  Compose and both frontend files are retained under
+  `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-extension-layout-20261110-203743`.
+
+The subsequent naming-only update changed the topbar/page heading to **Plugins**
+while retaining `/admin/extensions` and internal identifiers for compatibility.
+Naming-only image: `cga-local:1.30.131-plugins-name-20261110-203928`;
+rollback: `cga-local:rollback-plugins-name-20261110-203928`. Eight targeted
+navigation/plugin UI tests passed, live HTML matched the candidate, and Docker
+health passed. Original Compose/HTML are retained in
+`backups\pre-plugins-name-20261110-203928`.
+
+#### Verified Plugin Details Update (2026-11-10)
+
+- Image for this deployment:
+  `cga-local:1.30.131-plugin-details-20261110-213244-r2`, image
+  `sha256:a318d8a29f0f15e115b42583b4bbf38692abb9a2b4102e7da830c26e308dd849`.
+  This is a scoped local feature overlay, not a signed/public release.
+  Unrelated checkout changes were not deployed.
+- All eight plugins now have detail/settings pages. The catalog supports search,
+  category/status filtering, sorting and Free/Paid metadata badges; all current
+  plugins are Free. Enabled indicators are green, and catalog/detail action
+  buttons include icons. Pricing labels do not implement billing or licensing.
+- Thirteen UI tests passed against the actual staged frontend; sixteen source
+  navigation/plugin UI tests also passed. The candidate passed isolated runtime
+  checks. Normal administrator login verified all eight settings APIs and core
+  endpoints; anonymous plugin management returned HTTP 401. Five served assets
+  matched their staged hashes, and Docker health was `healthy`.
+- Authenticated live-browser checks opened all eight detail pages, confirmed
+  green Enabled indicators and Free badges, and exercised search, category
+  filtering, descending sorting and reset without changing plugin settings.
+  Shared navigation/plugin asset URLs are versioned to prevent an older cached
+  navigation script from breaking the new catalog.
+- **27 projects**, **20 published graphs**, **3 ADC tables**, runtime settings
+  and ADC asset hashes were preserved. Ports/mounts were unchanged; all **26
+  other running containers** retained IDs and start times. System Audit remains
+  core. No external provider execution or delivery was exercised.
+- An intermediate verification automatically restored the original image because
+  Docker Desktop exposed the same bind directory using Windows and Linux-style
+  source paths. Canonicalizing those equivalent paths and port-binding ordering
+  allowed the final cutover to pass without relaxing mount/port checks. The
+  deployment also waits for an existing database dump before restarting.
+- Rollback: `cga-local:rollback-plugin-details-20261110-213244`, retaining the
+  preceding naming-only image. Original Compose/runtime configuration, live
+  source, inventories, payload manifest and final verification are retained in
+  `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-plugin-details-20261110-213244`.
+  Pre-cutover database archive:
+  `backups\cga-desktop\auth\auth-20261111T053716Z-2b73bfddfb854cc39cb291457ec09368.sql.gz`;
+  gzip integrity passed, SHA256
+  `5b5c4d17b735f0095a00c68049eba38272a2db56c2ff834e9679ac583ea1df2c`.
+  No full restore rehearsal was performed. Preserve later settings/history when
+  rolling back.
+
+#### Verified Split Plugin Settings Deployment (2026-11-10)
+
+- Image for this deployment:
+  `cga-local:1.30.131-plugin-split-20261110-222016`, image
+  `sha256:47325fd51b3f00dfd9b76c6e749d21cabec615cbf31828e127213078b9009ced`.
+  This remains a local feature overlay, not a signed/public release.
+- Only two frontend files were replaced. Admin HTML was generated from the
+  previous live file by replacing plugin-specific styles, the plugin pane and
+  three asset cache markers; the plugin host JavaScript contains the split
+  settings implementation. Backend, ADC, Relay and unrelated checkout changes
+  were not included.
+- Plugins stay in the left searchable/filterable list while settings open on
+  the right. Larger settings use grouped tabs; the monitor includes an Activity
+  tab for outputs/findings/history. The redundant **Your plugins** heading and
+  introductory paragraph were removed; plugin counts remain.
+- Fourteen UI tests passed against the actual staged frontend and inherited
+  report asset. Authenticated live-browser checks opened all eight plugin
+  settings panels, exercised tabs, and confirmed the selected-card highlight,
+  side-by-side layout, green Enabled indicator, removed introduction, button
+  icons and no horizontal overflow. Prior isolated browser validation covered
+  narrow-screen return, cross-tab drafts and hidden-field validation.
+- Normal administrator login verified all eight settings APIs; anonymous plugin
+  management returned HTTP 401. Both served frontend hashes matched the payload
+  manifest and Docker health was `healthy`.
+- **27 projects**, **20 published graphs**, **3 ADC tables**, runtime settings
+  and ADC asset hashes were unchanged. Ports/mounts matched; all **26 other
+  running containers** retained IDs and start times. No production settings or
+  plugin selections were changed by browser verification.
+- Rollback: `cga-local:rollback-plugin-split-20261110-222016`. Original Compose,
+  runtime configuration, live frontend, inventories, verification probe, payload
+  manifest and final verification are retained under
+  `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-plugin-split-20261110-222016`.
+  This frontend-only cutover performed no database migration or restore; the
+  preceding verified database archive remains retained. Roll back the API image
+  without restoring the database or overwriting newer runtime settings.
+
+#### Verified Compact Plugin Cards Deployment (2026-11-10)
+
+- Persistent Compose image at that cutover:
+  `cga-local:1.30.131-plugin-compact-20261110-223629`, image
+  `sha256:1c2824e13fea031cde983ecf7de7b5dd58f3beb8bfd61e44ba13f7011d6d90ea`.
+  This is a local frontend overlay, not a signed/public release.
+- The overlay changes only five plugin CSS rules, the card footer wrapper and
+  three asset cache markers in the existing live HTML/plugin host JavaScript.
+  Installed/Enabled controls and Settings/Open actions share a single row when
+  space permits. Pricing and activation badges are horizontal, retaining their
+  independent meaning and colors. Narrow cards can wrap rather than overflow.
+- Fourteen UI tests passed against the actual staged frontend. Both served
+  assets matched the payload hashes. Normal administrator login verified all
+  eight settings APIs; anonymous plugin management returned HTTP 401.
+- Live browser measurements verified all eight cards at approximately **337px
+  footer width**: controls/actions on one line, badges on one line, no card or
+  page overflow, and icons present on every plugin action button. Asset URLs
+  use `1.30.131-plugin-split.2` to avoid stale plugin markup from browser cache.
+- Docker health was `healthy`. **27 projects**, **20 published graphs**, **3 ADC
+  tables**, runtime settings and ADC asset hashes were unchanged. Ports/mounts
+  matched and all **26 other running containers** retained IDs and start times.
+  Backend, system Audit, ADC and Relay code were not replaced.
+- Rollback: `cga-local:rollback-plugin-compact-20261110-223629`. Original Compose,
+  frontend/configuration snapshots, inventories, deployment/staging helpers,
+  verification probe, payload manifest and final verification are retained in
+  `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-plugin-compact-20261110-223629`.
+  No database migration or restore was performed. Roll back only the API image
+  and preserve subsequent settings and database activity.
+
+#### Verified Admin Menu And Automation Deployment (2026-11-10)
+
+- Persistent Compose image at that cutover:
+  `cga-local:1.30.131-user-menu-20261110-234500`, image
+  `sha256:7fde2dd888b3d7c71863ce351741d3ab6232047da35c05ac9c7f89617e775ff7`.
+  This is a local frontend overlay, not a signed/public release.
+- Only Admin HTML and the navigation JavaScript were replaced. The top bar
+  retains Dashboard, Project, Graph, Automation, ADC and Audit. Administrator
+  management entries now live under the user menu, separate from Profile and
+  Sign out, with their original routes and access controls.
+- Automation separates Tasks and Execution history, presents five task columns,
+  keeps task details expandable and defaults advanced editor fields to collapsed.
+  Project policy/evidence inputs now live under Audit > AI-First Readiness in a
+  collapsed section. Plugin settings have a 12px status-to-button gap; Save is
+  gray/disabled when clean and green/enabled only while settings differ.
+- Twenty-two UI tests passed against the actual staged frontend, and navigation
+  plus all inline JavaScript passed Node syntax checks. Served HTML/navigation
+  hashes matched the payload. Normal administrator login verified all eight
+  plugin settings APIs; anonymous management returned HTTP 401. Original
+  Automation, Users, Security and ADC deep links served the same verified shell.
+- Authenticated browser checks on **18001** verified the six top-level links,
+  management icons/active state, menu dismissal/focus restoration, Automation
+  tabs, five task columns, collapsed policy/advanced sections, editor name focus
+  and icons on visible Automation actions. Actual settings changed locally from
+  clean gray to edited green and back to clean gray without saving. At 380 CSS
+  pixels, the menu stayed within the viewport and tables did not overflow the
+  page. No alternate preview server or port was started.
+- Docker remained healthy on the original **18001** mappings and mounts.
+  **27 projects**, **20 published graphs**, **3 ADC tables** (including published
+  ADC 1.2.4), runtime configuration and all other frontend asset hashes remained
+  unchanged. All **26 other containers** retained IDs and start times.
+  Existing authentication behavior, backend, ADC, Relay and plugin host code
+  were preserved; unrelated dirty source changes were not deployed.
+- Rollback: `cga-local:rollback-user-menu-20261110-234500-r2`. Original Compose,
+  live frontend/configuration snapshots, deployed HTML/navigation bytes,
+  inventories, helpers, payload hashes and successful verification are retained
+  under `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-user-menu-20261110-234500-r2`.
+  No database migration or restore was performed.
+- An initial verification incorrectly expected a dynamically created form ID in
+  static HTML and triggered automatic rollback. The verifier was corrected to
+  check static styles and the rendered form was verified separately; the final
+  cutover and invariant checks passed.
+
+#### Verified ADC Constitution Workspace Deployment (2026-11-11)
+
+- Current persistent Compose image:
+  `cga-local:1.30.132-adc-constitution-20261111-150500-r2`, image
+  `sha256:c604c368f75d78adc4b79f66d1cb1c6983f8cd21cdb82a4a6340ac8448840f0d`.
+  This is a local overlay, not a signed/public release. Product metadata was
+  incremented once to **1.30.132** using the version helper; the installed Relay
+  executable was not replaced.
+- Only Admin HTML (ADC styles/cache markers), `adc.js`, `adc-versions.js` and the
+  backend `APP_VERSION` constant were changed against the deployed baseline.
+  Other pending checkout changes were excluded. Constitution uses a searchable
+  **240px** document menu beside the editor; project-specific changes are under
+  Amendments and the Versions history view is retained.
+- Twenty-six exact-payload UI/version tests passed, including a regression for
+  historical CRLF documents being incorrectly marked dirty after textarea
+  normalization. Comparison normalizes line endings without rewriting published
+  documents. JavaScript/Python syntax and version alignment checks passed.
+- Served payload hashes matched the manifest. Health reports **1.30.132**.
+  Authenticated checks verified master **ADC 1.2.4**, its **45 documents**, eight
+  plugin settings APIs and original admin deep links; anonymous management
+  still returned HTTP 401.
+- Live browser verified all three tab names, the searchable document menu,
+  selected document/content, Amendments project choices, and no false draft
+  after opening/switching CRLF documents. Desktop measured a 240px menu and
+  1122px editor. At 380 CSS pixels the layout stacked without page overflow.
+  No release, project amendment or runtime setting was saved.
+- Deployment-time before/after inventories matched: **27 projects**, **25
+  published graphs**, **3 ADC tables**, runtime configuration, other frontend
+  assets, ports and mounts. All **21 other running containers** retained IDs and
+  start times. These counts describe this cutover, not the earlier deployment.
+  The original `http://127.0.0.1:18001/admin/adc` endpoint remains in use.
+- Final cutover evidence, original snapshots and deployed payload are retained
+  in `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-adc-constitution-20261111-150500-r2`.
+  Its rollback tag is `cga-local:rollback-adc-constitution-20261111-150500-r2`
+  (the initial ADC cutover). To return to the last pre-ADC-layout image, use the
+  original Compose backup and tag
+  `cga-local:rollback-adc-constitution-20261111-150500` retained under
+  `backups\pre-adc-constitution-20261111-150500`. Roll back only the API image,
+  preserving subsequent database/settings activity. No migration or database
+  restore was performed.
+
+### Unix Desktop Relay Candidate (2026-11-10)
+
+The Relay source now includes a headless loopback gateway, macOS CLI and
+Linux GTK/AppIndicator companion, user-scoped installers/startup entries,
+native credential storage and signed-release jobs. See the
+[Relay installation and release guide](../src/cga-relay/README.md).
+Existing Windows Relay and CGA services were not replaced by this work.
+
+Local verification:
+
+- Windows: 94 Rust tests passed; hardened release build and existing
+  release-process tests passed. The local binary remains unsigned.
+- Linux x64: 99 default Rust tests passed; the separately invoked real GNOME
+  Keyring integration test passed login, restart persistence and logout.
+  Five isolated installer/package-gate tests, three native GTK/AppIndicator
+  tests under private D-Bus/Xvfb and installation of the actual final archive
+  passed. The candidate was built on Debian 12 (glibc 2.36); release-job Linux
+  builds use Ubuntu 24.04 and require a compatible runtime.
+- macOS Intel/Apple Silicon: Rust source and tests passed cross-target
+  `cargo check`; native CLI/Keychain execution and
+  Developer ID/notarization remain unverified without a macOS runner and
+  provisioned signing credentials.
+- New native CI/release jobs are configured, not claimed executed. Linux ARM64
+  has not been run locally. Formal publication still requires all native checks
+  and configured Windows, GPG and Apple signing gates.
+
+The macOS scope was subsequently reduced to CLI-only at the user's request:
+no `.app`, Swift compiler or menu-bar companion. Installation defaults to CLI;
+the optional headless LaunchAgent and Keychain protection remain available.
+
+Early validation caught incomplete credential fixtures, a read-only-source
+fixture path, CRLF manifest parsing and a macOS-specific error-conversion issue;
+these were corrected and the corresponding checks rerun successfully.
+
 ### Query Routing Policy
 
 Open **Settings > Query Strategy** (`/admin/settings/query`) to choose
@@ -84,6 +428,221 @@ reported the same 13 pre-existing typing errors reproduced from unchanged HEAD.
 `git diff --check` passed. The scoped frontend candidate also passed executable
 Node tests for loading, saving, failures, escaping and diagnostics; browser
 rendering and save/reload handlers were exercised with isolated mock data.
+
+### Verified Local ADC Centralization (2026-11-10)
+
+- Runtime image: `cga-local:1.30.128-adc-central-20261110.2`, image
+  `sha256:500a2b6ee0f54a33484b1d0992494cbe0ada00e34f9ff4dd558beb9602872799`.
+  This is a local feature overlay, not a signed public release.
+- Only ADC backend modules, the ADC scripts and their Admin-page wiring were
+  overlaid on the previously running query-policy image. Unrelated mainline
+  frontend changes were not applied. Only the API container was recreated;
+  database/graph/queue containers, volumes and credentials were retained.
+- The configured administrator's normal login was used for all project updates
+  and collection requests. BrowserAgent and Codex-CLI received their missing
+  registered checkout paths. The inventoried local DRI, SnapMarker and WorkAssist
+  projects were registered through the existing project API.
+- All **11 active projects** verified as `managed`: BrowserAgent, Codex-CLI,
+  ContextGraphAgent, IcM_Automation, DNSRE-1, orcasql-agctools-echo-ops,
+  QuickSearch, IWM, DRI, SnapMarker and WorkAssist. **268 rule documents** were
+  collected into 11 immutable project revisions with 11 collection receipts.
+  Existing projects retained their baselines. Every local source snapshot was
+  re-read and compared with both its receipt digest and the central effective
+  document contents. Original `.adc` files were not deleted or rewritten.
+- The main-rules editor, project-version panel and Versions tab were exercised
+  in the integrated browser using isolated fixture data and the real pinned
+  ECharts asset. The SVG Sankey reported `nodeAlign: right`; all three fixture
+  project endpoints had identical x coordinates (spread **0 pixels**). Theme
+  color synchronization, narrow viewport resizing and subtab navigation passed.
+  This browser exercise did not claim an authenticated live UI session.
+- Live authenticated version inventory and collection preview passed; anonymous
+  inventory/preview calls returned 401. All three deployed ADC script assets
+  returned HTTP 200, and the API container was healthy.
+- Before migration, the Compose configuration and a PostgreSQL dump were saved
+  under `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-adc-central-20261110`.
+  The gzip dump round-trip matched the original dump; SHA256 is
+  `95c6c477d66c440a70ac58bee7dbe830ca98d2606931c180843b2c10c4dcba88`.
+  No full restore rehearsal was performed. Preserve later project revisions
+  and administrator edits when planning rollback; do not blindly restore the
+  pre-migration database or discard collection history.
+
+Validation used an isolated PostgreSQL container/database, not the live auth
+database:
+
+```powershell
+# Set ADC_TEST_DSN to the isolated database named adc_test.
+.\.venv\Scripts\python.exe -m pytest src\tests\test_adc_collection.py src\tests\test_adc_governance.py src\tests\test_adc_remote.py src\tests\test_adc_ui.py src\tests\test_adc_skills.py src\tests\test_session_expiry_ui.py --no-cov -o addopts= -q
+# Passed: 31 tests, 14 subtests, no skips.
+$env:MYPYPATH = 'src'
+.\.venv\Scripts\python.exe -m mypy -m backend.adc.collection --follow-imports=silent
+# Passed.
+```
+
+### ADC Definition Update (2026-11-10)
+
+ADC now means **Agent Development Constitution**. The terminology-only local
+overlay is `cga-local:1.30.128-adc-definition-20261110`, image
+`sha256:36e412964c8f0a5edacdfa098ee889815be4c38f0ae6bf05b3b6401ff00d88cc`.
+It changes only the ADC page heading on top of the verified centralization
+image; current source documentation, templates and the template generator use
+the new expansion.
+
+The normal administrator API published master **ADC 1.2.2**, changing only the
+old expansion in 12 documents from 1.2.1. Its document SHA256 is
+`46a6473c122a0506f0ed7de9b59df47aba31e51b21648f13bdd421efbede519f`.
+The three prior releases' hashes and every existing project revision were
+verified unchanged. Pinned project bundles, their local caches and the bundled
+historical seed were not silently rewritten or upgraded.
+
+The preceding Compose configuration is retained under
+`%USERPROFILE%\.nasco\docker\main\cga\backups\pre-adc-definition-20261110`.
+Rolling back the UI image does not remove the newly published master release.
+
+### Verified Relay Health Notification Fix (2026-11-10)
+
+- Live Relay logs showed empty health responses during API/container restarts,
+  not malformed application payloads. A single failed probe previously raised
+  an outage notification, and a single successful probe immediately rearmed it.
+- The Windows tray now confirms outages after three consecutive failed probes,
+  clears them after two consecutive successful probes, and limits notifications
+  across distinct outages to one per five minutes. Confirmed outages still show
+  the warning icon during the cooldown. Failed probes and health transitions are
+  logged, and reconnection remains automatic.
+- Notification wording describes a connection failure rather than claiming the
+  container is stopped. Empty responses explicitly report connection closure
+  before HTTP headers; nonempty malformed responses remain errors.
+- Validation passed: 28 Relay unit tests, four tray-status integration tests,
+  three HTTP-response integration tests, and whitespace checks. The release
+  candidate passed existing PE hardening, symbol/path disclosure and production
+  single-instance verification.
+- Installed local candidate SHA256:
+  `9d25fd73d37c041a4d7ff514acaba455ba41c9763f6d6cb59ceee5730d330f0d`.
+  This remains an unsigned local development candidate, not a public release.
+  Only the identified installed Relay process was replaced and restarted with
+  its original arguments. Configuration and existing account/cache file hashes
+  were preserved. The loopback gateway returned HTTP 200, and repeated live
+  health probes returned HTTP 200 with `available=true`, `notification=false`.
+- Previous executable, invocation/state hashes and installation result are in
+  `%USERPROFILE%\.cga\backups\relay-health-20261110`. Its executable SHA256 is
+  `6305e1e8dfbc76f08177815b7b6842aa08e9d6c52e8c1daf5194487483cae1e3`.
+  CGA remained healthy with its original container start time; no container was
+  recreated or production outage induced for testing.
+
+### Verified Relay And ADC Usability Deployment (2026-11-10)
+
+- The local Windows Relay was replaced with the hardened development candidate;
+  its installed SHA256 at that deployment was
+  `56d7c12279d10221c60fd9a0367eca06dfa63c2280a706bd3117a6d900d3ac5d`.
+  The existing account session and project binding were preserved, and the
+  loopback settings gateway remained responsive. The original executable and
+  invocation are retained under
+  `%USERPROFILE%\.cga\backups\relay-cross-platform-20261110-1927`.
+  Stop only the identified installed Relay process before restoring that binary.
+  This candidate is unsigned, not a signed public release.
+- ADC frontend image `cga-local:1.30.128-adc-usability-20261110.2` overlays only
+  the three ADC scripts and their cache markers on the existing navigation-order
+  image. Database services, volumes, credentials and unrelated navigation changes
+  were preserved. Rollback by changing only the Compose service image to
+  `cga-local:1.30.128-nav-order-20261110-191158` and recreating only service `cga`;
+  do not restore the database.
+- Versions defaults to current revisions, with explicit All history and project
+  name/ID search. The table and right-aligned Sankey share the same filters.
+  Draft guards cover editor replacement, unstaged project publication, collection,
+  restoration and browser reload/close.
+- The authenticated live inventory remained exactly 4 releases, 24 project
+  revisions and 11 projects. Its pre/post deployment SHA256 was unchanged:
+  `316d7aebaf7a19e9e3a387f42a5ee8a3fbd12329735e259f2bd923e3373d4c78`.
+  No baseline, binding, collection or revision was modified by these UX checks.
+- Browser verification found zero document overflow at widths 320, 390, 768,
+  1280 and 1920. Explicit window resize events were dispatched because the
+  integrated browser remained hidden and deferred native resize notifications;
+  chart widths then matched their containers at every width. All 11 project
+  endpoints had identical x coordinates. Theme color synchronization passed.
+  An initially stale SVG width was corrected with containment and shared resize
+  handling. The viewport and theme were restored afterward.
+- The API container is healthy, GET `/admin/adc` returns 200, and the deployed
+  versions script hash matches source. HEAD is not supported on that page.
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest src\tests\test_adc_ui.py src\tests\test_adc_collection.py src\tests\test_session_expiry_ui.py src\tests\test_navigation_ui.py --no-cov -o addopts= -q
+# Passed: 12 tests.
+node --check src\frontend\adc-versions.js
+# Passed.
+git diff --check
+# Passed.
+```
+
+Native macOS CLI/Keychain execution and formal platform signing/notarization
+remain release gates; deploying this local Windows candidate does not satisfy
+those gates.
+
+### Version Iteration Follow-up (2026-11-10)
+
+The usability overlay initially retained product version `1.30.128`. That missed
+iteration was corrected to **1.30.129**, independently of image/cache suffixes.
+Backend, Relay manifest/lockfile, README and ADC script cache versions now agree.
+Use the [version iteration procedure](PUBLISHING.md#version-iteration) before
+future builds; Policy CI validates alignment without incrementing on retries.
+
+- API image at that cutover: `cga-local:1.30.129`, based on the verified ADC overlay.
+  Only backend version metadata and HTML cache markers were changed in this
+  follow-up image. `/health` and the browser report `1.30.129`.
+- Installed Relay SHA256:
+  `0f7ce63d933cf8791ed34e027401b1f48ee9a2c31ff6bd357781f491930a8cc8`.
+  The hardened candidate verification passed; the existing installed tray was
+  replaced/restarted, retaining its session and project binding.
+- The previous API image `cga-local:1.30.128-adc-usability-20261110.2` remains
+  available for image-only rollback. Earlier Relay backup instructions still
+  apply. No database or immutable ADC version was changed.
+- The targeted suite above, plus `test_versioning.py`, `test_health.py` and
+  `test_release_workflow.py`, passed **20 tests**. Relay `cargo test --locked`
+  passed **94 tests**. Mypy on `src\scripts\bump_version.py`, Ruff, metadata
+  alignment and whitespace checks passed. Browser checks confirmed updated
+  cache versions and the unchanged ADC inventory digest.
+
+### Inline ADC Information Deployment (2026-11-10)
+
+- Published immutable master **ADC 1.2.3**, changing only
+  `.adc/standards/conventions/frontend.md`. Its SHA256 is
+  `865614298bd8e465c77ece0dee6b3224ffce11f7f8cac91e4628cd1322c118fe`.
+  The new policy requires concise visible copy and right-side, same-line info
+  icons for complex explanations, with rich formatting and accessible behavior.
+  Earlier release hashes and all 11 projects / 24 revisions were unchanged.
+  Existing projects are not automatically upgraded to this new baseline.
+- Incremented the product once to **1.30.130**. Final local API image:
+  `cga-local:1.30.130-adc-info.2`. The build suffix records the formatting
+  refinement within this iteration, not another product-version increment.
+  The overlay changes only ADC scripts, HTML cache markers and backend version
+  metadata on the verified 1.30.129 runtime.
+- The installed hardened Relay reports the same package version; binary SHA256:
+  `ea01bf6a70a0a5c3f395c61dfbf01d07b66c6f7ef3c0d2b771a258b36849e0e5`.
+  Only the identified installed Relay was replaced/restarted, retaining its
+  session and binding. The previous binary and Compose configuration are in
+  the session's `adc-info-1.30.130` staging directory. API rollback can use
+  `cga-local:1.30.129` without reverting the central policy database.
+- The following command passed **20 tests**, including rich DOM formatting,
+  escaped/untrusted text, line breaks/code, hover persistence, keyboard/click
+  handlers, dismissal and resource cleanup:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest src\tests\test_versioning.py src\tests\test_health.py src\tests\test_release_workflow.py src\tests\test_adc_ui.py src\tests\test_adc_collection.py src\tests\test_session_expiry_ui.py src\tests\test_navigation_ui.py --no-cov -o addopts= -q
+```
+
+- JavaScript syntax, Ruff, product-version alignment and whitespace checks
+  passed. Browser checks on `/admin/adc` verified same-line/right-side icons
+  across all three subtabs at widths 320, 390 and 1280, no page overflow,
+  viewport-contained rich tooltips, theme synchronization, field-label
+  association and three live project-history help rows.
+  The integrated page remained hidden: native focus/hover stability checks did
+  not deliver reliably, so explicit DOM focus/pointer/keyboard events exercised
+  their registered handlers. Click toggling worked. Redeployment interrupted
+  existing index-status polling with transient `ERR_EMPTY_RESPONSE` events;
+  final authenticated inventory and page/health checks succeeded.
+- The final browser verified semantic code formatting, preserved line breaks,
+  the published policy hash and all three cache markers. Removing only the new
+  master from the inventory reproduces the previous full inventory digest
+  `316d7aebaf7a19e9e3a387f42a5ee8a3fbd12329735e259f2bd923e3373d4c78`.
+  No public tag or signed release was created.
 
 ### Docker Desktop Bundle
 
@@ -312,7 +871,7 @@ CGA includes a built-in work activity domain adapted from WorkAssist so cross-pr
 - Cold-start document import: `python src/scripts/memory_cold_start.py --project-id <id> --root .` prints a dry-run plan; add `--apply` to upsert summaries using `WORKBRIEFING_POSTGRES_DSN`.
 - Skill validation: `python src/scripts/validate_skills.py .adc` checks every `SKILL.md` for frontmatter, SemVer version and the When to Use / Steps / Validation sections.
 
-The Admin briefing dashboard includes copyable PowerShell, Python, and JSON request templates for project-scoped activity publishing. The Report tab can connect a Microsoft account with device-code login so generated WSR payloads can enrich stored PBI/PR references with Azure DevOps ticket details.
+The Admin briefing dashboard includes copyable PowerShell, Python, and JSON request templates for project-scoped activity publishing. The Audit > Report subtab can connect a Microsoft account with device-code login so generated WSR payloads can enrich stored PBI/PR references with Azure DevOps ticket details.
 
 Recorded activity is stored in the local PostgreSQL auth database under the `work_activities` table, keeping project progress local-first alongside project and audit metadata.
 
@@ -592,6 +1151,243 @@ and a hidden `.in-progress-*` staging directory behind. Stop/verify **all** writ
 for that backup folder, confirm no restore is running, and only then remove
 that specific stale lock/staging directory. Never remove locks from a live
 worker, and do not remove snapshots or named volumes as lock recovery.
+
+## Audit Workspace
+
+The source implementation groups administrator-only **Audit** into two subtabs:
+**Request log** and **Report**, which combines activity and AI-First readiness.
+Existing evidence-pack, policy and signal tools remain inside Report's collapsed
+advanced panel; weekly drafts, templates and browser-local history remain in a
+separate collapsed panel. Server-side administrator authorization is unchanged.
+Request-log polling stops when another subtab is selected.
+
+Deep links are `/admin/audit` and `/admin/audit/report`. Legacy
+`/admin/audit/ai-first`, `/admin/ai-first`, `/admin/aifirst`, and `/admin/report`
+links select Report, preserving query
+parameters and fragments. Browser Back/Forward restores the selected subtab.
+Report configuration remains under Settings > Report; it is not a second
+report-generation screen.
+
+### Unified Report workspace
+
+This redesign is source-only until separately packaged and deployed; the
+installed 1.30.132 service has not been replaced by these changes.
+
+- Select zero or more projects (zero means all), a 7/30/90-day or custom UTC
+  period, literal title/summary text, event type and recorded status. Select
+  activity, current readiness and/or evidence sections, then Generate.
+- The inclusive through-date becomes next-day exclusive UTC. Windows must be
+  nonempty and at most 366 days. `POST /api/admin/reports/generate` validates and
+  applies filters in PostgreSQL before its 10,000-row cap. Results explicitly
+  identify truncation; neither missing activity nor a source status proves a
+  real-world outcome. Raw metadata and body text are excluded.
+- Readiness reuses the current evidence API. Dates/type/status/search do not
+  retrospectively filter readiness. Unknown scores are excluded from averages,
+  not converted to zero. This is not a productivity or causal ROI report.
+- ECharts SVG charts support time zoom and project/status drill-down. Chart
+  clicks change draft filters; Generate applies them. Dirty filters disable
+  snapshot exports. Evidence paginates at 25 rows; titles expand to summaries
+  and stable activity IDs. Light/dark/system themes also update chart styling.
+- CSV/JSON export the complete generated snapshot, not unlimited source data.
+  CSV escapes quotes and neutralizes spreadsheet formulas. JSON also includes
+  filters, coverage, current readiness and the generation timestamp.
+- PDF uses Mermaid diagrams and a print-light layout, independent of screen
+  theme. Browser rendering is embedded as raster pages, preserving rendered
+  Unicode but not searchable PDF text. Evidence includes at most 100 records,
+  with shortened titles/summaries and an explicit completeness note; use
+  CSV/JSON for the full generated snapshot. Mermaid source is also downloadable.
+  Files use `CGA-Report-v<product-version>-en.<ext>`.
+- Existing AI-First controls keep their own project scope. Opening advanced
+  tools does not alter the report snapshot or migrate/delete saved history.
+  Reports remain optional and work without the briefing plugin.
+
+The report workspace does not fetch chart/PDF libraries from a CDN. Both Docker
+builds prepare their pinned local assets automatically. For a source checkout:
+
+```powershell
+Set-Location src\report-ui
+npm ci
+npm run build
+```
+
+Node/npm are build prerequisites, not API runtime dependencies. Generated
+`src/frontend/report-vendor` assets are ignored by Git; include them and their
+generated license directory in runtime/distribution packages. A missing bundle
+is reported as a generation error, not an empty successful report.
+
+### Audit retention, Change Logs and confirmed updates
+
+The working tree implements these controls; the installed 1.30.132 API still
+uses the earlier readiness-only Upgrade page. This is **source support, not a
+deployment, signed release or successful real upgrade**. Existing local source
+changes must be reviewed and selectively packaged before deployment.
+
+#### Audit retention
+
+Settings > Security shows record count, oldest timestamp, heap/index/total
+storage and the last cleanup result. Automatic deletion is **disabled by
+default**. The proposed defaults are 7 days for known successful polling,
+90 days for other successful reads, and 365 days for protected events.
+Protected events include errors, writes and sensitive account/configuration/
+upgrade operations; their retention cannot be shorter than other categories.
+Unknown/non-UTC timestamp formats are preserved.
+
+Change the policy, run **Preview eligible records**, review/archive any required
+evidence, and explicitly confirm **Save policy** to enable it. Preview is
+read-only, expires after 15 minutes and is bound to the exact draft. Clean Save
+is disabled and gray. Automatic eligibility is checked each minute and cleanup
+runs at most hourly; each run permits five bounded batches, defaults to 1,000
+rows per batch, and applies a 10-second SQL timeout per batch. A database
+advisory lock serializes cleanup and policy changes across workers.
+Administrators can explicitly request a bounded run under the saved policy.
+Errors are recorded and surfaced rather than reported as success.
+
+Backup **Keep Last N** prunes snapshot files, not `audit_logs`; Docker log
+rotation is also separate. Row deletion makes database space reusable after
+normal vacuuming; it does not promise immediate OS-level file shrinkage.
+Do not automatically run `VACUUM FULL` or delete additional evidence to force
+the capacity display down.
+
+#### Change Logs
+
+Settings > Change Logs separates **Unreleased** source changes from frozen
+version entries and identifies the current product version. A local overlay
+can differ from a formal build with the same version; the page states that
+distinction. Historical notes are included only where verified evidence exists.
+Release notes are plain text, not executable HTML.
+
+Every product change needs a user-facing JSON fragment; completed version
+iterations freeze and archive those fragments. See
+[publishing](PUBLISHING.md#change-logs-and-trusted-update-manifests) for the
+validation and signing workflow.
+
+#### One-time host updater provisioning
+
+The first implementation supports **one API process and an existing JSON
+Docker Compose installation**. It does not update Relay/native installers,
+support multi-replica orchestration or perform database/schema migrations.
+An older formal release is never offered as an upgrade for a newer local build.
+Checks occur every ten minutes; failures are explicit, not treated as
+"up to date". Version-pinned installations cannot install automatically.
+
+An operator must provision all of the following before confirmation becomes
+available:
+
+1. A trusted publisher RSA public PEM, installed through an independently
+   verified channel and mounted read-only in the API. Do not bootstrap trust
+   from the same unsigned release being checked. Set `CGA_UPDATE_PUBLIC_KEY`
+   to its container path.
+2. A dedicated shared queue/status directory, writable by API and executor,
+   with `CGA_UPDATE_STATE_DIR` pointing to its API-side path.
+3. An actual single-process API deployment, explicitly acknowledged with
+   `CGA_UPDATE_SINGLE_PROCESS=1`. Do not set this flag on a multiworker service.
+4. A private host config and journal/backup directory outside the shared state
+   directory and all API-accessible mounts. Keep the Compose file and trusted
+   key outside API-writable storage as well. Protect private files with host
+   permissions: recovery includes the original Compose configuration.
+5. A tested host-owned full-backup command and the exact paths of its fresh
+   `auth.sql.gz` and `falkordb.tgz` outputs. The updater verifies freshness,
+   nonempty gzip integrity and private copies; this is not a restore rehearsal.
+6. A running independent host executor and a newer compatible formal release
+   with a valid PS384-signed, digest-pinned `update-manifest.jwt`.
+
+The following is a configuration shape, **not an installed backup launcher**.
+Replace paths and ownership identifiers with the existing installation's values;
+the example backup PowerShell script must be supplied and tested by the operator.
+All directories must already exist.
+
+```json
+{
+  "state_dir": "C:\\CGA\\update-state",
+  "journal_dir": "C:\\CGA\\update-private\\journals",
+  "compose_file": "C:\\CGA\\compose.json",
+  "public_key": "C:\\CGA\\trust\\publisher-public.pem",
+  "project": "cga-dev",
+  "service": "cga",
+  "container": "cga-desktop-api",
+  "health_url": "http://127.0.0.1:18001/health",
+  "backup_command": ["powershell.exe", "-NoProfile", "-File", "C:\\CGA\\operator\\backup-cga.ps1"],
+  "backup_files": {
+    "auth.sql.gz": "C:\\CGA\\backups\\latest\\auth.sql.gz",
+    "falkordb.tgz": "C:\\CGA\\backups\\latest\\falkordb.tgz"
+  }
+}
+```
+
+Run the executor in a separately supervised host process using the same installed
+Python dependencies as CGA, not inside the API container:
+
+```powershell
+python src\scripts\cga_update_host.py --config C:\CGA\update-private\updater.json
+```
+
+It never gives the API a Docker socket or arbitrary backup/host command endpoint.
+Review notes, then explicitly confirm installation. The API rechecks the exact
+version/digest and the host independently verifies its signature. Queued work
+can be cancelled only before the host claims it. New API writes/MCP operations,
+scheduled tasks and indexing starts pause while existing work drains.
+
+The executor checks Compose ownership and the original health port, pulls the
+signed digest, stops **only the configured API service**, verifies fresh backups
+and replaces only its image. Verification checks health/version, image, original
+ports, mounts, configured environment values and database reads. Image-provided
+defaults may change; operator-configured environment values must not. The private
+journal filesystem needs at least 2 GiB free; image storage and actual backup
+capacity must also be sufficient. No `compose down`, volume deletion, port
+substitution or environment-file rewrite is part of updating.
+
+Failure restores the previous Compose/image, **never an older database over
+newer writes**. Interrupted image switching uses the private journal for recovery.
+Missing/corrupt journals or failed rollback require operator recovery; preserve
+all state and backups instead of retrying blindly. The worker lock is OS-released
+on exit. A stale shared queue-directory lock may be removed only after verifying
+and stopping its owner; never steal a live lock. Private recovery snapshots and
+rejected/cancelled queue receipts require operator-managed archival/retention.
+
+## Responsive Admin Navigation
+
+The admin topbar measures the space available after the logo, version and user
+menu. When text labels no longer fit, all visible navigation buttons become a
+single row of icons. Labels return automatically when space becomes available,
+including after permission-dependent buttons are hidden. At very narrow widths,
+only the icon strip scrolls horizontally; the toolbar does not wrap.
+
+Each icon retains its accessible name and existing route. Hover or keyboard
+focus displays an unclipped tooltip; Escape dismisses it. Keyboard focus can
+scroll an off-screen icon into view without losing its tooltip.
+
+The topbar order is **Dashboard → Project → Graph → Automation → Plugins →
+ADC → User → Audit → Settings**: daily project work comes before governance
+and system administration. Existing permission-dependent visibility is unchanged.
+Automation appears immediately before Extension in the topbar. It is the
+existing scheduler, renamed in navigation and its page heading; the
+`/admin/schedule` deep link and task behavior remain unchanged.
+
+The 2026-11-10 local navigation overlay passed 12 focused UI tests, JavaScript
+syntax and Ruff checks. Browser fixtures verified text/icon/text restoration,
+permission changes, hover/focus tooltips and single-row geometry at actual
+viewport widths from 300 to 1920 CSS pixels, with zero toolbar or page overflow.
+Only the API service was recreated; database, graph and queue services were not
+replaced. The previous image and Compose configuration remain rollback sources.
+
+### Verified Navigation Order Deployment (2026-11-10)
+
+The local API at `http://127.0.0.1:18001` now uses
+`cga-local:1.30.128-nav-order-20261110-191158`, image
+`sha256:e8cd89f3920cc9efbb91aff1462efff9f9e2abd04764211ddd339a9c17aca3c2`.
+Only the existing image's topbar button order was changed; the remainder of
+the served Admin HTML was preserved. The live HTML matched the scoped overlay
+exactly, and `/health` returned HTTP 200 with status `ok`.
+
+Nine navigation/session-expiry regression tests passed. Only the API service
+was recreated: the other 26 running containers retained their IDs and start
+times. Persistent mounts and port bindings were unchanged. The active Compose
+configuration retains the new image, so ordinary restarts preserve the change.
+
+Rollback materials are the image
+`cga-local:rollback-nav-order-20261110-191158` and the preceding Compose file
+under `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-nav-order-20261110-191158`.
+This is a local UI overlay, not a public release or a Relay deployment.
 
 ## Desktop Bundle Packaging
 

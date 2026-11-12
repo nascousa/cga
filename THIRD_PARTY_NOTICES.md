@@ -74,6 +74,23 @@ import map for browser execution. Release builds should either preserve the
 upstream license notices for those packages or ship a generated license report
 for the bundled viewer assets.
 
+The ADC Versions subtab loads Apache ECharts 6.0.0 (Apache-2.0) on demand from
+`https://cdn.jsdelivr.net/npm/echarts@6.0.0/dist/echarts.min.js`, pinned with
+SHA-384 subresource integrity and no-referrer requests. No ECharts source is
+vendored for that ADC integration. The upstream distribution retains its license
+header and bundled dependency notices. Chart data is rendered locally and is
+not transmitted to jsDelivr. Preserve the upstream license/NOTICE files if
+replacing the CDN with a redistributed local bundle.
+
+The separate unified Report workspace locally bundles Apache ECharts 6.1.0
+(Apache-2.0), Mermaid 12.3.0 (MIT), jsPDF 4.2.1 (MIT) and html2canvas 1.4.1 (MIT),
+built with esbuild 0.28.2 (MIT). Exact direct/transitive versions are locked in
+`src/report-ui/package-lock.json`. The build preserves external legal-comment
+files and collects installed dependency LICENSE/NOTICE/COPYING files and
+metadata into `src/frontend/report-vendor/licenses/`. Preserve these generated
+notices alongside all redistributed Report chunks; this summary does not
+replace upstream license text.
+
 FastAPI's default interactive API documentation endpoints may load Swagger UI,
 ReDoc, and related web assets from their upstream CDN URLs when those endpoints
 are enabled. If CGA vendors, customizes, or redistributes those assets directly,

@@ -40,7 +40,7 @@ def test_upgrade_status_payload_contains_local_readiness_contract() -> None:
         "graph": 2,
         "runtime_config": 1,
     }
-    assert payload["compatibility"]["rollback_mode"] == "restore-pre-upgrade-backup"
+    assert payload["compatibility"]["rollback_mode"] == "image-only-for-compatible-schema"
     assert payload["readiness"]["checks"]
     assert {check["id"] for check in payload["readiness"]["checks"]} >= {
         "backup",

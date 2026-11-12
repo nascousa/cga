@@ -447,6 +447,8 @@ mod tests {
     fn adc_sync_previews_preserves_local_edits_and_tracks_removals() {
         let base = std::env::temp_dir().join(format!("cga-adc-unit-{}", unique_stamp().unwrap()));
         fs::create_dir(&base).unwrap();
+        // macOS temporary paths traverse /var -> /private/var; keep the fixture link-free.
+        let base = base.canonicalize().unwrap();
         let repo = base.join("repo");
         fs::create_dir(&repo).unwrap();
         let config_path = base.join("relay.env");

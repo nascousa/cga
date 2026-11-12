@@ -30,6 +30,9 @@ yarn.log
 .pnpm-debug.log
 src/dist/
 src/viewer/dist/
+src/frontend/report-vendor/
+sdk/cga-plugin-sdk/src/*.egg-info/
+sdk/cga-plugin-sdk/dist/
 build/
 target/
 coverage/
@@ -98,7 +101,7 @@ out/
 .Parcel-cache/
 .vuepress/dist/
 
-# Autonomous Development Constitution (ADC)
+# Agent Development Constitution (ADC)
 # Note: Do not ignore .adc/ itself as it contains the constitution!
 # You should however ignore temporary AI outputs or raw generated templates if you don't track them.
 # adc-template/  # Uncomment if you want to ignore the generated template test output

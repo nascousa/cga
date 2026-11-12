@@ -1,5 +1,13 @@
 FROM postgres:16-bookworm AS postgres-client
 
+FROM node:22-bookworm-slim AS report-assets
+WORKDIR /report-ui
+COPY src/report-ui/package*.json ./
+RUN npm ci
+COPY src/report-ui/libraries.js ./
+COPY src/report-ui/notices.mjs ./
+RUN npm run build
+
 FROM python:3.12-slim-bookworm AS runtime-base
 
 WORKDIR /app
@@ -30,7 +38,10 @@ RUN grep -vE '^(sentence-transformers|numpy|pytest|black|ruff|mypy|pip-audit)' \
 
 # Copy source
 COPY src/ ./src/
+COPY --from=report-assets /frontend/report-vendor/ ./src/frontend/report-vendor/
 COPY extensions/ ./extensions/
+ARG CGA_PLUGINS=all
+RUN PYTHONPATH=/app/src python src/scripts/package-plugins.py "$CGA_PLUGINS"
 
 # Create data dir for SQLite auth DB
 RUN mkdir -p /app/data

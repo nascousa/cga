@@ -1,8 +1,8 @@
 # CGA-Relay
 
-`cga-relay` is the Rust desktop relay for CGA. It is designed as one installed relay per developer machine. Project repositories only need a small MCP pointer that launches the installed relay over stdio; they do not run their own long-lived MCP server.
+`cga-relay` is the Rust relay for CGA, with a Windows notification-area UI, macOS CLI-only distribution, Linux GTK3/Ayatana AppIndicator companion, and a headless loopback gateway. macOS defaults to CLI installation without Swift, a menu-bar helper or an application bundle; an optional headless LaunchAgent is available. Project repositories only need a small MCP pointer that launches the installed relay over stdio; they do not run their own long-lived MCP server.
 
-Every command acquires the same machine-wide OS lock before doing any work: a named global mutex on Windows and a non-blocking file lock on Unix. If another CGA-Relay process already owns that lock, the new process exits with `CGA-Relay is already running` instead of starting a second instance.
+Every command acquires an OS lock before doing any work: a machine-wide named global mutex on Windows and a per-effective-user non-blocking file lock in a private directory on Unix. If another CGA-Relay process already owns that lock, the new process exits with `CGA-Relay is already running` instead of starting a second instance. Separate Unix users do not block one another.
 
 ## Install Or Build
 
@@ -21,6 +21,13 @@ cga-relay --help
 ```
 
 The executable must be on `PATH`, or the project MCP pointer must use the full executable path.
+
+For macOS/Linux package installation, desktop dependencies, user startup services,
+upgrade/uninstall behavior and native validation limits, see the
+[Desktop Relay guide](../src/cga-relay/README.md). Unix source and CI candidate
+support does not imply an available signed public release. The dependency-free
+Rust core and headless mode do not require a Python backend; Linux desktop mode
+additionally requires Python3, PyGObject, GTK3 and an AppIndicator host.
 
 ## Approved ADC Onboarding And Sync
 
@@ -58,12 +65,12 @@ automatically stopped by these ADC commands.
 
 ```powershell
 Push-Location src/cga-relay
-cargo test
-cargo build --release
+cargo test --locked
+cargo build --locked --release
 Pop-Location
 ```
 
-Policy CI runs the Relay tests on Windows and Linux, plus Windows PE hardening and isolated replacement/rollback checks. Run Cargo from the crate directory so its `.cargo/config.toml` mitigation flags are loaded; `--manifest-path` from the repository root alone does not load that configuration. CI candidates are unsigned and are never installed or published by these checks; formal release signing remains mandatory.
+Policy CI is configured to run Relay tests on Windows, Linux x64/ARM64 and macOS Intel/Apple Silicon, with Unix installer tests and native candidate packaging, plus Windows PE hardening and isolated replacement/rollback checks. Run Cargo from the crate directory so its `.cargo/config.toml` mitigation flags are loaded; `--manifest-path` from the repository root alone does not load that configuration. CI candidates are development artifacts, not formal releases: Windows/Linux candidates are unsigned, and macOS candidates are ad-hoc signed without Developer ID or notarization. Formal release signing remains mandatory on every platform.
 
 The standalone-copy test tolerates only transient `ExecutableFileBusy` (`ETXTBSY`)
 launch errors for up to two seconds: parallel Linux child processes can briefly
@@ -73,7 +80,7 @@ descriptor, verifies that execution is blocked, then confirms launch succeeds
 after it closes; separate tests cover error propagation and the retry deadline.
 This handling is confined to the test harness, not production Relay startup.
 
-The crate has no third-party Rust dependencies. The release build produces a standalone `cga-relay.exe` at `src/cga-relay/target/release/cga-relay.exe`; install or copy that executable onto the developer machine and launch it directly. Project MCP config must call that installed executable, not `cargo`, Python, PowerShell scripts, or a per-project MCP server.
+The crate has no third-party Rust dependencies. The release build produces `src/cga-relay/target/release/cga-relay.exe` on Windows or `src/cga-relay/target/release/cga-relay` on Unix. Windows uses a standalone executable; Unix desktop packages include or invoke the platform companion. Project MCP config must call the installed Rust executable, not `cargo`, Python, PowerShell scripts, or a per-project MCP server.
 
 On Windows MSVC targets, the crate config enables static CRT linking, fat LTO, symbol stripping, panic abort, Control Flow Guard, ASLR, high-entropy ASLR, DEP/NX, CET compatibility, and reproducible linker metadata. Build formal artifacts through the secure release script:
 
@@ -105,6 +112,12 @@ if ((Get-AuthenticodeSignature .\cga-relay.exe).Status -ne 'Valid') {
 ```
 
 Never publish or install a formal release artifact when either check fails. Locally built unsigned candidates are for development validation only.
+
+For Unix release archives, verify the SHA-256 manifest as well as platform trust:
+Linux requires the detached GPG signature and a trusted signing-key fingerprint;
+macOS requires Developer ID signing, notarization and Gatekeeper assessment.
+See [Unix packaging and release prerequisites](../src/cga-relay/README.md#build-test-and-release).
+Do not bypass Gatekeeper to treat an ad-hoc candidate as a formal release.
 
 ## Safe Config
 
@@ -144,6 +157,7 @@ cga-relay index incremental --config %USERPROFILE%\.cga\relay.env --repo-path C:
 cga-relay refs promote --config %USERPROFILE%\.cga\relay.env --repo-path C:\Repos\ExampleProject --ref feature/example --parent-ref main --delete-ref-graph
 cga-relay settings --config %USERPROFILE%\.cga\relay.env --status --json
 cga-relay settings --config %USERPROFILE%\.cga\relay.env --render
+cga-relay serve --config %USERPROFILE%\.cga\relay.env
 cga-relay tray --config %USERPROFILE%\.cga\relay.env
 cga-relay tray --config %USERPROFILE%\.cga\relay.env --status --json
 cga-relay mcp --config %USERPROFILE%\.cga\relay.env
@@ -155,9 +169,32 @@ cga-relay mcp --config %USERPROFILE%\.cga\relay.env
 
 When `tray` starts, CGA-Relay also starts a loopback-only dark-mode settings page on `127.0.0.1` and records its URL under `STATE_DIR/settings-url.txt`. The tray `Settings` menu item opens this relay settings page, not the CGA admin settings screen. The same loopback server exposes `GET /status.json` for browser discovery and `POST /api/index-git-incremental` for the CGA Admin page to trigger local git-aware incremental indexing.
 
+`serve` runs this same gateway without a desktop UI. Neither mode automatically
+watches or synchronizes every project; schedule explicit indexing/sync commands
+when periodic updates are needed. Stop the tray or service before launching a
+separate CLI or stdio-MCP process under the same single-instance scope.
+
 The local settings listener limits request headers and bodies to 64 KiB each, applies 30-second read and write timeouts, rejects ambiguous content framing, and validates state-changing POST requests against the listener's exact loopback `Host` and browser `Origin`. Responses disable framing and apply a restrictive Content Security Policy. These controls reduce loopback denial-of-service, cross-site request forgery, and DNS rebinding risk; they do not make the settings page remotely accessible.
 
-The settings page lets the developer sign in with a CGA account and review current user groups. After login, CGA-Relay calls `/api/auth/me` and `/api/auth/me/groups`, caches the account session and current user's group-to-project mappings under `STATE_DIR`, derives local relay project access only from those group mappings, and imports group-authorized projects with valid local `repo_path` values into the local registry under the `account` namespace. On Windows, the cached JWT is encrypted with current-user Windows Data Protection API (DPAPI); a copied session cannot be decrypted by another Windows user or machine. Existing plaintext Windows sessions are migrated when first read. Non-Windows source builds restrict the session file to mode `0600`; token environment variables remain the preferred non-Windows credential path. Relay status checks the JWT expiration claim before reporting the account as signed in. An expired cached JWT remains protected local state for diagnosis but cannot authorize sync, MCP, refresh, settings, or tray signed-in status; sign in again to obtain a new JWT. The cached account session is local machine state and must not be copied into repository files or committed. Use the Settings page `Refresh access` button after CGA admin group or project membership changes to reload access without signing out.
+The settings page lets the developer sign in with a CGA account and review current user groups. After login, CGA-Relay calls `/api/auth/me` and `/api/auth/me/groups`, caches the account session and current user's group-to-project mappings under `STATE_DIR`, derives local relay project access only from those group mappings, and imports group-authorized projects with valid local `repo_path` values into the local registry under the `account` namespace.
+
+Account credentials use OS-protected storage by default:
+
+- **Windows:** current-user Data Protection API (DPAPI); a copied session cannot
+  be decrypted by another Windows user or machine. Existing plaintext Windows
+  sessions are migrated when first read.
+- **macOS:** login Keychain; local session metadata stores a credential reference.
+- **Linux:** Secret Service through `secret-tool` (`libsecret-tools`), with an
+  available unlocked provider such as GNOME Keyring or compatible KWallet.
+
+Unix legacy plaintext sessions are rejected: sign out in local settings, then
+sign in again; revoke the old token if it may have been exposed. There is no
+plaintext fallback when the native credential store is unavailable. For explicit
+process-memory-only login, set the process environment variable
+`CGA_RELAY_CREDENTIAL_MODE=session` before starting Relay, not in the strict
+allowlisted config file. The token will not survive process restart.
+
+Relay status checks the JWT expiration claim before reporting the account as signed in. An expired protected account token cannot authorize sync, MCP, refresh, settings, or tray signed-in status; sign in again to obtain a new JWT. The cached account session is local machine state and must not be copied into repository files or committed. Use the Settings page `Refresh access` button after CGA admin group or project membership changes to reload access without signing out.
 
 After account login, MCP tool calls and `sync` can use the user JWT relay bridge at `/api/auth/cga-relay/mcp-tool` and `/api/auth/cga-relay/sync`. For projects registered under the `account` namespace, `sync` prefers a current account JWT even when a global project-token environment variable is also configured; this prevents a token bound to one project from being sent for another account-authorized project. If the cached account session has expired, account-project sync fails before scanning instead of silently falling back to that global project token. If the server rejects an otherwise unexpired account JWT with HTTP 401, Relay removes the invalid local session and retries through the project endpoint only when an explicit project token is configured. The rejected JWT remains invalidated across all projects and batches in that `sync` invocation. Relay fails closed if the local session cannot be removed, and it never applies fallback to HTTP 403 access denials. Project-token routes remain supported for other namespaces and for deployments that prefer explicit per-project tokens.
 
@@ -165,7 +202,9 @@ After account login, MCP tool calls and `sync` can use the user JWT relay bridge
 
 `tray` runs the same standalone Rust executable as a Windows notification-area relay with a native Shell_NotifyIcon tray icon. The icon is antialiased `CGA` lettering in one horizontal row on a transparent background, without a tile or decorative accents, in both 16- and 32-pixel resources. The executable icon uses the embedded green `CGA` resource, while the tray icon uses the embedded gray `CGA` resource when no CGA account is signed in and switches to the embedded green `CGA` resource after account login. It does not launch Python, Node, Cargo, PowerShell, or a project-local MCP server.
 
-At startup, and every five seconds afterward, the tray process checks `API_BASE_URL/health` on a background thread so a slow backend cannot block the Windows message loop. While the CGA backend is unavailable, the tray alternates its normal account icon with an embedded yellow `CGA` warning icon every 500 milliseconds. The first failed check in each continuous outage also raises a Windows system notification titled `CGA Server Container is unavailable` with the message `Start the CGA Server Container to reconnect CGA-Relay.` The warning stops as soon as health recovers; a later outage can notify again, but repeated failed checks during the same outage do not generate duplicate notifications.
+At startup, and every five seconds afterward, the tray process checks `API_BASE_URL/health` on a background thread so a slow backend cannot block the Windows message loop. Three consecutive failed checks confirm an outage; an isolated failure or a brief container restart does not immediately raise an alarm. While the CGA backend is unavailable, the tray alternates its normal account icon with an embedded yellow `CGA` warning icon every 500 milliseconds. Two consecutive successful checks clear a confirmed outage, preventing a single successful probe from rearming notifications during a flapping connection.
+
+Each confirmed outage can raise one Windows notification titled `CGA server connection is unavailable`, explaining that Relay reconnects automatically and that persistent failures require checking CGA and Docker. Notifications are limited to one per five minutes across separate outages; the warning icon still reflects confirmed unavailability during that cooldown. Failed probes and confirmed health transitions remain logged. An empty HTTP response is reported as a connection closed before response headers, which can occur while Docker is restarting the server, rather than as evidence that the container is stopped. `tray --status --json` still reports the immediate probe result rather than the long-running tray's debounced state.
 
 When `tray` starts successfully, CGA-Relay releases the startup console so the long-running tray process does not leave a blank command window on the desktop. Status and diagnostic commands such as `tray --status --json`, `doctor`, and `settings --render` keep normal terminal output.
 

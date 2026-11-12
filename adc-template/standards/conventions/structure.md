@@ -6,7 +6,7 @@ All ADC projects MUST follow this standard root structure:
 
 ```text
 project-root/
-├── .adc/                    # Autonomous Development Constitution (hidden)
+├── .adc/                    # Agent Development Constitution (hidden)
 ├── src/                     # All source code
 │   ├── dist/                # Compiled/bundled output (git-ignored)
 │   │   ├── release/         # Final production artifacts

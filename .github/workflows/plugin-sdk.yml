@@ -1,0 +1,54 @@
+name: Plugin SDK
+
+on:
+  pull_request:
+    paths:
+      - "sdk/cga-plugin-sdk/**"
+      - "docs/plugins/**"
+      - "src/scripts/*plugin*"
+      - "src/tests/test_plugin_approval.py"
+      - ".github/workflows/plugin-sdk*.yml"
+  push:
+    branches: [main]
+    paths:
+      - "sdk/cga-plugin-sdk/**"
+      - "docs/plugins/**"
+      - "src/scripts/*plugin*"
+      - "src/tests/test_plugin_approval.py"
+      - ".github/workflows/plugin-sdk*.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Plugin SDK tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.11"
+      - name: Install SDK and isolated test/build tools
+        run: python -m pip install ./sdk/cga-plugin-sdk pytest build==1.6.1 setuptools==81.0.0
+      - name: Test SDK and fail-closed approval decisions
+        run: python -m pytest --noconftest sdk/cga-plugin-sdk/tests src/tests/test_plugin_approval.py -q -o addopts=''
+      - name: Build joint standards and developer kit
+        run: python src/scripts/build_plugin_sdk.py --output "$RUNNER_TEMP/plugin-sdk"
+      - name: Smoke-test the actual wheel and generated adapter
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --no-deps --force-reinstall "$RUNNER_TEMP"/plugin-sdk/*.whl
+          cd "$RUNNER_TEMP"
+          python -m cga_plugin_sdk init sample-plugin --id sample_inspector
+          python -m cga_plugin_sdk validate sample-plugin
+          python -m pytest --noconftest sample-plugin/test_plugin.py -q
+          python -m cga_plugin_sdk package sample-plugin --output plugin-output
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: plugin-development-kit-candidate
+          path: ${{ runner.temp }}/plugin-sdk/*
+          if-no-files-found: error

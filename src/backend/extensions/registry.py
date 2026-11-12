@@ -332,9 +332,8 @@ def deliver_extension_notifications(
     *,
     smtp_config: dict[str, Any],
 ) -> dict[str, Any]:
-    if extension_id != AZURE_POLICY_EXTENSION_ID:
-        raise KeyError(f"Unknown extension: {extension_id}")
-    _ensure_extension_path(_azure_policy_src_path())
-    from policy_monitor.notifications import deliver_notifications
+    from backend.plugins.host import execution
+    with execution("notifications"):
+        from backend.plugins.notifications import deliver_notifications
 
-    return deliver_notifications(result, config, smtp_config=smtp_config)
+        return deliver_notifications(result, config, smtp_config=smtp_config)

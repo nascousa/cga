@@ -92,9 +92,10 @@ mod platform {
 
 #[cfg(unix)]
 mod platform {
-    use std::fs::{File, OpenOptions};
+    use std::fs::{self, DirBuilder, File, OpenOptions};
     use std::io;
     use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 
     const LOCK_EX: i32 = 2;
     const LOCK_NB: i32 = 4;
@@ -104,12 +105,28 @@ mod platform {
     }
 
     pub(super) fn try_acquire(name: &str) -> io::Result<Option<Guard>> {
-        let path = std::path::Path::new("/tmp").join(format!("{name}.lock"));
+        let uid = unsafe { geteuid() };
+        let directory = std::path::Path::new("/tmp").join(format!("cga-relay-{uid}"));
+        match DirBuilder::new().mode(0o700).create(&directory) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        }
+        let metadata = fs::symlink_metadata(&directory)?;
+        if !metadata.is_dir() || metadata.uid() != uid || metadata.permissions().mode() & 0o077 != 0
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "single-instance directory must be a private directory owned by the current user",
+            ));
+        }
+        let path = directory.join(format!("{name}.lock"));
         let file = OpenOptions::new()
             .read(true)
             .write(true)
             .create(true)
             .truncate(false)
+            .mode(0o600)
             .open(path)?;
         if unsafe { flock(file.as_raw_fd(), LOCK_EX | LOCK_NB) } == 0 {
             return Ok(Some(Guard { _file: file }));
@@ -125,6 +142,7 @@ mod platform {
 
     unsafe extern "C" {
         fn flock(file_descriptor: i32, operation: i32) -> i32;
+        fn geteuid() -> u32;
     }
 }
 
