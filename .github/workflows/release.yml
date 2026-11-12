@@ -52,7 +52,7 @@ jobs:
         working-directory: src/cga-relay
         run: |
           test "$(sed -n 's/^version = "\([^"]*\)"$/\1/p' Cargo.toml)" = "${GITHUB_REF_NAME#v}" || { echo "Tag does not match Relay package version" >&2; exit 1; }
-          cargo test --locked
+          bash scripts/tests/run-native-tests.sh
           python3 scripts/tests/test_unix_install.py
       - name: Build signed Linux release
         if: runner.os == 'Linux'

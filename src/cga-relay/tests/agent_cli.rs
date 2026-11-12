@@ -72,7 +72,6 @@ fn write_test_account_session(path: impl AsRef<Path>, text: impl AsRef<[u8]>) ->
         #[cfg(target_os = "macos")]
         let (field, value) = {
             use std::os::unix::ffi::OsStrExt;
-            writeln!(io::stderr(), "macOS fixture: creating {}", path.display())?;
             let canonical = path.parent().unwrap().canonicalize()?.join(path.file_name().unwrap());
             let scope = canonical.as_os_str().as_bytes().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
             // The Relay reads synthetic credentials; security owns fixture creation and cleanup.
@@ -108,7 +107,6 @@ fn write_test_account_session(path: impl AsRef<Path>, text: impl AsRef<[u8]>) ->
                     return Err(io::Error::other("cannot authorize isolated Keychain fixture"));
                 }
             }
-            writeln!(io::stderr(), "macOS fixture: created {}", path.display())?;
             ("access_token_keychain", scope)
         };
         let text = text.replace(&format!("\"access_token\":\"{token}\""), &format!("\"{field}\":\"{value}\""));
@@ -160,14 +158,12 @@ impl Drop for TestDir {
                 if let Some(value) = text.split("\"access_token_keychain\":\"")
                     .nth(1).and_then(|value| value.split('"').next())
                 {
-                    let _ = writeln!(io::stderr(), "macOS fixture: deleting {}", path.display());
                     let result = ProcessCommand::new("/usr/bin/security")
                         .args(["delete-generic-password", "-s", "com.cga.relay.account", "-a", value])
                         .output();
                     if !result.is_ok_and(|output| output.status.success()) {
                         eprintln!("Cannot delete synthetic macOS Keychain fixture");
                     }
-                    let _ = writeln!(io::stderr(), "macOS fixture: cleanup returned {}", path.display());
                 }
             }
         }

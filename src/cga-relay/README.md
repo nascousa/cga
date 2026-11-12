@@ -123,6 +123,14 @@ python3 scripts/tests/test_unix_install.py
 sh scripts/build-unix-package.sh /absolute/path/to/new-output-directory
 ```
 
+On macOS, use `bash scripts/tests/run-native-tests.sh` instead of direct
+`cargo test`: it runs the same native tests against a temporary unlocked
+Keychain and restores the original default/search list afterward. Synthetic
+fixtures authorize the compiled test Relay identity without changing production
+credential storage or requiring GUI consent. Policy and release CI share this
+wrapper. Installer path assertions compare resolved paths because macOS
+temporary directories may be reached through `/var` aliases.
+
 macOS source builds require a Rust toolchain and the system C linker; packaging
 uses `codesign` and `ditto`, with `xcrun notarytool` for formal releases. There is
 no Swift/Cocoa helper to build. Linux desktop helper syntax can be checked with

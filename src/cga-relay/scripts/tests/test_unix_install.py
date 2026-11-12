@@ -141,7 +141,7 @@ class MacCliInstallerTests(UnixInstallerTests):
         self.assertEqual(result.returncode, 0, result.stderr)
         binary = self.home / ".local" / "share" / "cga-relay" / "bin" / "cga-relay"
         self.assertTrue(binary.is_file())
-        self.assertEqual((self.home / ".local" / "bin" / "cga-relay").resolve(), binary)
+        self.assertEqual((self.home / ".local" / "bin" / "cga-relay").resolve(), binary.resolve())
         self.assertFalse((self.home / "Applications").exists())
         agent = self.home / "Library" / "LaunchAgents" / "com.nascousa.cga-relay.plist"
         self.assertFalse(agent.exists())

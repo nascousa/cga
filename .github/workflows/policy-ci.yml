@@ -24,31 +24,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Test Relay
         shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$RUNNER_OS" != "macOS" ]]; then
-            cargo test --locked
-            exit
-          fi
-          original_default="$(security default-keychain -d user | sed -e 's/^ *"//' -e 's/"$//')"
-          original_search=()
-          while IFS= read -r keychain; do original_search+=("$keychain"); done < <(security list-keychains -d user | sed -e 's/^ *"//' -e 's/"$//')
-          export CGA_RELAY_TEST_KEYCHAIN="$RUNNER_TEMP/cga-relay-tests.keychain-db"
-          export CGA_RELAY_TEST_KEYCHAIN_PASSWORD
-          CGA_RELAY_TEST_KEYCHAIN_PASSWORD="$(openssl rand -hex 32)"
-          echo "::add-mask::$CGA_RELAY_TEST_KEYCHAIN_PASSWORD"
-          cleanup() {
-            security default-keychain -d user -s "$original_default"
-            security list-keychains -d user -s "${original_search[@]}"
-            security delete-keychain "$CGA_RELAY_TEST_KEYCHAIN"
-          }
-          security create-keychain -p "$CGA_RELAY_TEST_KEYCHAIN_PASSWORD" "$CGA_RELAY_TEST_KEYCHAIN"
-          trap cleanup EXIT
-          security set-keychain-settings -lut 21600 "$CGA_RELAY_TEST_KEYCHAIN"
-          security unlock-keychain -p "$CGA_RELAY_TEST_KEYCHAIN_PASSWORD" "$CGA_RELAY_TEST_KEYCHAIN"
-          security list-keychains -d user -s "$CGA_RELAY_TEST_KEYCHAIN"
-          security default-keychain -d user -s "$CGA_RELAY_TEST_KEYCHAIN"
-          cargo test --locked
+        run: bash scripts/tests/run-native-tests.sh
       - name: Test Unix user installers
         if: runner.os != 'Windows'
         run: python3 scripts/tests/test_unix_install.py
