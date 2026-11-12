@@ -72,6 +72,7 @@ fn write_test_account_session(path: impl AsRef<Path>, text: impl AsRef<[u8]>) ->
         #[cfg(target_os = "macos")]
         let (field, value) = {
             use std::os::unix::ffi::OsStrExt;
+            writeln!(io::stderr(), "macOS fixture: creating {}", path.display())?;
             let canonical = path.parent().unwrap().canonicalize()?.join(path.file_name().unwrap());
             let scope = canonical.as_os_str().as_bytes().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
             // The Relay reads synthetic credentials; security owns fixture creation and cleanup.
@@ -84,6 +85,7 @@ fn write_test_account_session(path: impl AsRef<Path>, text: impl AsRef<[u8]>) ->
             if !result.status.success() {
                 return Err(io::Error::other("cannot create the scoped macOS Keychain fixture"));
             }
+            writeln!(io::stderr(), "macOS fixture: created {}", path.display())?;
             ("access_token_keychain", scope)
         };
         let text = text.replace(&format!("\"access_token\":\"{token}\""), &format!("\"{field}\":\"{value}\""));
@@ -130,6 +132,7 @@ impl Drop for TestDir {
     fn drop(&mut self) {
         #[cfg(target_os = "macos")]
         {
+            let _ = writeln!(io::stderr(), "macOS fixture: deleting {}", path.display());
             let path = self.path.join("state").join("account-session.json");
             if let Ok(text) = fs::read_to_string(&path) {
                 if let Some(value) = text.split("\"access_token_keychain\":\"")
@@ -141,6 +144,7 @@ impl Drop for TestDir {
                     if !result.is_ok_and(|output| output.status.success()) {
                         eprintln!("Cannot delete synthetic macOS Keychain fixture");
                     }
+                    let _ = writeln!(io::stderr(), "macOS fixture: deleted {}", path.display());
                 }
             }
         }
