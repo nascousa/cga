@@ -85,6 +85,29 @@ fn write_test_account_session(path: impl AsRef<Path>, text: impl AsRef<[u8]>) ->
             if !result.status.success() {
                 return Err(io::Error::other("cannot create the scoped macOS Keychain fixture"));
             }
+            if let Ok(keychain) = std::env::var("CGA_RELAY_TEST_KEYCHAIN") {
+                let password = std::env::var("CGA_RELAY_TEST_KEYCHAIN_PASSWORD")
+                    .map_err(|_| io::Error::other("missing isolated Keychain password"))?;
+                let signature = ProcessCommand::new("/usr/bin/codesign")
+                    .args(["-d", "--verbose=4"]).arg(agent_bin()).output()?;
+                let details = String::from_utf8_lossy(&signature.stderr);
+                let partition = if signature.status.success() {
+                    let hash = details.lines().find_map(|line| line.strip_prefix("CDHash="))
+                        .ok_or_else(|| io::Error::other("missing Relay code signature hash"))?;
+                    format!("cdhash:{hash},apple-tool:,apple:")
+                } else if details.contains("code object is not signed at all") {
+                    "unsigned:,apple-tool:,apple:".to_string()
+                } else {
+                    return Err(io::Error::other("cannot inspect fixture Relay signature"));
+                };
+                let access = ProcessCommand::new("/usr/bin/security")
+                    .args(["set-generic-password-partition-list", "-s", "com.cga.relay.account",
+                           "-a", &scope, "-S", &partition, "-k", &password, &keychain])
+                    .output()?;
+                if !access.status.success() {
+                    return Err(io::Error::other("cannot authorize isolated Keychain fixture"));
+                }
+            }
             writeln!(io::stderr(), "macOS fixture: created {}", path.display())?;
             ("access_token_keychain", scope)
         };
