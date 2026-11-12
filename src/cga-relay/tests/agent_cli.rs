@@ -83,12 +83,10 @@ fn write_test_account_session(path: impl AsRef<Path>, text: impl AsRef<[u8]>) ->
             use std::os::unix::ffi::OsStrExt;
             let canonical = path.parent().unwrap().canonicalize()?.join(path.file_name().unwrap());
             let scope = canonical.as_os_str().as_bytes().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
-            // Fixture credentials must be readable by both the test and the spawned Relay.
+            // Only synthetic fixture tokens use an open ACL; unsigned test processes cannot share GUI consent.
             let result = ProcessCommand::new("/usr/bin/security")
                 .args(["add-generic-password", "-s", "com.cga.relay.account", "-a", &scope,
-                       "-w", token, "-T"])
-                .arg(agent_bin())
-                .arg("-T").arg(std::env::current_exe()?)
+                       "-w", token, "-A"])
                 .output()?;
             if !result.status.success() {
                 return Err(io::Error::other("cannot create the scoped macOS Keychain fixture"));
