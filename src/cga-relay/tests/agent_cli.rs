@@ -46,15 +46,6 @@ impl Command {
     }
 }
 
-#[cfg(target_os = "macos")]
-#[derive(Debug)]
-struct AgentError(String);
-#[cfg(target_os = "macos")]
-type AgentResult<T> = Result<T, AgentError>;
-#[cfg(target_os = "macos")]
-#[path = "../src/secret_store.rs"]
-mod secret_store;
-
 fn write_test_account_session(path: impl AsRef<Path>, text: impl AsRef<[u8]>) -> io::Result<()> {
     let path = path.as_ref();
     #[cfg(windows)]
@@ -83,10 +74,12 @@ fn write_test_account_session(path: impl AsRef<Path>, text: impl AsRef<[u8]>) ->
             use std::os::unix::ffi::OsStrExt;
             let canonical = path.parent().unwrap().canonicalize()?.join(path.file_name().unwrap());
             let scope = canonical.as_os_str().as_bytes().iter().map(|byte| format!("{byte:02x}")).collect::<String>();
-            // Only synthetic fixture tokens use an open ACL; unsigned test processes cannot share GUI consent.
+            // The Relay reads synthetic credentials; security owns fixture creation and cleanup.
             let result = ProcessCommand::new("/usr/bin/security")
                 .args(["add-generic-password", "-s", "com.cga.relay.account", "-a", &scope,
-                       "-w", token, "-A"])
+                       "-w", token, "-T"])
+                .arg(agent_bin())
+                .args(["-T", "/usr/bin/security"])
                 .output()?;
             if !result.status.success() {
                 return Err(io::Error::other("cannot create the scoped macOS Keychain fixture"));
@@ -142,7 +135,12 @@ impl Drop for TestDir {
                 if let Some(value) = text.split("\"access_token_keychain\":\"")
                     .nth(1).and_then(|value| value.split('"').next())
                 {
-                    let _ = secret_store::delete_access_token(&path, "access_token_keychain", value);
+                    let result = ProcessCommand::new("/usr/bin/security")
+                        .args(["delete-generic-password", "-s", "com.cga.relay.account", "-a", value])
+                        .output();
+                    if !result.is_ok_and(|output| output.status.success()) {
+                        eprintln!("Cannot delete synthetic macOS Keychain fixture");
+                    }
                 }
             }
         }
