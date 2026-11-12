@@ -132,19 +132,19 @@ impl Drop for TestDir {
     fn drop(&mut self) {
         #[cfg(target_os = "macos")]
         {
-            let _ = writeln!(io::stderr(), "macOS fixture: deleting {}", path.display());
             let path = self.path.join("state").join("account-session.json");
             if let Ok(text) = fs::read_to_string(&path) {
                 if let Some(value) = text.split("\"access_token_keychain\":\"")
                     .nth(1).and_then(|value| value.split('"').next())
                 {
+                    let _ = writeln!(io::stderr(), "macOS fixture: deleting {}", path.display());
                     let result = ProcessCommand::new("/usr/bin/security")
                         .args(["delete-generic-password", "-s", "com.cga.relay.account", "-a", value])
                         .output();
                     if !result.is_ok_and(|output| output.status.success()) {
                         eprintln!("Cannot delete synthetic macOS Keychain fixture");
                     }
-                    let _ = writeln!(io::stderr(), "macOS fixture: deleted {}", path.display());
+                    let _ = writeln!(io::stderr(), "macOS fixture: cleanup returned {}", path.display());
                 }
             }
         }
