@@ -1376,6 +1376,11 @@ scheduled tasks and indexing starts pause while existing work drains.
 Drain readiness also waits for in-flight audit cleanup to persist its run status.
 Receipts identify the exact update request; the host rejects earlier or legacy
 receipts, and queueing/cancellation clears stale readiness.
+An overlapping API queue probe can temporarily hold the queue lock even when
+no update is queued. The host logs this dedicated busy condition and retries
+after its normal two-second poll delay, keeping its heartbeat alive. Recovery,
+journal and other processing errors are not treated as lock contention or
+silently retried.
 
 The executor checks Compose ownership and the original health port, pulls the
 signed digest, stops **only the configured API service**, verifies fresh backups

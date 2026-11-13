@@ -35,6 +35,32 @@ def test_powershell_generator_copies_current_template_without_overwrite():
         shutil.rmtree(target, ignore_errors=True)
 
 
+def test_powershell_generator_resolves_relative_targets_from_session_location(tmp_path):
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if shell is None:
+        pytest.skip("PowerShell is required to validate the template generator")
+    startup = tmp_path / "process-startup"
+    current = tmp_path / "current checkout"
+    startup.mkdir()
+    current.mkdir()
+
+    def quoted(path):
+        return "'" + str(path).replace("'", "''") + "'"
+
+    command = (
+        "$ErrorActionPreference='Stop'; "
+        f"[Environment]::CurrentDirectory = {quoted(startup)}; "
+        f"Set-Location -LiteralPath {quoted(current)}; "
+        f"& {quoted(ROOT / 'src/scripts/generate-adc-template.ps1')} -TargetDir './new-template'"
+    )
+    subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-Command", command],
+        cwd=startup, check=True, capture_output=True, text=True, timeout=30,
+    )
+    assert (current / "new-template" / "index.md").read_bytes() == (ROOT / "adc-template/index.md").read_bytes()
+    assert not (startup / "new-template").exists()
+
+
 def test_prompt_rules_has_core_quality_sections() -> None:
     content = _read("adc-template/prompt-rules.md")
 

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from backend.indexer.parser import ParsedFile, path_to_module
-from backend.indexer.snapshot import FileSnapshot, SymbolResolver, parse_snapshot
+from backend.indexer.snapshot import FileSnapshot, SymbolResolver, call_key, parse_snapshot
 
 
 def snapshot(path: Path, language: str = "python") -> FileSnapshot:
@@ -136,3 +136,44 @@ def test_class_imports_do_not_leak_into_methods_and_nested_functions_capture_rec
         f"{module}.Owner.run:inner": f"{module}.Owner.run.inner",
         f"{module}.Owner.run.inner:self.sibling": f"{module}.Owner.sibling",
     }
+
+
+@pytest.mark.parametrize("expression", [
+    "[helper() for helper in items]",
+    "{helper() for helper in items}",
+    "{helper(): item for helper in items}",
+    "(helper() for helper in items)",
+])
+def test_comprehension_local_calls_do_not_reuse_the_outside_import_target(tmp_path, expression):
+    dependency = tmp_path / "wanted.py"
+    dependency.write_text("def helper():\n    pass\n", encoding="utf-8")
+    source = tmp_path / "source.py"
+    source.write_text(
+        "from wanted import helper\n"
+        f"def caller(items):\n    helper()\n    result = {expression}\n    helper()\n",
+        encoding="utf-8",
+    )
+    parsed = FileSnapshot.deserialize(parse_snapshot(str(source)).serialize())
+    resolver = SymbolResolver([parsed, parse_snapshot(str(dependency))], tmp_path)
+    target = path_to_module(str(dependency)) + ".helper"
+    assert [resolver.resolve(parsed, call) for call in parsed.parsed.calls] == [target, None, target]
+    targets = resolver.call_map(parsed)
+    assert call_key(parsed.parsed.calls[1]) not in targets
+    assert targets[call_key(parsed.parsed.calls[0])] == target
+
+
+def test_comprehension_first_iterable_keeps_outer_binding_while_later_iterables_are_local(tmp_path):
+    dependency = tmp_path / "wanted.py"
+    dependency.write_text("def helper():\n    pass\n", encoding="utf-8")
+    source = tmp_path / "source.py"
+    source.write_text(
+        "from wanted import helper\n"
+        "def caller():\n"
+        "    return [helper() for helper in helper() for item in helper() if helper()]\n",
+        encoding="utf-8",
+    )
+    parsed = parse_snapshot(str(source))
+    resolver = SymbolResolver([parsed, parse_snapshot(str(dependency))], tmp_path)
+    assert [resolver.resolve(parsed, call) for call in parsed.parsed.calls] == [
+        path_to_module(str(dependency)) + ".helper", None, None, None,
+    ]

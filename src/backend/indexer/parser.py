@@ -21,7 +21,8 @@ from typing import AbstractSet, Iterator
 from backend.indexer.language_definitions import REGISTERED_EXTENSIONS, REGISTERED_FILENAMES
 from backend.indexer.language_catalog import is_parser_file_enabled
 from backend.indexer.call_analyzer import (
-    MethodBinding, PythonParameter, PythonScope, RawCall, python_parameters, python_scopes, walk_python_scope,
+    MethodBinding, PythonParameter, PythonScope, RawCall, python_parameters, python_scopes,
+    walk_python_scope, walk_python_scope_context,
 )
 
 
@@ -126,7 +127,7 @@ class PythonParser:
                         method_binding=scope.method_binding,
                     )
                 )
-            for item in walk_python_scope(node):
+            for item in walk_python_scope(node, evaluate_annotations=scope.evaluate_annotations):
                 if isinstance(item, ast.Import):
                     for alias in item.names:
                         result.imports.append(ParsedImport(source_path=file_path, imported_module=alias.name))
@@ -166,7 +167,9 @@ class PythonParser:
         scope_qname = scope.qualified_name
         seen_flows: set[tuple[str, str, str, int]] = set()
         return_var = variables_by_name[f"{scope_qname}:__return__"]
-        for node in walk_python_scope(scope.node):
+        for node, bound in walk_python_scope_context(
+            scope.node, evaluate_annotations=scope.evaluate_annotations,
+        ):
             if isinstance(node, ast.Assign):
                 target_names = self._extract_python_target_names(node.targets)
                 source_names = self._extract_python_source_names(node.value)
@@ -236,7 +239,7 @@ class PythonParser:
                     )
             elif isinstance(node, ast.Call):
                 for argument in [*node.args, *(keyword.value for keyword in node.keywords)]:
-                    for name in self._extract_python_source_names(argument):
+                    for name in self._extract_python_source_names(argument, bound):
                         role = "parameter" if scope.variable_qname(name) in parameter_qnames else "local"
                         self._ensure_variable(
                             result, variables_by_name, scope.variable_scope(name).qualified_name,
@@ -325,12 +328,14 @@ class PythonParser:
         return sorted(names)
 
     @staticmethod
-    def _extract_python_source_names(node: ast.AST | None) -> list[str]:
+    def _extract_python_source_names(
+        node: ast.AST | None, bound_names: frozenset[str] = frozenset(),
+    ) -> list[str]:
         if node is None:
             return []
         names: set[str] = set()
-        for child in walk_python_scope(node):
-            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load):
+        for child, bound in walk_python_scope_context(node, bound_names=bound_names):
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load) and child.id not in bound:
                 names.add(child.id)
         return sorted(names)
 

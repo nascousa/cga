@@ -9,7 +9,7 @@ from pathlib import Path
 
 from backend.indexer.call_analyzer import (
     CallAnalyzer, CallArgument, PythonParameter, PythonScope, python_parameters,
-    python_scopes, walk_python_scope,
+    python_scopes, walk_python_scope_context,
 )
 from backend.indexer.hasher import sha256_file
 from backend.indexer.parser import (
@@ -18,7 +18,7 @@ from backend.indexer.parser import (
 )
 
 
-INDEX_FORMAT_VERSION = 3
+INDEX_FORMAT_VERSION = 4
 
 
 @dataclass
@@ -89,12 +89,9 @@ def _python_bindings(scope: PythonScope, scopes: dict[ast.AST, PythonScope]) -> 
             bind(parameter.name, target)
     for name in scope.global_names | scope.nonlocal_names:
         bind(name, {**unknown, "scope": scope.variable_scope(name).qualified_name})
-    nodes = list(walk_python_scope(scope.node))
-    comprehension_targets = {
-        child for node in nodes if isinstance(node, ast.comprehension)
-        for child in ast.walk(node.target)
-    }
-    for node in nodes:
+    for node, bound in walk_python_scope_context(
+        scope.node, evaluate_annotations=scope.evaluate_annotations,
+    ):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             bind(node.name, {**unknown, "symbol": scopes[node].qualified_name})
         elif isinstance(node, ast.Import):
@@ -109,7 +106,7 @@ def _python_bindings(scope: PythonScope, scopes: dict[ast.AST, PythonScope]) -> 
                         "name": alias.name,
                     })
         elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
-            if node not in comprehension_targets:
+            if node.id not in bound:
                 bind(node.id, dict(unknown))
         elif isinstance(node, ast.ExceptHandler) and node.name:
             bind(node.name, dict(unknown))
@@ -151,7 +148,8 @@ def parse_snapshot(path: str, parser: SourceParser | None = None) -> FileSnapsho
 
 
 def call_key(call: RawCall) -> str:
-    return f"{call.caller_qname}:{call.callee_qualifier or call.callee_name}"
+    key = f"{call.caller_qname}:{call.callee_qualifier or call.callee_name}"
+    return key + "#comprehension-shadowed" if call.callee_is_shadowed else key
 
 
 class SymbolResolver:
@@ -227,6 +225,8 @@ class SymbolResolver:
         return None
 
     def resolve(self, snapshot: FileSnapshot, call: RawCall) -> str | None:
+        if call.callee_is_shadowed:
+            return None
         qualifier = call.callee_qualifier or call.callee_name
         if snapshot.parsed.language == "python":
             target, receiver_kind = self._python_reference(snapshot, call.caller_qname, qualifier)

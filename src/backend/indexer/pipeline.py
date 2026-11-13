@@ -308,6 +308,7 @@ class IndexPipeline:
         rows = [
             {"caller_qname": rc.caller_qname, "callee_qname": callee_qname}
             for rc in raw_calls
+            if not rc.callee_is_shadowed
             if (callee_qname := symbol_map.get(call_key(rc)) or symbol_map.get(rc.callee_name))
         ]
         if rows:
@@ -388,6 +389,7 @@ class IndexPipeline:
         resolved: list[tuple[RawCall, str]] = [
             (call, callee_qname)
             for call in raw_calls
+            if not call.callee_is_shadowed
             if (callee_qname := symbol_map.get(call_key(call)) or symbol_map.get(call.callee_name))
         ]
         if not resolved:

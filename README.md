@@ -306,7 +306,9 @@ draft artifacts are not approved API/Relay updates.
 - **1.30.133 security/indexing fixes:** MCP SSE sessions bind to the verified
   project and exact credential; another token cannot reuse a session. Python
   nested scopes and positional/keyword/repeated argument flows are corrected.
-  Index format 3 reparses older evidence on the next repository indexing job;
+  Source index format 4 also corrects eager annotations and comprehension-local
+  shadowing; the deployed overlay remains on format 3. Older evidence is
+  reparsed on the next repository indexing job after installing the newer source;
   deploying does not automatically rebuild existing project graphs.
 - **Upgrade Center:** admin-visible upgrade readiness, backup status, schema compatibility, relay guidance, and copyable upgrade commands.
 

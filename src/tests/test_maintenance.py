@@ -1,7 +1,7 @@
 import json
 import asyncio
 import time
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -18,7 +18,7 @@ from backend.maintenance import retention, updates
 from backend.auth.database import get_db
 from backend.maintenance.history import validate_change_diff, version_tuple
 from backend.maintenance.router import router
-from backend.maintenance.spool import atomic_json
+from backend.maintenance.spool import QueueLockBusyError, atomic_json, queue_lock
 from backend.maintenance.update_manifest import verify_manifest
 from backend.maintenance.gate import MaintenanceGate
 from backend.indexer.consumer import IndexerConsumer
@@ -441,6 +441,51 @@ def test_host_success_preserves_scope_and_keeps_private_journals(tmp_path, signe
     assert calls[1][-4:] == ["stop", "--timeout", "300", "cga"]
     assert all("down" not in call and "--volumes" not in call for call in calls)
     assert "never-write-this-in-journal" not in (journal / ("b" * 32) / "journal.json").read_text()
+
+
+@pytest.mark.parametrize("queued", [False, True])
+def test_host_retries_overlapping_queue_polls_without_stopping_heartbeat(
+    tmp_path, signed_update, monkeypatch, capsys, queued,
+):
+    host, root, _, _, _ = make_host(tmp_path, signed_update, monkeypatch)
+    if not queued:
+        (root / "request.json").unlink()
+    monkeypatch.setattr(host, "verify_runtime", lambda *args: None)
+    delays = []
+    with ExitStack() as held:
+        held.enter_context(queue_lock(root))
+        with pytest.raises(QueueLockBusyError):
+            host.process()
+
+        def release_after_busy_poll(delay):
+            delays.append(delay)
+            assert host.thread.is_alive()
+            assert not host.stop_event.is_set()
+            assert (root / "queue.lock").is_dir()
+            assert (root / "status.json").is_file()
+            held.close()
+
+        monkeypatch.setattr("scripts.cga_update_host.time.sleep", release_after_busy_poll)
+        host.run(once=True)
+    assert delays == [2]
+    assert host.progress["status"] == ("success" if queued else "ready")
+    assert not (root / "request.json").exists()
+    assert not host.thread.is_alive()
+    assert "queue is busy" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("stage", ["recover", "process"])
+def test_host_does_not_retry_recovery_errors_as_queue_contention(tmp_path, signed_update, monkeypatch, stage):
+    host, _, _, _, _ = make_host(tmp_path, signed_update, monkeypatch)
+
+    def recovery_required():
+        raise ValueError("Operator recovery required")
+
+    monkeypatch.setattr(host, stage, recovery_required)
+    with pytest.raises(ValueError, match="Operator recovery required"):
+        host.run(once=True)
+    assert host.stop_event.is_set()
+    assert host.thread is None or not host.thread.is_alive()
 
 
 def test_host_target_failure_restores_image_not_database(tmp_path, signed_update, monkeypatch):
