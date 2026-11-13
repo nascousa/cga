@@ -107,12 +107,14 @@ class HostUpdater:
         self.progress = {**self.progress, **fields, "status": status, "message": message}
         self.heartbeat()
 
-    def wait_drained(self, version: str) -> None:
+    def wait_drained(self, version: str, request_id: str) -> None:
         for _ in range(300):
             path = self.root / "drain.json"
             if path.is_file():
                 data = json.loads(path.read_text(encoding="utf-8"))
-                if data.get("ready") and data.get("version") == version and time.time() - data["heartbeat"] < 5:
+                if (data.get("ready") and data.get("version") == version
+                        and data.get("request_id") == request_id
+                        and 0 <= time.time() - data["heartbeat"] < 5):
                     return
             time.sleep(1)
         raise RuntimeError("Timed out draining active writes, tasks and indexing. No replacement was performed.")
@@ -221,7 +223,7 @@ asyncio.run(probe())
             self.progress_to("preparing", "Downloading verified image; draining active work.",
                              id=request["id"], version=request["version"])
             command(["docker", "pull", claims["image"]], timeout=900)
-            self.wait_drained(request["current_version"])
+            self.wait_drained(request["current_version"], request["id"])
             self.progress_to("backing-up", "Brief maintenance outage: stopping only CGA and verifying fresh backups.")
             # Persist the recovery phase before any operation that can stop the old runtime.
             atomic_json(job_dir / "journal.json", {"request": request, "before": before, "phase": "stopping"})

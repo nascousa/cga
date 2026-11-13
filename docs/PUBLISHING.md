@@ -30,16 +30,32 @@ After review and merge, run **Plugin SDK release** from **main**, with its
 approved PR number and matching SDK version. It verifies live review/check
 metadata before building and again before publication, checks out the actual
 merge commit, runs tests, attests artifacts and creates a new immutable release.
+Publication rejects an existing tag (even without a release) or release, and
+metadata lookup failures abort publication. The workflow atomically creates the
+tag at the approved merge commit before creating a release with `--verify-tag`;
+if publication fails after tag creation, use a new version, not a reused tag.
+Required check names are resolved only inside the repository's active
+`.github/workflows/plugin-sdk.yml` workflow. Its run, check-suite, repository,
+event and source must agree: a `pull_request` run must test the approved head
+directly or a synthetic merge with that head and the run's recorded base as
+parents. Both the reviewed head's and tested commit's workflow Git blob IDs must
+match the workflow at the immutable base SHA returned by GitHub for trusted
+`main`; a matching filename alone is insufficient. A successful `push` run
+on `main` at the approved merge commit also qualifies, including when a PR
+changes the SDK workflow itself. Same-named jobs from other workflows,
+`pull_request_target` runs and author-modified PR workflows do not qualify.
 Configure both reviewer variables and the protected `plugin-sdk-release`
 environment first. A local kit or candidate draft is not an attested release.
 The existing API/Relay signature/deployment gates remain unchanged.
 
 Publishing the workflow files requires GitHub credentials authorized for
-workflow writes. The current OAuth credential rejected both the isolated SDK
-branch push and exact-commit draft creation because it lacks `workflow` scope;
-no remote SDK branch, approval PR or candidate release was created. Preserve the
-local candidate/source patch for review until authorization is granted.
-Do not delete gate files, change source targets or bypass required approvals.
+workflow writes. The earlier OAuth-scope blocker was resolved, and the
+consolidated source/workflows were merged through
+[PR #60](https://github.com/nascousa/cga/pull/60) on 2026-11-12. This is not a
+formal SDK release or proof that the independent SDK approval/environment gates
+are configured. Preserve local candidates as review evidence; recheck current
+credentials and release approvals before publishing. Do not delete gate files,
+change source targets or bypass required approvals.
 
 ### Application runtime channels
 
@@ -137,6 +153,14 @@ older installations need an operator-managed bootstrap first. Missing keys,
 unfinished notes or inconsistent package/version inputs fail signing; existing
 Relay signing gates remain mandatory.
 
+The API build first pushes an untagged staging digest, not a public version or
+`latest` tag. Only after Relay gates, API manifest signing, checksum creation
+and GitHub release asset publication succeed does the workflow promote that
+exact digest to both public tags. Failed gates leave the previous tags intact;
+a staging digest is not a formal release. Registry promotion is not atomic with
+GitHub release creation: a promotion failure can leave release assets published
+without changing the public image tags and requires operator recovery.
+
 The workflow publishes `update-manifest.jwt`, includes its checksum and uses the
 same notes for the GitHub release. Existing assets are not overwritten. Source
 changes, ephemeral-key tests and successful local builds do not prove a trusted
@@ -144,17 +168,19 @@ formal release or a real update/rollback. Host provisioning and first-phase
 limitations are documented in
 [runtime operations](runtime-operations.md#one-time-host-updater-provisioning).
 
-## Current Release Readiness (2026-11-10)
+<a id="current-release-readiness-2026-11-10"></a>
+
+## Current Release Readiness (2026-11-12)
 
 | Area | Verified state |
 | --- | --- |
 | Source version | See the README for the current aligned backend/Relay candidate; this is not a public-release claim. |
-| Main integration | Ontology query routing and runtime fixes merged through [PR #57](https://github.com/nascousa/cga/pull/57). The checked main commit is `9a3f714e36e30e7c380046759a389c2ec978b196`. |
-| Main validation | [Policy CI](https://github.com/nascousa/cga/actions/runs/42691299869) passed Python quality/security and both Windows/Linux Relay jobs. [CodeQL](https://github.com/nascousa/cga/actions/runs/42691299246) passed all four analysis jobs. These are existing CI results, not a new local full-suite run. |
-| Local runtime | The query-policy cutover and its limits are documented in [runtime operations](runtime-operations.md#verified-local-query-policy-cutover-2026-11-09). A read-only check on November 10 returned HTTP 200 from `http://127.0.0.1:18001/health`; no containers or data were changed. |
+| Main integration | Plugin/report/maintenance/ADC and cross-platform Relay source merged through [PR #60](https://github.com/nascousa/cga/pull/60) at `e0507bebf2b35ad3a6cbf511f69560da8fecf69a`. The local 1.30.133 security/indexing fixes and other pending edits are not implied by that merge. |
+| Main validation | [Policy CI](https://github.com/nascousa/cga/actions/runs/43284448675) passed Python quality/security plus Windows, Linux x64/ARM64 and macOS Intel/Apple Silicon Relay jobs. [Plugin SDK CI](https://github.com/nascousa/cga/actions/runs/43284448770) and [CodeQL](https://github.com/nascousa/cga/actions/runs/43284447317) also passed. These attest to the named merged baseline, not every later local edit or formal signing. |
+| Local runtime | The verified 1.30.133 [security/indexing overlay](runtime-operations.md#verified-local-security-and-indexing-update-2026-11-12) is healthy at `http://127.0.0.1:18001/admin`. It changes only scoped backend files, requirements metadata and the runtime version, retaining the previous UI. Unified Report and the new maintenance controls remain source-only in that installation. |
 | Published release | [v1.30.113](https://github.com/nascousa/cga/releases/tag/v1.30.113) is still the latest published release. The v1.30.125 draft is unpublished historical preparation, not the current source candidate. |
-| Signing gate | The recorded repository Actions secrets check returned zero repository secrets, so Windows signing was blocked. Unix release jobs require GPG and Apple credentials; API update manifests additionally require `CGA_UPDATE_SIGNING_KEY`. Credential provisioning and successful formal signing are not verified here. Local candidates must not be distributed as signed formal releases. |
-| Merge gate | The active main ruleset requires a pull request and currently sets the required approving review count to zero. Historical draft notes about independent approval do not establish today's rule; recheck current rules and any applicable release approvals before publishing. |
+| Signing gate | Formal Windows signing, Linux GPG verification, Apple signing/notarization and API publisher-key provisioning are not verified by this documentation check. API manifests additionally require `CGA_UPDATE_SIGNING_KEY`. Local/CI candidates must not be distributed as signed formal releases. |
+| Approval gate | Remote branch/environment protection and independent release approvals must be rechecked before publishing. Passing CI, a merged PR or earlier ruleset observations do not establish today's approval policy or satisfy the SDK release gate. |
 
 ### Remaining Maintainer Actions
 
@@ -168,19 +194,19 @@ limitations are documented in
    pull requests, logs, or chat.
 2. Select the reviewed main commit for the release, confirm its version metadata
    matches the intended tag, and recheck its CI and current approval requirements.
-   The November 9 local overlay is not a substitute for an exact release build.
+   The local 1.30.133 overlay is not a substitute for an exact release build.
 3. Only after these prerequisites are satisfied, follow the tag flow below.
    Require all signed platform Relay jobs and image publication to succeed,
    then build and verify the matching Docker Desktop bundle.
 4. Preserve existing published versions and the historical draft's source/assets.
    Do not relabel or overwrite them to imply they contain the current candidate.
 
-The signing gate is unresolved. No new release tag, public release, or signed
-artifact is claimed by this readiness update.
+Formal signing and approval readiness remain unverified. No new release tag,
+public release, or signed artifact is claimed by this readiness update.
 
 ## Maintainer Preflight
 
-Before the first public release:
+Before each public release:
 
 1. Confirm the Apache License 2.0 text in `LICENSE` is still the intended public license.
 2. Review `NOTICE.md` for current acknowledgements and trademark boundaries.
@@ -299,10 +325,11 @@ Open:
 - MCP SSE (`cga-mcp-server`): `http://localhost:8000/mcp/sse`
 - FalkorDB Browser: `http://localhost:13000`
 
-Pin a specific release image by setting `CGA_VERSION` in `.env`:
+Pin a published release image by setting `CGA_VERSION` in `.env`, for example
+the currently published tag (not the newer local/source version):
 
 ```bash
-CGA_VERSION=v1.29.85
+CGA_VERSION=v1.30.113
 ```
 
 ## GitHub Repository Settings

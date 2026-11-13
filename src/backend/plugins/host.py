@@ -55,17 +55,20 @@ def selection(raw: dict | None = None) -> dict[str, list[str]]:
             [item.strip() for item in initial.split(",") if item.strip()], "CGA_PLUGINS"
         )
         value = {"installed": sorted(installed), "enabled": sorted(installed)}
-    return validate_selection(value)
+        return validate_selection(value)
+    saved = validate_selection(value, available_only=False)
+    available = available_plugins()
+    return {key: sorted(set(ids) & available) for key, ids in saved.items()}
 
 
-def validate_selection(value: object) -> dict[str, list[str]]:
+def validate_selection(value: object, *, available_only: bool = True) -> dict[str, list[str]]:
     if not isinstance(value, dict) or set(value) != {"installed", "enabled"}:
         raise runtime_config.RuntimeConfigError("plugins requires exactly installed and enabled arrays")
     installed = _ids(value["installed"], "plugins.installed")
     enabled = _ids(value["enabled"], "plugins.enabled")
     if not enabled <= installed:
         raise runtime_config.RuntimeConfigError("Enabled plugins must be installed")
-    if not installed <= available_plugins():
+    if available_only and not installed <= available_plugins():
         raise runtime_config.RuntimeConfigError("Selected plugins are not included in this distribution")
     return {"installed": sorted(installed), "enabled": sorted(enabled)}
 
@@ -114,6 +117,8 @@ def catalog_status() -> dict:
     with _lock:
         current = selection()
         available = available_plugins()
+        saved = runtime_config._read_raw_config().get("plugins")
+        retained = validate_selection(saved, available_only=False) if saved is not None else current
         return {
             "items": [
                 {
@@ -126,6 +131,9 @@ def catalog_status() -> dict:
                 for plugin in CATALOG.values()
             ],
             "selection": current,
+            "unavailable_selection": {
+                key: sorted(set(ids) - available) for key, ids in retained.items()
+            },
             "core": ["adc", "audit", "identity", "projects", "graph", "mcp", "scheduler", "backup"],
         }
 
@@ -139,7 +147,12 @@ def update_selection(value: dict) -> dict:
         busy = sorted(plugin_id for plugin_id in stopping if _active[plugin_id])
         if busy:
             raise PluginUnavailableError(f"Wait for active executions before disabling: {', '.join(busy)}")
-        raw["plugins"] = desired
+        retained = validate_selection(raw["plugins"], available_only=False) if "plugins" in raw else current
+        available = available_plugins()
+        raw["plugins"] = {
+            key: sorted(set(desired[key]) | (set(retained[key]) - available))
+            for key in desired
+        }
         runtime_config._write_raw_config(raw)
         return catalog_status()
 

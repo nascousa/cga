@@ -20,6 +20,45 @@ or unrelated services. If ownership or permissions are unclear, report the
 blocker instead of changing ports; verify the original URL and health afterward.
 See the [ADC 1.2.4 policy](adc-framework.md#fixed-project-ports-and-conflict-cleanup).
 
+### Verified Local Security And Indexing Update (2026-11-12)
+
+- The existing API now runs local image
+  `cga-local:1.30.133-security-index-20261112`, image
+  `sha256:0641aa26e51b5af3312572ff619b5d24e7eb726f6cb50d9c024e08bf6be4aaa3`.
+  The original `http://127.0.0.1:18001/admin` endpoint and Docker health passed.
+  This is a scoped local overlay, not a public release or a full-checkout deploy.
+- Eight deployed files were hash-verified: project authentication middleware,
+  five indexing modules, requirements metadata and the previous serving entry
+  point with only its version updated. The existing MCP SDK was already 1.30.0;
+  verified token/project identities are now supplied as SDK principals so SSE
+  session-ownership checks apply. Another token, including one for the same
+  project, cannot submit messages to that session.
+- Python lexical-scope and argument-flow fixes use
+  [index format 3](graph-reliability.md#existing-graphs). Older evidence is
+  reparsed when the repository next indexes. No automatic fleet reindex,
+  project deletion or schema migration was performed.
+- All **27 projects**, **25 published graphs**, **3 ADC tables** and runtime
+  configuration were preserved. All **21 other running containers** retained
+  IDs/start times; API ports, mounts, environment and resource limits matched.
+  Frontend assets were unchanged, so unified Report, the new maintenance pages
+  and other source-only feedback fixes were not deployed by this overlay.
+- **424 targeted tests passed, 12 environment-dependent tests skipped**.
+  Actual candidate and deployed code passed isolated two-project SSE tests
+  (including owner read/write, different-token rejection and revocation),
+  indexing canaries and a disposable real-graph format-upgrade test.
+  The exact MCP 1.30.0 dependency audit returned no known vulnerabilities;
+  this was not a complete container/transitive-dependency audit.
+- Fresh PostgreSQL and FalkorDB backups passed full gzip integrity and SHA-256
+  checks. An isolated FalkorDB restore of the pre-cutover RDB verified node/edge
+  counts for all 25 graphs without publishing a host port; its helper was stopped.
+  Graph inventory used both Redis `graphdata` key discovery and `GRAPH.LIST`,
+  because `GRAPH.LIST` alone omitted renamed graph keys.
+- Recovery materials, original Compose, scoped source and verification receipts
+  are retained under
+  `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-security-index-20261112`.
+  Rollback image: `cga-local:rollback-security-index-20261112`. Preserve later
+  data/configuration changes if rolling back the image.
+
 ### Selectable First-Party Plugins
 
 The runtime supports eight optional plugins managed through
@@ -42,10 +81,13 @@ selection API, selective Docker builds and adapter-specific scheduling APIs.
   not coordinated multi-worker activation.
 - Enabling evaluation after starting with it disabled requires an API restart
   to start background trace recording/evaluation. Direct benchmarks are usable
-  immediately; disabling pauses an already-started worker.
-- Before replacing an existing distribution with a leaner image, save a selection
-  containing only plugins bundled in the new image. A saved selection referencing
-  absent plugins is rejected explicitly, rather than silently discarded.
+  immediately; disabling pauses an already-started worker. On restart, the
+  evaluator recovers its Redis consumer's pending traces before reading new ones.
+- A leaner image pauses saved selections for omitted plugins without preventing
+  startup. Their selection and settings remain persisted and resume when a
+  distribution containing them returns. The catalog exposes these IDs under
+  `unavailable_selection`; administrative selection changes still reject plugins
+  absent from the current image.
 
 These are in-process first-party plugins, not an arbitrary-code marketplace or
 separately installed Python wheels. Build-time selection removes optional
@@ -1171,7 +1213,8 @@ report-generation screen.
 ### Unified Report workspace
 
 This redesign is source-only until separately packaged and deployed; the
-installed 1.30.132 service has not been replaced by these changes.
+local 1.30.133 security/indexing overlay retains the earlier Report UI and
+does not deploy this redesign.
 
 - Select zero or more projects (zero means all), a 7/30/90-day or custom UTC
   period, literal title/summary text, event type and recorded status. Select
@@ -1181,6 +1224,10 @@ installed 1.30.132 service has not been replaced by these changes.
   applies filters in PostgreSQL before its 10,000-row cap. Results explicitly
   identify truncation; neither missing activity nor a source status proves a
   real-world outcome. Raw metadata and body text are excluded.
+  Database reads project summary fields only, retaining additional fields solely
+  for learning-record safety checks. Results stream one row at a time with a
+  256 KiB serialized-row cap and 16 MiB total serialized-data cap; oversized
+  reports return HTTP 413 with a request to narrow filters, not partial success.
 - Readiness reuses the current evidence API. Dates/type/status/search do not
   retrospectively filter readiness. Unknown scores are excluded from averages,
   not converted to zero. This is not a productivity or causal ROI report.
@@ -1217,7 +1264,7 @@ is reported as a generation error, not an empty successful report.
 
 ### Audit retention, Change Logs and confirmed updates
 
-The working tree implements these controls; the installed 1.30.132 API still
+The working tree implements these controls; the local 1.30.133 API still
 uses the earlier readiness-only Upgrade page. This is **source support, not a
 deployment, signed release or successful real upgrade**. Existing local source
 changes must be reviewed and selectively packaged before deployment.
@@ -1326,6 +1373,9 @@ Review notes, then explicitly confirm installation. The API rechecks the exact
 version/digest and the host independently verifies its signature. Queued work
 can be cancelled only before the host claims it. New API writes/MCP operations,
 scheduled tasks and indexing starts pause while existing work drains.
+Drain readiness also waits for in-flight audit cleanup to persist its run status.
+Receipts identify the exact update request; the host rejects earlier or legacy
+receipts, and queueing/cancellation clears stale readiness.
 
 The executor checks Compose ownership and the original health port, pulls the
 signed digest, stops **only the configured API service**, verifies fresh backups

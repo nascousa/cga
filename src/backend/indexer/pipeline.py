@@ -7,6 +7,7 @@ built before relationships, including incoming edges from unchanged callers.
 from __future__ import annotations
 
 import ast
+import inspect
 import math
 import os
 import threading
@@ -18,7 +19,7 @@ import structlog
 from backend import runtime_config
 from backend.graph.client import GraphClient
 from backend.graph import schema as S
-from backend.indexer.call_analyzer import CallAnalyzer, RawCall
+from backend.indexer.call_analyzer import CallAnalyzer, CallArgument, PythonParameter, RawCall
 from backend.indexer.hasher import hash_variable_flows, sha256_file
 from backend.indexer.language_catalog import (
     is_supported_parser_file,
@@ -211,7 +212,9 @@ class IndexPipeline:
                         "rows": [{"src_path": parsed.path, "target_path": target} for target in imports]
                     })
                 stats["imports"] += len(imports)
-                stats["variable_flows"] += worker._write_cross_scope_variable_flows(parsed.calls, targets)
+                stats["variable_flows"] += worker._write_cross_scope_variable_flows(
+                    parsed.calls, targets, resolver.parameter_map(snapshot, targets),
+                )
                 stats["variables"] += len(parsed.variables)
                 stats["variable_flows"] += len(parsed.variable_flows)
             for snapshot in ordered:
@@ -375,7 +378,12 @@ class IndexPipeline:
             stats["variable_flows"] = len(flow_rows)
         return stats
 
-    def _write_cross_scope_variable_flows(self, raw_calls: list[RawCall], symbol_map: dict[str, str]) -> int:
+    def _write_cross_scope_variable_flows(
+        self,
+        raw_calls: list[RawCall],
+        symbol_map: dict[str, str],
+        signatures: dict[str, list[PythonParameter] | None] | None = None,
+    ) -> int:
         # Resolve callees and collect unique ones for batch parameter lookup
         resolved: list[tuple[RawCall, str]] = [
             (call, callee_qname)
@@ -391,10 +399,24 @@ class IndexPipeline:
         flow_rows: list[dict] = []
         for call, callee_qname in resolved:
             callee_params = parameter_cache.get(callee_qname, [])
-            for index, arg_name in enumerate((call.arg_names or [])[: len(callee_params)]):
+            key = call_key(call)
+            if call.arguments is None:
+                argument_flows = [
+                    (f"{call.caller_qname}:{name}", callee_params[index])
+                    for index, name in enumerate((call.arg_names or [])[:len(callee_params)])
+                ]
+            else:
+                parameters = (
+                    signatures[key] if signatures is not None and key in signatures else [
+                        PythonParameter(qname.rsplit(":", 1)[-1], "positional_or_keyword", True)
+                        for qname in callee_params
+                    ]
+                )
+                argument_flows = self._bind_call_arguments(call.arguments, callee_qname, parameters)
+            for source, target in argument_flows:
                 flow_rows.append({
-                    "source_qname": f"{call.caller_qname}:{arg_name}",
-                    "target_qname": callee_params[index],
+                    "source_qname": source,
+                    "target_qname": target,
                     "scope_qname": call.caller_qname,
                     "line_number": 0,
                     "flow_type": "argument",
@@ -402,7 +424,7 @@ class IndexPipeline:
             if call.result_var_name:
                 flow_rows.append({
                     "source_qname": f"{callee_qname}:__return__",
-                    "target_qname": f"{call.caller_qname}:{call.result_var_name}",
+                    "target_qname": call.result_var_qname or f"{call.caller_qname}:{call.result_var_name}",
                     "scope_qname": call.caller_qname,
                     "line_number": 0,
                     "flow_type": "call_return",
@@ -411,6 +433,56 @@ class IndexPipeline:
             with self._graph_lock:
                 self._graph.query(S.BATCH_EDGE_VARIABLE_FLOWS, {"rows": flow_rows})
         return len(flow_rows)
+
+    @staticmethod
+    def _bind_call_arguments(
+        arguments: list[CallArgument],
+        callee_qname: str,
+        parameters: list[PythonParameter] | None,
+    ) -> list[tuple[str, str]]:
+        if parameters is None or any(argument.unpacked for argument in arguments):
+            return []
+        positional = sorted(
+            (argument for argument in arguments if argument.position is not None),
+            key=lambda argument: argument.position if argument.position is not None else -1,
+        )
+        if [argument.position for argument in positional] != list(range(len(positional))):
+            return []
+        keywords: dict[str, CallArgument] = {}
+        for argument in arguments:
+            if argument.position is not None:
+                if argument.keyword is not None:
+                    return []
+            elif argument.keyword is None or argument.keyword in keywords:
+                return []
+            else:
+                keywords[argument.keyword] = argument
+        kinds = {
+            "positional_only": inspect.Parameter.POSITIONAL_ONLY,
+            "positional_or_keyword": inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            "var_positional": inspect.Parameter.VAR_POSITIONAL,
+            "keyword_only": inspect.Parameter.KEYWORD_ONLY,
+            "var_keyword": inspect.Parameter.VAR_KEYWORD,
+        }
+        try:
+            signature = inspect.Signature([
+                inspect.Parameter(
+                    parameter.name, kinds[parameter.kind],
+                    default=None if parameter.has_default else inspect.Parameter.empty,
+                )
+                for parameter in parameters
+            ])
+            bound = signature.bind(*positional, **keywords)
+        except (TypeError, ValueError):
+            return []
+        flows: set[tuple[str, str]] = set()
+        for name, value in bound.arguments.items():
+            values = value.values() if isinstance(value, dict) else value if isinstance(value, tuple) else (value,)
+            for argument in values:
+                flows.update(
+                    (source, f"{callee_qname}:{name}") for source in argument.dependencies
+                )
+        return sorted(flows)
 
     def _get_scope_parameter_qnames(self, scope_qname: str) -> list[str]:
         cache = self._get_scope_parameters_batch([scope_qname])

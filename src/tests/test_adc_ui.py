@@ -1,8 +1,130 @@
 import shutil
 import subprocess
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
+
+
+def test_adc_collection_browser_review_and_acknowledgments():
+    playwright = pytest.importorskip("playwright.sync_api")
+    root = Path(__file__).resolve().parents[1] / "frontend"
+    release = {
+        "id": 1, "version": "1.0.0", "documents": {".adc/index.md": "Baseline"},
+        "source": "fixture", "actor": "admin", "created_at": "now", "reason": "Initial", "sha256": "a" * 64,
+    }
+    ready = {
+        "project_id": 7, "project_name": "Alpha", "status": "ready", "release_id": 1,
+        "expected_revision": 2, "snapshot_sha256": "b" * 64, "document_count": 1,
+        "changed_paths": [".adc/index.md"],
+        "rule_review": [{"path": ".adc/index.md", "source": "<img src=x onerror=alert(1)>",
+                         "effective": "Baseline rule", "conflict": None}],
+    }
+    other = {**ready, "project_id": 8, "project_name": "Beta",
+             "rule_review": [{"path": ".adc/index.md", "source": "New rule", "effective": None, "conflict": None}]}
+    blocked = {**ready, "project_id": 9, "project_name": "Waived", "status": "blocked",
+               "error": "Explicit exemption decision required before collection: .adc/index.md",
+               "rule_review": [{"path": ".adc/index.md", "source": "Waived source", "effective": None,
+                                "conflict": "Existing exemption requires an explicit decision"}]}
+    posts, unexpected, errors = [], [], []
+
+    def route_request(route):
+        path = urlsplit(route.request.url).path
+        if path == "/admin":
+            route.fulfill(content_type="text/html", body="""<!doctype html>
+                <html><body><main id="adc-manager"></main><script>
+                const _me={role:'admin'}; const toast=()=>{};
+                async function api(method,path,body) {
+                  const response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json'},
+                    body:body?JSON.stringify(body):undefined});
+                  const result=await response.json();
+                  if(!response.ok) throw new Error(result.detail);
+                  return result;
+                }
+                </script><script src="/adc-versions.js"></script>
+                <script src="/adc-collection.js"></script><script src="/adc.js"></script></body></html>""")
+        elif path in {"/adc-versions.js", "/adc-collection.js", "/adc.js"}:
+            route.fulfill(content_type="text/javascript", body=(root / path[1:]).read_text(encoding="utf-8"))
+        elif path == "/api/adc/releases":
+            route.fulfill(json=[release])
+        elif path == "/api/adc/releases/1":
+            route.fulfill(json=release)
+        elif path == "/api/auth/projects":
+            route.fulfill(json=[])
+        elif path == "/api/adc/rules/preview":
+            route.fulfill(json=[ready, other, blocked])
+        elif path in {"/api/adc/projects/7/rules/collect", "/api/adc/projects/8/rules/collect"}:
+            posts.append((path, route.request.post_data_json))
+            if "/8/" in path:
+                route.fulfill(status=409, json={"detail": "Local rules changed since preview"})
+            else:
+                route.fulfill(json={"revision": 3})
+        else:
+            unexpected.append(route.request.url)
+            route.abort()
+
+    with playwright.sync_playwright() as driver:
+        try:
+            browser = driver.chromium.launch(headless=True)
+        except playwright.Error as error:
+            if "Executable doesn't exist" in str(error):
+                pytest.skip("Install the Playwright Chromium browser to run DOM validation")
+            raise
+        try:
+            page = browser.new_page()
+            page.route("**/*", route_request)
+            page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("dialog", lambda dialog: dialog.accept("Reviewed all ready project snapshots")
+                    if dialog.type == "prompt" else dialog.accept())
+            page.goto("http://127.0.0.1:18001/admin")
+            page.evaluate("loadAdcManager()")
+            page.get_by_role("tab", name="Amendments", exact=True).click()
+            panel = page.locator("details").filter(
+                has=page.locator("summary").get_by_text("Collect project rules", exact=True))
+            panel.locator("summary").first.click()
+            collect = panel.get_by_role("button", name="Collect available rule snapshots", exact=True)
+            preview = panel.get_by_role("button", name="Preview all project rules", exact=True)
+            playwright.expect(collect).to_be_disabled()
+            preview.click()
+            playwright.expect(panel.get_by_text("Alpha: ready", exact=True)).to_be_visible()
+            playwright.expect(panel.locator("li").filter(has_text=".adc/index.md")).to_have_count(3)
+            reviews = panel.locator("details")
+            for index in range(3):
+                reviews.nth(index).locator("summary").click()
+            playwright.expect(panel.locator("pre").filter(has_text="<img src=x onerror=alert(1)>")).to_be_visible()
+            playwright.expect(panel.locator("pre").filter(has_text="Baseline rule")).to_be_visible()
+            playwright.expect(panel.locator("pre").filter(has_text="(Not present)")).to_have_count(2)
+            playwright.expect(panel.get_by_text(
+                "Conflict: Existing exemption requires an explicit decision. Resolve it in Amendments, then preview again.",
+                exact=True)).to_be_visible()
+            assert panel.locator("img").count() == 0
+            checks = panel.get_by_role("checkbox")
+            playwright.expect(checks).to_have_count(2)
+            checks.nth(0).check()
+            playwright.expect(collect).to_be_disabled()
+            assert posts == []
+            checks.nth(1).check()
+            playwright.expect(collect).to_be_enabled()
+            checks.nth(0).uncheck()
+            playwright.expect(collect).to_be_disabled()
+            preview.click()
+            playwright.expect(checks.nth(1)).not_to_be_checked()
+            playwright.expect(collect).to_be_disabled()
+            checks.nth(0).check()
+            checks.nth(1).check()
+            collect.click()
+            playwright.expect(panel.get_by_text("Alpha: managed", exact=True)).to_be_visible()
+            playwright.expect(panel.get_by_text("Beta: blocked", exact=True)).to_be_visible()
+            playwright.expect(page.get_by_role("alert")).to_have_text(
+                "Collection is incomplete: 2 projects remain blocked. See each project result.")
+            playwright.expect(collect).to_be_disabled()
+            playwright.expect(preview).to_be_enabled()
+            assert [path for path, _ in posts] == [
+                "/api/adc/projects/7/rules/collect", "/api/adc/projects/8/rules/collect"]
+            assert all(body["reason"] == "Reviewed all ready project snapshots" for _, body in posts)
+            assert unexpected == errors == []
+        finally:
+            browser.close()
 
 
 def test_adc_tabs_versions_chart_and_collection_failures():
@@ -223,7 +345,8 @@ let api=async(method,path)=>{
   assert.equal(prevented,false);
   assert.throws(()=>adcVersionGraph({...inventory,revisions:[{project_id:999,release_id:1,revision:1}]}),/unresolved/);
   const ready={project_id:7,project_name:'Alpha',status:'ready',release_id:1,expected_revision:2,
-    snapshot_sha256:'a'.repeat(64),changed_paths:['.adc/index.md'],document_count:1};
+    snapshot_sha256:'a'.repeat(64),changed_paths:['.adc/index.md'],document_count:1,
+    rule_review:[{path:'.adc/index.md',source:'<script>Source</script>',effective:'Baseline',conflict:null}]};
   api=async(method,path,body)=>{
     if(path==='/adc/rules/preview') return [structuredClone(ready)];
     assert.equal(method,'POST');
@@ -232,10 +355,41 @@ let api=async(method,path)=>{
   };
   await adcPreviewCollections();
   adcState.projectSelect.value='';
+  assert.equal(adcState.collectionButton.disabled,true);
+  await assert.rejects(adcCollectSnapshots,/Review and acknowledge/);
+  assert.equal(allElements(adcState.collectionList).some(e=>e.tag==='li' && e.textContent==='.adc/index.md'),true);
+  assert.equal(allElements(adcState.collectionList).some(e=>e.tag==='pre' && e.textContent==='<script>Source</script>'),true);
+  const acknowledge=allElements(adcState.collectionList).find(e=>e.type==='checkbox');
+  acknowledge.checked=true; acknowledge.listeners.change();
+  assert.equal(adcState.collectionButton.disabled,false);
+  adcState.collections.push({...structuredClone(ready),project_id:8,reviewed:false});
+  adcRenderCollections();
+  assert.equal(adcState.collectionButton.disabled,true);
+  await assert.rejects(adcCollectSnapshots,/Review and acknowledge/);
+  adcState.collections.pop(); adcRenderCollections();
   await assert.rejects(adcCollectSnapshots,/incomplete/);
   assert.equal(adcState.collections[0].status,'blocked');
   assert.match(adcState.collections[0].error,/changed since preview/);
   assert.match(adcState.collectionStatus.textContent,/0 snapshots committed/);
+  assert.equal(adcState.collectionButton.disabled,true);
+  api=async()=>[structuredClone(ready)];
+  await adcPreviewCollections();
+  assert.equal(adcState.collections[0].reviewed,undefined);
+  assert.equal(adcState.collectionButton.disabled,true);
+  const committed=[];
+  adcState.collections.push({...structuredClone(ready),project_id:8});
+  for(const item of adcState.collections) item.reviewed=true;
+  adcRenderCollections();
+  api=async(method,path)=>{
+    assert.equal(adcState.collectionPreviewButton.disabled,true);
+    await assert.rejects(adcPreviewCollections,/Wait for collection/);
+    committed.push(path);
+    return {revision:3};
+  };
+  await adcCollectSnapshots();
+  assert.deepEqual(committed,['/adc/projects/7/rules/collect','/adc/projects/8/rules/collect']);
+  assert.equal(adcState.collections.every(p=>p.status==='managed'),true);
+  assert.equal(adcState.collectionPreviewButton.disabled,false);
   api=async()=>{throw new Error('Forbidden');};
   await assert.rejects(adcRefreshVersions,/Forbidden/);
   assert.equal(adcState.versionData,null);
@@ -252,5 +406,6 @@ let api=async(method,path)=>{
 """
     source = "\n".join((root / file).read_text(encoding="utf-8")
                        for file in ("adc-versions.js", "adc-collection.js", "adc.js"))
-    subprocess.run([node], input=setup + source + assertions,
-                   check=True, capture_output=True, text=True, timeout=20)
+    result = subprocess.run([node], input=setup + source + assertions,
+                            capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr

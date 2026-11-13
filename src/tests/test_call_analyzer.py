@@ -58,3 +58,52 @@ class Indexer:
     callee_names = {c.callee_name for c in calls}
     assert "parse" in callee_names
     assert "write" in callee_names
+
+
+def test_nested_functions_have_lexical_callers_without_outer_body_leakage():
+    calls = _analyze("""
+def first():
+    def helper():
+        target()
+    helper()
+
+def second():
+    def helper():
+        other()
+""")
+
+    assert {(call.caller_qname, call.callee_name) for call in calls} == {
+        ("mymod.first", "helper"),
+        ("mymod.first.helper", "target"),
+        ("mymod.second.helper", "other"),
+    }
+
+
+def test_nested_class_methods_and_inner_functions_are_extracted_once():
+    calls = _analyze("""
+class Outer:
+    class Inner:
+        def run(self):
+            async def helper():
+                await target()
+            return helper()
+""")
+
+    assert [(call.caller_qname, call.callee_name) for call in calls] == [
+        ("mymod.Outer.Inner.run", "helper"),
+        ("mymod.Outer.Inner.run.helper", "target"),
+    ]
+
+
+def test_definition_defaults_execute_in_parent_but_nested_and_lambda_bodies_do_not():
+    calls = _analyze("""
+def outer():
+    def inner(value=prepare()):
+        deferred()
+    callback = lambda: deferred()
+""")
+
+    assert {(call.caller_qname, call.callee_name) for call in calls} == {
+        ("mymod.outer", "prepare"),
+        ("mymod.outer.inner", "deferred"),
+    }

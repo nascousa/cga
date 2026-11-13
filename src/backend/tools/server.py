@@ -1805,11 +1805,11 @@ async def workassist_list_recent_activity(project_id: str | None = None, limit: 
 @mcp.tool()
 async def workassist_get_activity_briefing(project_id: str | None = None, limit: int = 25) -> dict:
     """Summarize recent activity for the authenticated MCP project."""
-    require_enabled("briefing")
-    service = _require_work_briefing_service()
-    resolved_project_id = _resolve_project_external_id(project_id)
-    safe_limit = max(1, min(int(limit), 100))
-    return await service.get_briefing(project_id=resolved_project_id, limit=safe_limit)
+    with execution("briefing"):
+        service = _require_work_briefing_service()
+        resolved_project_id = _resolve_project_external_id(project_id)
+        safe_limit = max(1, min(int(limit), 100))
+        return await service.get_briefing(project_id=resolved_project_id, limit=safe_limit)
 
 
 @mcp.tool()

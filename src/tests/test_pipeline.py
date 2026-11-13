@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+import json
+import textwrap
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -13,7 +15,7 @@ from backend.graph import schema as S
 from backend.graph.client import GraphClient
 from backend.indexer.call_analyzer import RawCall
 from backend.indexer.hasher import sha256_file
-from backend.indexer.parser import ParsedFile, ParsedSymbol, ParsedVariable, ParsedVariableFlow
+from backend.indexer.parser import ParsedFile, ParsedSymbol, ParsedVariable, ParsedVariableFlow, path_to_module
 from backend.indexer.pipeline import IndexPipeline
 from backend.indexer.snapshot import FileSnapshot, INDEX_FORMAT_VERSION, parse_snapshot
 
@@ -217,3 +219,226 @@ def test_parse_snapshot_rejects_edit_then_revert_during_parse(tmp_path):
 
     with pytest.raises(RuntimeError, match="changed while being parsed"):
         parse_snapshot(str(source), MagicMock(parse=parse))
+
+
+def _index_python_source(tmp_path, source):
+    path = tmp_path / "service.py"
+    path.write_text(textwrap.dedent(source), encoding="utf-8")
+    live, stage = _graphs()
+    IndexPipeline(live).index_full(str(tmp_path))
+    return path_to_module(str(path)), stage
+
+
+def _argument_edges(stage):
+    return {
+        (row["source_qname"], row["target_qname"])
+        for call in stage.query.call_args_list if call.args[0] == S.BATCH_EDGE_VARIABLE_FLOWS
+        for row in call.args[1]["rows"] if row["flow_type"] == "argument"
+    }
+
+
+@pytest.mark.parametrize(("expression", "expected"), [
+    ("callee(0, x)", {("x", "b")}),
+    ("callee(b=x)", {("x", "b")}),
+    ("callee(x, x)", {("x", "a"), ("x", "b")}),
+    ("callee(x + y, z)", {("x", "a"), ("y", "a"), ("z", "b")}),
+    ("callee(b=x + y, a=z)", {("x", "b"), ("y", "b"), ("z", "a")}),
+    ("callee((x, {'value': y}), [z, x])", {("x", "a"), ("y", "a"), ("z", "b"), ("x", "b")}),
+    ("callee(0, 0)", set()),
+])
+def test_python_arguments_bind_to_their_original_positions_and_keywords(tmp_path, expression, expected):
+    module, stage = _index_python_source(tmp_path, f"""\
+        def callee(a=0, b=0):
+            return a + b
+        def caller(x, y, z):
+            return {expression}
+    """)
+
+    assert _argument_edges(stage) == {
+        (f"{module}.caller:{source}", f"{module}.callee:{target}")
+        for source, target in expected
+    }
+
+
+def test_nested_argument_expressions_keep_all_dependencies_in_the_correct_slot(tmp_path):
+    module, stage = _index_python_source(tmp_path, """\
+        def wrap(value):
+            return value
+        def callee(a, b):
+            return b
+        def caller(x, y, z):
+            return callee(0, wrap(x + y) + z)
+    """)
+
+    assert {
+        edge for edge in _argument_edges(stage) if edge[0].startswith(f"{module}.caller:")
+    } == {
+        *((f"{module}.caller:{name}", f"{module}.callee:b") for name in ("x", "y", "z")),
+        *((f"{module}.caller:{name}", f"{module}.wrap:value") for name in ("x", "y")),
+    }
+    variable_qnames = {
+        row["qualified_name"]
+        for call in stage.query.call_args_list if call.args[0] == S.BATCH_MERGE_VARIABLES
+        for row in call.args[1]["rows"]
+    }
+    assert all(source in variable_qnames and target in variable_qnames for source, target in _argument_edges(stage))
+
+
+def test_direct_arguments_respect_positional_only_keyword_only_and_variadic_parameters(tmp_path):
+    module, stage = _index_python_source(tmp_path, """\
+        def callee(a, /, b=0, *values, flag=0, **options):
+            return a
+        def caller(x, y, z):
+            return callee(x, y, z, x, flag=z, extra=y)
+    """)
+
+    assert _argument_edges(stage) == {
+        (f"{module}.caller:{source}", f"{module}.callee:{target}")
+        for source, target in (
+            ("x", "a"), ("y", "b"), ("z", "values"),
+            ("x", "values"), ("z", "flag"), ("y", "options"),
+        )
+    }
+
+
+@pytest.mark.parametrize("name", ["self", "cls"])
+def test_plain_function_parameters_named_like_receivers_are_still_argument_dependencies(tmp_path, name):
+    module, stage = _index_python_source(tmp_path, f"""\
+        def callee(value):
+            return value
+        def caller({name}):
+            return callee({name})
+    """)
+
+    assert _argument_edges(stage) == {(f"{module}.caller:{name}", f"{module}.callee:value")}
+
+
+@pytest.mark.parametrize("expression", [
+    "callee(x, *items)",
+    "callee(x, **options)",
+    "callee(*items, b=x)",
+    "callee(b=x, **options)",
+])
+def test_unresolved_argument_unpacking_does_not_invent_argument_flows(tmp_path, expression):
+    module, stage = _index_python_source(tmp_path, f"""\
+        def callee(a=0, b=0):
+            return b
+        def caller(x, items, options):
+            result = {expression}
+            return result
+    """)
+
+    assert _argument_edges(stage) == set()
+    assert any(
+        row["flow_type"] == "call_return"
+        and row["source_qname"] == f"{module}.callee:__return__"
+        and row["target_qname"] == f"{module}.caller:result"
+        for call in stage.query.call_args_list if call.args[0] == S.BATCH_EDGE_VARIABLE_FLOWS
+        for row in call.args[1]["rows"]
+    )
+
+
+def test_method_argument_binding_accounts_for_receivers_and_nested_closures(tmp_path):
+    module, stage = _index_python_source(tmp_path, """\
+        class Worker:
+            def run(this, a=0, b=0):
+                return b
+            @classmethod
+            def make(cls, a=0, b=0):
+                return b
+            @staticmethod
+            def utility(a=0, b=0):
+                return b
+            def caller(self, x):
+                def helper():
+                    return self.run(0, x)
+                return helper()
+        def direct(x):
+            return Worker.run(None, 0, x)
+        def factory(x):
+            return Worker.make(b=x)
+        def utility(x):
+            return Worker.utility(b=x)
+    """)
+
+    assert _argument_edges(stage) == {
+        (f"{module}.{source}:x", f"{module}.Worker.{target}:b")
+        for source, target in (
+            ("Worker.caller", "run"), ("direct", "run"),
+            ("factory", "make"), ("utility", "utility"),
+        )
+    }
+
+
+def test_nested_calls_use_enclosing_argument_and_nonlocal_result_variable_identities(tmp_path):
+    module, stage = _index_python_source(tmp_path, """\
+        def callee(value):
+            return value
+        def outer(value):
+            result = None
+            def inner():
+                nonlocal result
+                result = callee(value)
+            return inner()
+    """)
+
+    assert _argument_edges(stage) == {(f"{module}.outer:value", f"{module}.callee:value")}
+    assert any(
+        row["flow_type"] == "call_return"
+        and row["source_qname"] == f"{module}.callee:__return__"
+        and row["target_qname"] == f"{module}.outer:result"
+        for call in stage.query.call_args_list if call.args[0] == S.BATCH_EDGE_VARIABLE_FLOWS
+        for row in call.args[1]["rows"]
+    )
+
+
+def test_cached_structured_calls_and_signatures_rebuild_the_same_argument_flows(tmp_path):
+    source = tmp_path / "service.py"
+    source.write_text(
+        "def callee(a=0, b=0):\n    return b\n"
+        "def caller(x):\n    return callee(b=x)\n",
+        encoding="utf-8",
+    )
+    cached = parse_snapshot(str(source))
+    (tmp_path / "added.py").write_text("def added():\n    pass\n", encoding="utf-8")
+    live, stage = _graphs([[str(source), cached.content_hash, cached.serialize(), INDEX_FORMAT_VERSION]])
+
+    IndexPipeline(live).index_incremental(str(tmp_path), ["added.py"])
+
+    module = path_to_module(str(source))
+    assert _argument_edges(stage) == {(f"{module}.caller:x", f"{module}.callee:b")}
+
+
+def test_legacy_snapshot_is_readable_but_reparsed_even_without_changed_paths(tmp_path):
+    source = tmp_path / "service.py"
+    source.write_text(
+        "def first():\n    def helper():\n        target()\n"
+        "def second():\n    def helper():\n        target()\n",
+        encoding="utf-8",
+    )
+    cached = parse_snapshot(str(source))
+    legacy = json.loads(cached.serialize())
+    legacy.pop("scope_parents")
+    for symbol in legacy["parsed"]["symbols"]:
+        symbol.pop("parameters")
+        symbol.pop("method_binding")
+    for call in legacy["parsed"]["calls"]:
+        call.pop("arguments")
+        call.pop("result_var_qname")
+    metadata = json.dumps(legacy)
+    assert all(call.arguments is None for call in FileSnapshot.deserialize(metadata).parsed.calls)
+    live, stage = _graphs([[str(source), cached.content_hash, metadata, INDEX_FORMAT_VERSION - 1]])
+
+    stats = IndexPipeline(live).index_incremental(str(tmp_path), [])
+
+    assert stats["files"] == 1
+    module = path_to_module(str(source))
+    symbol_qnames = {
+        row["qualified_name"]
+        for call in stage.query.call_args_list if call.args[0] == S.BATCH_MERGE_SYMBOLS
+        for row in call.args[1]["rows"]
+    }
+    assert {f"{module}.first.helper", f"{module}.second.helper"} <= symbol_qnames
+    writes = [call.args[1] for call in stage.query.call_args_list if call.args[0] == S.SET_FILE_SNAPSHOT]
+    assert writes[0]["version"] == INDEX_FORMAT_VERSION
+    assert all(call.arguments is not None for call in FileSnapshot.deserialize(writes[0]["metadata"]).parsed.calls)
