@@ -46,6 +46,12 @@ Do not include real secrets, production tokens, private keys, credentials, or
 confidential third-party data in public issues, logs, support bundles, example
 repositories, screenshots, or generated release artifacts.
 
+Protect MCP session URLs as operational metadata. SSE sessions are bound to
+the verified project credential, not transferable to another token. Revoking a
+token prevents further requests but does not undo work already accepted by a
+session. Token rotation and API restarts require clients to establish a new
+session.
+
 CGA's harness-learning feature stores bounded project-scoped lesson summaries,
 outcomes, optional harness/task/session identifiers, and caller-supplied
 activity references. New lessons remain unapproved candidates, and CGA does

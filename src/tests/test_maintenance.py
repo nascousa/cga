@@ -1,5 +1,6 @@
 import json
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -235,7 +236,69 @@ async def test_install_requires_matching_confirmation_and_is_exclusive(signed_up
     assert json.loads((root / "request.json").read_text())["id"] == job["id"]
     with pytest.raises(ValueError, match="already"):
         await updates.request_install("1.30.132", claims["version"], claims["image"], "operator")
+    atomic_json(root / "drain.json", {"request_id": job["id"], "ready": True})
     assert updates.cancel_queued()["status"] == "cancelled"
+    assert not (root / "drain.json").exists()
+    atomic_json(root / "drain.json", {"request_id": job["id"], "ready": True})
+    next_job = await updates.request_install("1.30.132", claims["version"], claims["image"], "operator")
+    assert next_job["id"] != job["id"]
+    assert not (root / "drain.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_update_drain_waits_for_retention_run_and_records_current_request(tmp_path, monkeypatch):
+    from backend.plugins import host
+    monkeypatch.setenv("CGA_UPDATE_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(host, "catalog_status", lambda: {"items": []})
+    started, finish = asyncio.Event(), asyncio.Event()
+    recorded = []
+
+    async def cleanup():
+        started.set()
+        await finish.wait()
+        recorded.append("run status persisted")
+        return {"status": "ok"}
+
+    monkeypatch.setattr(retention, "_cleanup", cleanup)
+    worker = asyncio.create_task(retention.cleanup())
+    await asyncio.wait_for(started.wait(), timeout=1)
+    atomic_json(tmp_path / "request.json", {"id": "current"})
+    idle = asyncio.Event()
+    idle.set()
+    app = SimpleNamespace(version="1.30.132", state=SimpleNamespace(
+        consumer=SimpleNamespace(_idle=idle), maintenance_inflight=0,
+    ))
+
+    async def end_iteration(_delay):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(updates.asyncio, "sleep", end_iteration)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await updates.drain_loop(app)
+        receipt = json.loads((tmp_path / "drain.json").read_text())
+        assert receipt["request_id"] == "current" and not receipt["ready"]
+        assert (await retention.cleanup())["status"] == "paused-for-upgrade"
+    finally:
+        finish.set()
+        await worker
+    assert recorded and retention.active_cleanups() == 0
+    with pytest.raises(asyncio.CancelledError):
+        await updates.drain_loop(app)
+    assert json.loads((tmp_path / "drain.json").read_text())["ready"]
+    (tmp_path / "request.json").unlink()
+    with pytest.raises(asyncio.CancelledError):
+        await updates.drain_loop(app)
+    assert not (tmp_path / "drain.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_retention_releases_inflight_tracking_on_failure(monkeypatch):
+    monkeypatch.delenv("CGA_UPDATE_STATE_DIR", raising=False)
+    monkeypatch.setattr(retention, "_cleanup", AsyncMock(side_effect=RuntimeError("cleanup failed")))
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        await retention.cleanup()
+    assert retention.active_cleanups() == 0
 
 
 @pytest.mark.asyncio
@@ -319,7 +382,7 @@ def make_host(tmp_path, signed_update, monkeypatch):
               "HostConfig": {"PortBindings": {"8000/tcp": [{"HostPort": "18001"}]}}, "Mounts": []}
     monkeypatch.setattr(host, "inspect", lambda: before)
     monkeypatch.setattr(host, "health", lambda version: None)
-    monkeypatch.setattr(host, "wait_drained", lambda version: None)
+    monkeypatch.setattr(host, "wait_drained", lambda version, request_id: None)
     monkeypatch.setattr(host, "backup", lambda job_dir: None)
     monkeypatch.setattr(host, "environment_keys", lambda: ["SECRET"])
     calls = []
@@ -330,6 +393,24 @@ def make_host(tmp_path, signed_update, monkeypatch):
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
     })
     return host, root, journal, compose, calls
+
+
+@pytest.mark.parametrize("stale_id", [None, "previous"])
+def test_host_requires_current_request_drain_receipt(tmp_path, signed_update, monkeypatch, stale_id):
+    host, root, _, _, _ = make_host(tmp_path, signed_update, monkeypatch)
+    receipt = {"version": "1.30.132", "ready": True, "heartbeat": time.time()}
+    if stale_id is not None:
+        receipt["request_id"] = stale_id
+    atomic_json(root / "drain.json", receipt)
+    sleeps = []
+
+    def refresh(_delay):
+        sleeps.append(1)
+        atomic_json(root / "drain.json", {**receipt, "request_id": "current"})
+
+    monkeypatch.setattr("scripts.cga_update_host.time.sleep", refresh)
+    HostUpdater.wait_drained(host, "1.30.132", "current")
+    assert sleeps == [1], "The previous/legacy receipt must not drain a new request"
 
 
 @pytest.mark.parametrize("configured_change", [False, True])

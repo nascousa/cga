@@ -9,6 +9,9 @@ import json
 from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+from mcp.server.auth.provider import AccessToken
+from starlette.authentication import AuthCredentials
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from backend.auth.access import registered_project_scope
@@ -179,6 +182,15 @@ class ProjectTokenMiddleware:
         scope["state"]["project_token_id"] = row["id"]
         scope["state"]["project_token_type"] = row["token_type"]
         scope["state"]["registered_project_scope"] = project_scope
+
+        # The SDK binds SSE sessions only when our verified credential is an SDK principal.
+        scope["user"] = AuthenticatedUser(AccessToken(
+            token=token,
+            client_id=f"cga-project:{row['project_id']}:{effective_project_id}",
+            subject=f"cga-project-token:{row['id']}:{digest}",
+            scopes=["mcp"],
+        ))
+        scope["auth"] = AuthCredentials(["authenticated", "mcp"])
 
         # Set ContextVar so MCP tool functions pick up the right project graph.
         # Pure ASGI middleware propagates ContextVars correctly (unlike BaseHTTPMiddleware).

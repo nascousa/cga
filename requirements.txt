@@ -1,7 +1,7 @@
 # Web / MCP layer
 fastapi>=0.110,<1.0
 uvicorn[standard]>=0.29,<1.0
-mcp[cli]>=1.0,<2.0
+mcp[cli]>=1.30.0,<2.0
 pydantic>=2.6,<3.0
 
 # Auth

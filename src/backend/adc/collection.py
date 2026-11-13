@@ -55,7 +55,8 @@ def read_rules(repo_path: str, *, allow_absent: bool = False) -> dict[str, str]:
                     raise HTTPException(409, f"Rule path must be a regular file: {relative}")
                 if file.stat().st_size > 512_000:
                     raise HTTPException(413, f"Rule file exceeds 512 KB: {relative}")
-                documents[relative] = file.read_text(encoding="utf-8-sig")
+                with file.open(encoding="utf-8-sig", newline="") as stream:
+                    documents[relative] = stream.read()
                 if len(documents) > 500 or len(service.canonical(documents).encode()) > 5_000_000:
                     raise HTTPException(413, "Rule snapshot exceeds 500 files or 5 MB")
         service.ReleaseCreate.validate_documents(documents)
@@ -64,7 +65,15 @@ def read_rules(repo_path: str, *, allow_absent: bool = False) -> dict[str, str]:
         raise HTTPException(409, f"Cannot collect registered project rules: {error}") from error
 
 
+def exemption_conflicts(state: dict, documents: dict[str, str]) -> list[str]:
+    return sorted(c["path"] for c in state["changes"]
+                  if c["kind"] == "exemption" and c["path"] in documents)
+
+
 def rule_changes(state: dict, baseline: dict, documents: dict[str, str], reason: str) -> list[service.Change]:
+    conflicts = exemption_conflicts(state, documents)
+    if conflicts:
+        raise HTTPException(409, "Explicit exemption decision required before collection: " + ", ".join(conflicts))
     changes = {c["path"]: service.Change.model_validate({k: v for k, v in c.items() if k != "active"})
                for c in state["changes"]}
     for path, content in documents.items():
@@ -110,6 +119,8 @@ async def preview(conn) -> list[dict]:
             release_id = state["release"]["id"] if state["release"] else latest
             if release_id is None:
                 raise HTTPException(409, "Publish an ADC baseline before collection")
+            effective = state["documents"] if state["release"] else (await service.read_release(conn, release_id))["documents"]
+            conflicts = exemption_conflicts(state, documents)
             sha = service.digest(documents)
             previous = await conn.fetchrow(
                 """SELECT revision,snapshot_sha256 FROM adc_rule_collections
@@ -119,9 +130,17 @@ async def preview(conn) -> list[dict]:
                 status="managed" if previous and previous["snapshot_sha256"] == sha and matching else "ready",
                 release_id=release_id, expected_revision=state["revision"], snapshot_sha256=sha,
                 document_count=len(documents),
-                changed_paths=[p for p, c in documents.items() if state["documents"].get(p) != c],
+                changed_paths=[p for p, c in documents.items() if effective.get(p) != c],
                 documents={p: hashlib.sha256(c.encode()).hexdigest() for p, c in documents.items()},
+                conflicts=conflicts,
+                rule_review=[
+                    {"path": p, "source": c, "effective": effective.get(p),
+                     "conflict": "Existing exemption requires an explicit decision" if p in conflicts else None}
+                    for p, c in documents.items() if effective.get(p) != c or p in conflicts
+                ],
             )
+            if conflicts:
+                item.update(status="blocked", error="Explicit exemption decision required before collection: " + ", ".join(conflicts))
         except HTTPException as error:
             item.update(status="blocked", error=str(error.detail))
         results.append(item)

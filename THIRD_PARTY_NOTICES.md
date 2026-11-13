@@ -45,6 +45,12 @@ The backend dependency manifest is `requirements.txt`.
 | Mypy | Type checking | MIT |
 | pip-audit | Dependency vulnerability audit | Verify package metadata for the resolved version |
 
+MCP Python SDK 1.30.0 is the minimum supported 1.x security baseline for the
+backend and strategy client. Its MIT license and upstream notices remain
+required in runtime distributions. CGA's project authentication must also
+populate the SDK principal so session-ownership checks are enforced; upgrading
+the dependency alone does not establish that binding.
+
 ## Viewer Direct Dependencies
 
 The browser viewer dependency manifest is `src/viewer/package.json`, with exact

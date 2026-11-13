@@ -23,6 +23,11 @@ in-place, single-file write optimization.
 Python calls use lexical scope and explicit import bindings. Ambiguous
 cross-file names are not resolved by "last file wins". Other language
 relationships remain structural/best-effort, not compiler-level type inference.
+Index format version 3 preserves Python nested function/class identities and
+keeps nested definition bodies out of their parent's direct calls and local
+variable flows. Argument dependencies retain positional slots, keyword names
+and repeated inputs; unresolved `*args`/`**kwargs` expansion does not fabricate
+confident cross-function bindings.
 
 ## Existing graphs
 
@@ -32,6 +37,11 @@ incremental update loads legacy files from the authorized repository when that
 metadata is absent, rather than trusting a possibly incomplete content hash.
 A full rebuild from a valid, nonempty repository repairs historical missing
 relationships using the same atomic publication mechanism.
+Version 3 invalidates older cached parse evidence, including unchanged files,
+when that repository next indexes. Deploying the code does not rewrite existing
+graphs or trigger a fleet-wide reindex. Upgrade selected repositories through
+their normal authorized indexing jobs after verifying backups; the old
+generation remains available until a complete corrected generation commits.
 
 Take and verify a backup before upgrading. Confirm the registered repository
 path and container mount before indexing. A visible but empty full scan is

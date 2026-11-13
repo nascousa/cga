@@ -31,6 +31,12 @@ CGA beyond localhost.
 - Change default admin credentials and `JWT_SECRET_KEY` before any non-local
   deployment.
 - Keep MCP access protected by project-scoped tokens.
+- Use MCP Python SDK 1.30.0 or newer within the supported 1.x line. CGA passes
+  the database-verified project and exact token identity to the SDK principal;
+  SSE message requests must match the credential that opened the session.
+  Another token, including one for the same project, cannot reuse that session.
+  Revocation is rechecked on every request. Reconnect after token rotation or
+  API restart; do not share session URLs or treat session IDs as authentication.
 - Do not commit `.env`, runtime databases, backups, deploy keys, or generated
   local artifacts.
 - Use only Authenticode-signed CGA-Relay release artifacts and verify the

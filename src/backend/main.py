@@ -84,11 +84,11 @@ from backend.schedules.service import ScheduledTaskWorker
 from backend.viewer.router import router as viewer_router
 from backend.workbriefing.service import WorkActivityValidationError, WorkBriefingService
 from backend.workbriefing.models import AgentLearningRequest
-from backend.workbriefing.store import PgVectorActivityStore, resolve_dsn
+from backend.workbriefing.store import PgVectorActivityStore, ReportSizeError, resolve_dsn
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.132"
+APP_VERSION = "1.30.133"
 AUTH_SCHEMA_VERSION = 1
 GRAPH_SCHEMA_VERSION = 2
 RUNTIME_CONFIG_VERSION = 1
@@ -943,7 +943,10 @@ async def api_admin_report_source(
 
 @app.post("/api/admin/reports/generate", dependencies=[Depends(require_plugin("reports"))])
 async def api_admin_report_generate(body: ReportFilters, _: dict = Depends(require_admin)) -> dict:
-    return await build_report(_work_briefing_service, body)
+    try:
+        return await build_report(_work_briefing_service, body)
+    except ReportSizeError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
 
 
 @app.get("/api/admin/work-briefing/activities", dependencies=[Depends(require_plugin("briefing"))])

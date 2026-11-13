@@ -116,6 +116,7 @@ class TraceEvaluator:
 
     async def _loop(self) -> None:
         pending: list[tuple[str, dict]] = []
+        recovering = True
         while self._running:
             if not is_enabled("evaluation") or not tracing_enabled():
                 await asyncio.sleep(2)
@@ -125,11 +126,14 @@ class TraceEvaluator:
                     messages = await self._client.xreadgroup(
                         _TRACE_GROUP,
                         "eval-worker-0",
-                        {_TRACE_STREAM: ">"},
+                        {_TRACE_STREAM: "0" if recovering else ">"},
                         count=_BATCH,
                         block=_BLOCK_MS,
                     )
                     pending = [entry for _stream, entries in messages for entry in entries]
+                    if recovering and not pending:
+                        recovering = False
+                        continue
                 while pending:
                     if not tracing_enabled():
                         break

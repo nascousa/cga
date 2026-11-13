@@ -103,6 +103,54 @@ def test_minimal_initial_install_and_bundle_availability_are_explicit(plugin_con
     assert host.is_enabled("reports"), "Saved selection must win over the initial-install default"
 
 
+def test_leaner_bundle_pauses_missing_plugins_without_losing_saved_selection(plugin_config, monkeypatch):
+    select("reports", "evaluation")
+    plugin_settings.save_settings("evaluation", {"trace_enabled": False})
+    before = plugin_config.read_bytes()
+    monkeypatch.setenv("CGA_AVAILABLE_PLUGINS", "reports")
+    assert not host.is_enabled("evaluation")
+    assert host.selection() == {"installed": ["reports"], "enabled": ["reports"]}
+    assert plugin_config.read_bytes() == before
+    assert host.catalog_status()["unavailable_selection"] == {
+        "installed": ["evaluation"], "enabled": ["evaluation"],
+    }
+    host.update_selection({"installed": ["reports"], "enabled": []})
+    with pytest.raises(runtime_config.RuntimeConfigError, match="distribution"):
+        select("evaluation")
+    monkeypatch.delenv("CGA_AVAILABLE_PLUGINS")
+    assert host.is_enabled("evaluation")
+    assert not host.is_enabled("reports")
+    assert plugin_settings.get_settings("evaluation")["trace_enabled"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fails", [False, True])
+async def test_mcp_briefing_holds_execution_lease_until_await_finishes(plugin_config, monkeypatch, fails):
+    import backend.tools.server as server
+    select("briefing")
+
+    async def briefing(**kwargs):
+        assert host.catalog_status()["items"][
+            list(CATALOG).index("briefing")
+        ]["active_executions"] == 1
+        with pytest.raises(host.PluginUnavailableError, match="active executions"):
+            select()
+        if fails:
+            raise RuntimeError("briefing failed")
+        return {"total_events": 0}
+
+    monkeypatch.setattr(server, "_work_briefing_service", type("Service", (), {
+        "get_briefing": staticmethod(briefing),
+    })())
+    monkeypatch.setattr(server, "_resolve_project_external_id", lambda project: "P1")
+    if fails:
+        with pytest.raises(RuntimeError, match="briefing failed"):
+            await server.workassist_get_activity_briefing()
+    else:
+        assert await server.workassist_get_activity_briefing() == {"total_events": 0}
+    select()
+
+
 @pytest.mark.parametrize("plugin_id,values", [
     ("browseragent", {"target_url": "https://browser.invalid/batch", "timeout_seconds": 91, "screenshot": False}),
     ("workflows", {"agent_url": "", "http_url": "https://workflow.invalid/run", "payload": {"action": "inspect"}}),
@@ -375,8 +423,42 @@ async def test_evaluator_resumes_claimed_batch_after_plugin_is_disabled(plugin_c
     evaluator._client.xreadgroup.assert_awaited_once()
 
 
+@pytest.mark.asyncio
+async def test_evaluator_recovers_paused_pending_entries_after_restart_before_new_entries(plugin_config, monkeypatch):
+    from backend.eval.trace_eval import TraceEvaluator, _TRACE_STREAM
+    select("evaluation")
+    plugin_settings.save_settings("evaluation", {"trace_enabled": False})
+    evaluator = TraceEvaluator("redis://unused", None)
+    evaluator._running = True
+    evaluator._client = AsyncMock()
+    evaluator._client.xreadgroup.side_effect = [
+        [(_TRACE_STREAM, [("old-1", {}), ("old-2", {})])],
+        [],
+        [(_TRACE_STREAM, [("new-1", {})])],
+    ]
+    processed = []
+
+    async def resume(_delay):
+        evaluator._client.xreadgroup.assert_not_awaited()
+        plugin_settings.save_settings("evaluation", {"trace_enabled": True})
+
+    async def evaluate(message_id, _data):
+        processed.append(message_id)
+        if message_id == "new-1":
+            evaluator._running = False
+
+    monkeypatch.setattr("backend.eval.trace_eval.asyncio.sleep", resume)
+    monkeypatch.setattr(evaluator, "_evaluate_trace", evaluate)
+    await asyncio.wait_for(evaluator._loop(), timeout=1)
+    assert processed == ["old-1", "old-2", "new-1"]
+    assert [
+        call.args[2][_TRACE_STREAM] for call in evaluator._client.xreadgroup.await_args_list
+    ] == ["0", "0", ">"]
+
+
 @pytest.mark.parametrize("plugins", ["", *CATALOG])
-def test_selected_distribution_imports_without_omitted_implementations(tmp_path, plugins):
+@pytest.mark.parametrize("persisted_selection", [False, True])
+def test_selected_distribution_imports_without_omitted_implementations(tmp_path, plugins, persisted_selection):
     bundle = tmp_path / "bundle"
     for relative in ("src/backend", "src/frontend", "extensions/azure-policy-monitor/src"):
         shutil.copytree(ROOT / relative, bundle / relative, ignore=shutil.ignore_patterns("__pycache__", "report-vendor"))
@@ -396,6 +478,11 @@ def test_selected_distribution_imports_without_omitted_implementations(tmp_path,
     env = {**os.environ, "PYTHONPATH": str(bundle / "src"), "CGA_RUNTIME_CONFIG_PATH": str(bundle / "runtime-config.json")}
     env.pop("CGA_PLUGINS", None)
     env.pop("CGA_AVAILABLE_PLUGINS", None)
+    if persisted_selection:
+        (bundle / "runtime-config.json").write_text(json.dumps({
+            "plugins": {"installed": list(CATALOG), "enabled": list(CATALOG)},
+            "plugin_settings": {"evaluation": {"trace_enabled": False}},
+        }), encoding="utf-8")
     result = subprocess.run(
         [sys.executable, "-c", """
 import asyncio, json, sys

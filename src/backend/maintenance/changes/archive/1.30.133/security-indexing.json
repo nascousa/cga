@@ -1,0 +1,13 @@
+{
+  "summary": "Bind MCP sessions to project credentials and correct Python indexing scope and argument flows",
+  "changes": {
+    "Security": [
+      "Bind MCP SSE sessions to their database-verified project and exact credential; reject another project's or another token's messages before tool execution.",
+      "Require MCP Python SDK 1.30.0 or newer in the supported 1.x line, including session ownership and client transport fixes."
+    ],
+    "Fixed": [
+      "Keep Python nested function identities, imports, calls and variable flows within their lexical scopes rather than merging same-named closures or attributing nested bodies to their parent.",
+      "Preserve positional, keyword and repeated argument dependencies when building cross-function data-flow edges; do not invent bindings for unresolved argument expansion."
+    ]
+  }
+}

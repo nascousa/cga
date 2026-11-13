@@ -14,6 +14,7 @@ from backend.auth.security import JWT_SECRET
 
 log = structlog.get_logger()
 LOCK_ID = 718234019
+_active_cleanups = 0
 POLL_PATHS = (
     "/api/auth/projects/index-status", "/api/auth/audit", "/api/auth/audit/paged",
     "/api/admin/schedules",
@@ -105,10 +106,23 @@ async def status() -> dict:
 
 
 async def cleanup() -> dict:
+    global _active_cleanups
     from backend.maintenance.spool import pending
 
     if pending():
         return {"status": "paused-for-upgrade", "deleted": 0}
+    _active_cleanups += 1
+    try:
+        return await _cleanup()
+    finally:
+        _active_cleanups -= 1
+
+
+def active_cleanups() -> int:
+    return _active_cleanups
+
+
+async def _cleanup() -> dict:
     async with get_pool().acquire() as db:
         conn = db.raw
         if not await conn.fetchval("SELECT pg_try_advisory_lock($1)", LOCK_ID):

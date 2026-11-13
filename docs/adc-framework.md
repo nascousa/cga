@@ -180,6 +180,12 @@ copies, not a second release catalog. Use **Amendments > Preview all
 project rules**, review each result, then **Collect available rule snapshots**
 with an administrator's justification.
 
+The preview lists changed paths and expandable source-versus-effective rule text
+(the proposed pinned baseline for unbound projects). Acknowledge review for every
+ready project before collection is enabled; the action commits **all ready
+projects**, not just the project selected in Amendments. Blocked projects remain
+visible and are not collected.
+
 Collection reads only the registered checkout and includes `.adc/index.md`,
 `bootstrap.md`, `prompt-rules.md`, root tool-rule pointers, and files under
 `.adc/standards/`, `.adc/rules/` and `.adc/.github/`. It excludes the provenance
@@ -200,6 +206,11 @@ revision. Existing bindings retain their baseline; unbound projects explicitly
 adopt the previewed baseline. Matching master rules are inherited; differences
 become project overrides/amendments. Unrelated changes and central-only rules
 are preserved. Collection is not an implicit baseline upgrade or deletion.
+If a local rule targets an existing exemption, collection is blocked even when
+the source matches the baseline or the exemption has expired. Make an explicit
+exemption decision in Amendments, save it and preview again; collection never
+silently removes a waiver or replaces it with an override. Snapshot text and
+hashes retain original CRLF/LF line endings (an optional UTF-8 BOM is excluded).
 
 The new immutable revision and its `adc_rule_collections` receipt commit
 atomically. Receipts record the registered source path, snapshot hash and
@@ -208,6 +219,12 @@ master releases are never mutated. Original files are retained for offline
 agents and source-control review, not deleted or rewritten during collection.
 After collecting, make future rule changes in CGA and distribute approved
 bundles using the existing preview-first Relay workflow.
+
+To scaffold the maintained ADC template, run
+`.\src\scripts\generate-adc-template.ps1 -TargetDir <new-directory>`.
+It copies `adc-template` byte-for-byte, including the indexed research-report
+convention, and refuses an existing destination. It does not publish an ADC
+release or update existing project bindings.
 
 Admin-only account endpoints:
 

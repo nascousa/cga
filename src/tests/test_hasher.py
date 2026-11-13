@@ -1,9 +1,10 @@
 """Tests for file hash dedup (hasher.py)."""
 
-import hashlib
-import os
-import tempfile
+import ast
 
+import pytest
+
+from backend.indexer.call_analyzer import CallAnalyzer, PythonParameter
 from backend.indexer.hasher import sha256_file, file_changed, hash_symbols, hash_calls, hash_imports, hash_variable_flows
 from backend.indexer.parser import ParsedFile, ParsedSymbol, ParsedVariable, ParsedVariableFlow, RawCall, ParsedImport
 
@@ -85,6 +86,38 @@ def test_hash_calls_order_independent():
     parsed2.calls.append(RawCall("mod.a", "b"))
     
     assert hash_calls(parsed1) == hash_calls(parsed2)
+
+
+@pytest.mark.parametrize(("first", "second"), [
+    ("callee(0, x)", "callee(x, 0)"),
+    ("callee(a=x)", "callee(b=x)"),
+    ("callee(x)", "callee(x, x)"),
+    ("first.callee(x)", "second.callee(x)"),
+])
+def test_hash_calls_tracks_argument_binding_and_qualified_targets(first, second):
+    def parsed(expression):
+        result = ParsedFile(path="test.py", language="python")
+        result.calls = CallAnalyzer().extract(
+            ast.parse(f"def caller(x):\n    return {expression}\n"), "test.py", "mod",
+        )
+        return result
+
+    assert hash_calls(parsed(first)) != hash_calls(parsed(second))
+
+
+def test_hash_symbols_tracks_parameter_order_when_source_lines_do_not_change():
+    first = ParsedFile(path="test.py", language="python", symbols=[
+        ParsedSymbol("callee", "mod.callee", "function", "test.py", 1, 2, [
+            PythonParameter("a", "positional_or_keyword"), PythonParameter("b", "positional_or_keyword"),
+        ]),
+    ])
+    second = ParsedFile(path="test.py", language="python", symbols=[
+        ParsedSymbol("callee", "mod.callee", "function", "test.py", 1, 2, [
+            PythonParameter("b", "positional_or_keyword"), PythonParameter("a", "positional_or_keyword"),
+        ]),
+    ])
+
+    assert hash_symbols(first) != hash_symbols(second)
 
 
 def test_hash_imports_dedupes():
