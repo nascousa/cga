@@ -1,4 +1,9 @@
 from pathlib import Path
+import shutil
+import subprocess
+import uuid
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -6,6 +11,54 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _read(rel_path: str) -> str:
     return (ROOT / rel_path).read_text(encoding="utf-8")
+
+
+def test_powershell_generator_copies_current_template_without_overwrite():
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if shell is None:
+        pytest.skip("PowerShell is required to validate the template generator")
+    target = ROOT / (".adc-generator-test-" + uuid.uuid4().hex)
+    command = [shell, "-NoProfile", "-NonInteractive", "-File",
+               str(ROOT / "src/scripts/generate-adc-template.ps1"), "-TargetDir", str(target)]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True, timeout=30)
+        source = ROOT / "adc-template"
+        files = {p.relative_to(source): p.read_bytes() for p in source.rglob("*") if p.is_file()}
+        assert {p.relative_to(target): p.read_bytes() for p in target.rglob("*") if p.is_file()} == files
+        assert b"standards/conventions/research-reports.md" in (target / "index.md").read_bytes()
+        assert (target / "standards/conventions/research-reports.md").is_file()
+        (target / "index.md").write_bytes(b"Preserve existing template")
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        assert result.returncode != 0
+        assert (target / "index.md").read_bytes() == b"Preserve existing template"
+    finally:
+        shutil.rmtree(target, ignore_errors=True)
+
+
+def test_powershell_generator_resolves_relative_targets_from_session_location(tmp_path):
+    shell = shutil.which("pwsh") or shutil.which("powershell")
+    if shell is None:
+        pytest.skip("PowerShell is required to validate the template generator")
+    startup = tmp_path / "process-startup"
+    current = tmp_path / "current checkout"
+    startup.mkdir()
+    current.mkdir()
+
+    def quoted(path):
+        return "'" + str(path).replace("'", "''") + "'"
+
+    command = (
+        "$ErrorActionPreference='Stop'; "
+        f"[Environment]::CurrentDirectory = {quoted(startup)}; "
+        f"Set-Location -LiteralPath {quoted(current)}; "
+        f"& {quoted(ROOT / 'src/scripts/generate-adc-template.ps1')} -TargetDir './new-template'"
+    )
+    subprocess.run(
+        [shell, "-NoProfile", "-NonInteractive", "-Command", command],
+        cwd=startup, check=True, capture_output=True, text=True, timeout=30,
+    )
+    assert (current / "new-template" / "index.md").read_bytes() == (ROOT / "adc-template/index.md").read_bytes()
+    assert not (startup / "new-template").exists()
 
 
 def test_prompt_rules_has_core_quality_sections() -> None:

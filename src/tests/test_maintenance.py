@@ -1,6 +1,7 @@
 import json
 import asyncio
-from contextlib import asynccontextmanager
+import time
+from contextlib import ExitStack, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -17,7 +18,7 @@ from backend.maintenance import retention, updates
 from backend.auth.database import get_db
 from backend.maintenance.history import validate_change_diff, version_tuple
 from backend.maintenance.router import router
-from backend.maintenance.spool import atomic_json
+from backend.maintenance.spool import QueueLockBusyError, atomic_json, queue_lock
 from backend.maintenance.update_manifest import verify_manifest
 from backend.maintenance.gate import MaintenanceGate
 from backend.indexer.consumer import IndexerConsumer
@@ -235,7 +236,69 @@ async def test_install_requires_matching_confirmation_and_is_exclusive(signed_up
     assert json.loads((root / "request.json").read_text())["id"] == job["id"]
     with pytest.raises(ValueError, match="already"):
         await updates.request_install("1.30.132", claims["version"], claims["image"], "operator")
+    atomic_json(root / "drain.json", {"request_id": job["id"], "ready": True})
     assert updates.cancel_queued()["status"] == "cancelled"
+    assert not (root / "drain.json").exists()
+    atomic_json(root / "drain.json", {"request_id": job["id"], "ready": True})
+    next_job = await updates.request_install("1.30.132", claims["version"], claims["image"], "operator")
+    assert next_job["id"] != job["id"]
+    assert not (root / "drain.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_update_drain_waits_for_retention_run_and_records_current_request(tmp_path, monkeypatch):
+    from backend.plugins import host
+    monkeypatch.setenv("CGA_UPDATE_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(host, "catalog_status", lambda: {"items": []})
+    started, finish = asyncio.Event(), asyncio.Event()
+    recorded = []
+
+    async def cleanup():
+        started.set()
+        await finish.wait()
+        recorded.append("run status persisted")
+        return {"status": "ok"}
+
+    monkeypatch.setattr(retention, "_cleanup", cleanup)
+    worker = asyncio.create_task(retention.cleanup())
+    await asyncio.wait_for(started.wait(), timeout=1)
+    atomic_json(tmp_path / "request.json", {"id": "current"})
+    idle = asyncio.Event()
+    idle.set()
+    app = SimpleNamespace(version="1.30.132", state=SimpleNamespace(
+        consumer=SimpleNamespace(_idle=idle), maintenance_inflight=0,
+    ))
+
+    async def end_iteration(_delay):
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(updates.asyncio, "sleep", end_iteration)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await updates.drain_loop(app)
+        receipt = json.loads((tmp_path / "drain.json").read_text())
+        assert receipt["request_id"] == "current" and not receipt["ready"]
+        assert (await retention.cleanup())["status"] == "paused-for-upgrade"
+    finally:
+        finish.set()
+        await worker
+    assert recorded and retention.active_cleanups() == 0
+    with pytest.raises(asyncio.CancelledError):
+        await updates.drain_loop(app)
+    assert json.loads((tmp_path / "drain.json").read_text())["ready"]
+    (tmp_path / "request.json").unlink()
+    with pytest.raises(asyncio.CancelledError):
+        await updates.drain_loop(app)
+    assert not (tmp_path / "drain.json").exists()
+
+
+@pytest.mark.asyncio
+async def test_retention_releases_inflight_tracking_on_failure(monkeypatch):
+    monkeypatch.delenv("CGA_UPDATE_STATE_DIR", raising=False)
+    monkeypatch.setattr(retention, "_cleanup", AsyncMock(side_effect=RuntimeError("cleanup failed")))
+    with pytest.raises(RuntimeError, match="cleanup failed"):
+        await retention.cleanup()
+    assert retention.active_cleanups() == 0
 
 
 @pytest.mark.asyncio
@@ -319,7 +382,7 @@ def make_host(tmp_path, signed_update, monkeypatch):
               "HostConfig": {"PortBindings": {"8000/tcp": [{"HostPort": "18001"}]}}, "Mounts": []}
     monkeypatch.setattr(host, "inspect", lambda: before)
     monkeypatch.setattr(host, "health", lambda version: None)
-    monkeypatch.setattr(host, "wait_drained", lambda version: None)
+    monkeypatch.setattr(host, "wait_drained", lambda version, request_id: None)
     monkeypatch.setattr(host, "backup", lambda job_dir: None)
     monkeypatch.setattr(host, "environment_keys", lambda: ["SECRET"])
     calls = []
@@ -330,6 +393,24 @@ def make_host(tmp_path, signed_update, monkeypatch):
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat(),
     })
     return host, root, journal, compose, calls
+
+
+@pytest.mark.parametrize("stale_id", [None, "previous"])
+def test_host_requires_current_request_drain_receipt(tmp_path, signed_update, monkeypatch, stale_id):
+    host, root, _, _, _ = make_host(tmp_path, signed_update, monkeypatch)
+    receipt = {"version": "1.30.132", "ready": True, "heartbeat": time.time()}
+    if stale_id is not None:
+        receipt["request_id"] = stale_id
+    atomic_json(root / "drain.json", receipt)
+    sleeps = []
+
+    def refresh(_delay):
+        sleeps.append(1)
+        atomic_json(root / "drain.json", {**receipt, "request_id": "current"})
+
+    monkeypatch.setattr("scripts.cga_update_host.time.sleep", refresh)
+    HostUpdater.wait_drained(host, "1.30.132", "current")
+    assert sleeps == [1], "The previous/legacy receipt must not drain a new request"
 
 
 @pytest.mark.parametrize("configured_change", [False, True])
@@ -360,6 +441,51 @@ def test_host_success_preserves_scope_and_keeps_private_journals(tmp_path, signe
     assert calls[1][-4:] == ["stop", "--timeout", "300", "cga"]
     assert all("down" not in call and "--volumes" not in call for call in calls)
     assert "never-write-this-in-journal" not in (journal / ("b" * 32) / "journal.json").read_text()
+
+
+@pytest.mark.parametrize("queued", [False, True])
+def test_host_retries_overlapping_queue_polls_without_stopping_heartbeat(
+    tmp_path, signed_update, monkeypatch, capsys, queued,
+):
+    host, root, _, _, _ = make_host(tmp_path, signed_update, monkeypatch)
+    if not queued:
+        (root / "request.json").unlink()
+    monkeypatch.setattr(host, "verify_runtime", lambda *args: None)
+    delays = []
+    with ExitStack() as held:
+        held.enter_context(queue_lock(root))
+        with pytest.raises(QueueLockBusyError):
+            host.process()
+
+        def release_after_busy_poll(delay):
+            delays.append(delay)
+            assert host.thread.is_alive()
+            assert not host.stop_event.is_set()
+            assert (root / "queue.lock").is_dir()
+            assert (root / "status.json").is_file()
+            held.close()
+
+        monkeypatch.setattr("scripts.cga_update_host.time.sleep", release_after_busy_poll)
+        host.run(once=True)
+    assert delays == [2]
+    assert host.progress["status"] == ("success" if queued else "ready")
+    assert not (root / "request.json").exists()
+    assert not host.thread.is_alive()
+    assert "queue is busy" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("stage", ["recover", "process"])
+def test_host_does_not_retry_recovery_errors_as_queue_contention(tmp_path, signed_update, monkeypatch, stage):
+    host, _, _, _, _ = make_host(tmp_path, signed_update, monkeypatch)
+
+    def recovery_required():
+        raise ValueError("Operator recovery required")
+
+    monkeypatch.setattr(host, stage, recovery_required)
+    with pytest.raises(ValueError, match="Operator recovery required"):
+        host.run(once=True)
+    assert host.stop_event.is_set()
+    assert host.thread is None or not host.thread.is_alive()
 
 
 def test_host_target_failure_restores_image_not_database(tmp_path, signed_update, monkeypatch):

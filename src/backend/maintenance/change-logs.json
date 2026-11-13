@@ -1,11 +1,60 @@
 [
   {
+    "version": "1.30.133",
+    "date": "2026-11-12",
+    "summary": "Compact ADC editing workspaces; Audit lifecycle, version Change Logs and controlled updates; Versioned first-party plugin standards, approval policy and developer SDK; Optional first-party plugin controls and cross-platform Relay source support; Bind MCP sessions to project credentials and correct Python indexing scope and argument flows; Unified interactive reporting workspace; Remove the user menu's green active border",
+    "changes": {
+      "Changed": [
+        "Compact Constitution toolbars and collapse publication/import controls.",
+        "Place the Amendments change picker beside the editor and collapse baseline review, history and collection tools.",
+        "Separate product release history from request audit records and local unpublished work.",
+        "The developer kit remains a verified local candidate: GitHub workflow authorization and independent publication approvals are still required; no SDK release or runtime update has been published.",
+        "Automation, browser tasks, workflows, reports, notifications and evaluation retain their existing integration contracts behind optional-plugin host checks.",
+        "Cross-platform Relay release workflows require their platform signing and notarization prerequisites; source candidates do not imply published platform releases.",
+        "Merged Report and AI-First into one filter-driven workspace, retaining evidence/policy tools and legacy saved reports in collapsed sections.",
+        "Date/project/type/status/text filters apply before the bounded activity sample; current readiness is explicitly separate from historical activity.",
+        "The user menu button keeps its neutral border when a management page is active."
+      ],
+      "Added": [
+        "Audit capacity and policy previews, confirmed persistent retention settings and bounded background cleanup.",
+        "System settings Change Logs, bundled release history and release-time change-note validation.",
+        "Online release checks and notifications, signed update manifests and administrator-confirmed host update requests.",
+        "English/Chinese plugin contract and independent exact-commit approval policy, with explicit trusted in-process boundaries.",
+        "Installable Python SDK with scaffolding, semantic/file validation, host adapter result contracts and deterministic non-overwriting packages.",
+        "Joint standards/SDK packaging and approval-gated provenance publication workflows; drafts and missing reviewer configuration do not count as formal approval.",
+        "Selectable first-party plugin packaging, administrator enable/install controls and focused plugin settings with execution-aware disable safeguards.",
+        "Linux tray and user-service packaging plus macOS CLI packaging, native credential backends and explicit session-only credential mode.",
+        "Local ECharts interactive charts with matching dark/light themes, evidence drill-down and snapshot-bound CSV/JSON exports.",
+        "Downloadable Mermaid-led PDF reports and diagram sources; PDF evidence is explicitly limited while CSV/JSON retain the complete generated snapshot."
+      ],
+      "Security": [
+        "Keep audit deletion disabled until a policy is previewed and explicitly enabled.",
+        "Require trusted signed artifacts and an independently configured host executor before enabling installation; preserve existing ports and data.",
+        "Bind MCP SSE sessions to their database-verified project and exact credential; reject another project's or another token's messages before tool execution.",
+        "Require MCP Python SDK 1.30.0 or newer in the supported 1.x line, including session ownership and client transport fixes."
+      ],
+      "Fixed": [
+        "Review fixes preserve ADC exemptions and CRLF snapshots, expose per-file collection review and include research-report conventions in generated templates.",
+        "Plugin selection survives leaner bundles; briefing holds execution leases and evaluation resumes pending Redis traces after restart.",
+        "Confirmed upgrades wait for audit cleanup and require request-specific drain receipts; reports stream bounded summary projections and reject oversized results.",
+        "Release publication rejects existing SDK tags, validates trusted workflow provenance and delays public image tag promotion until release gates pass.",
+        "Keep Python nested function identities, imports, calls and variable flows within their lexical scopes rather than merging same-named closures or attributing nested bodies to their parent.",
+        "Preserve positional, keyword and repeated argument dependencies when building cross-function data-flow edges; do not invent bindings for unresolved argument expansion."
+      ]
+    }
+  },
+  {
     "version": "1.30.132",
     "date": "2026-11-11",
     "summary": "ADC Constitution and project Amendments workspace",
     "changes": {
-      "Changed": ["Renamed Main rules to Constitution and Project versions to Amendments.", "Added a searchable document sidebar beside the Constitution editor."],
-      "Fixed": ["Avoid false unsaved-change prompts for historical Windows line endings without rewriting published documents."]
+      "Changed": [
+        "Renamed Main rules to Constitution and Project versions to Amendments.",
+        "Added a searchable document sidebar beside the Constitution editor."
+      ],
+      "Fixed": [
+        "Avoid false unsaved-change prompts for historical Windows line endings without rewriting published documents."
+      ]
     }
   },
   {
@@ -13,8 +62,13 @@
     "date": "2026-11-10",
     "summary": "Compact administration and Automation navigation",
     "changes": {
-      "Changed": ["Grouped Users, Plugins and System settings in the administrator menu.", "Separated Automation tasks from execution history and collapsed advanced fields."],
-      "Fixed": ["Disabled unchanged plugin settings saves and separated save status from actions."]
+      "Changed": [
+        "Grouped Users, Plugins and System settings in the administrator menu.",
+        "Separated Automation tasks from execution history and collapsed advanced fields."
+      ],
+      "Fixed": [
+        "Disabled unchanged plugin settings saves and separated save status from actions."
+      ]
     }
   }
 ]

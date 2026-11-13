@@ -23,6 +23,7 @@ jobs:
       contents: read
       pull-requests: read
       checks: read
+      actions: read
     outputs:
       commit: ${{ steps.review.outputs.commit }}
       head: ${{ steps.review.outputs.head }}
@@ -56,6 +57,7 @@ jobs:
       contents: write
       pull-requests: read
       checks: read
+      actions: read
       id-token: write
       attestations: write
     steps:
@@ -96,11 +98,18 @@ jobs:
         run: |
           set -euo pipefail
           tag="plugin-sdk-v$SDK_VERSION"
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "Release already exists; choose a new version instead of replacing assets"
+          tag_count="$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag" \
+            --jq "map(select(.ref == \"refs/tags/$tag\")) | length")"
+          release_count="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" --paginate --slurp \
+            --jq "[.[][] | select(.tag_name == \"$tag\")] | length")"
+          if [[ "$tag_count" != "0" || "$release_count" != "0" ]]; then
+            echo "Tag or release already exists; choose a new version"
             exit 1
           fi
+          # Atomic creation also rejects a tag created after the lookups.
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+            -f "ref=refs/tags/$tag" -f "sha=$APPROVED_COMMIT"
           gh release create "$tag" "$RUNNER_TEMP"/plugin-sdk/* \
-            --target "$APPROVED_COMMIT" --latest=false \
+            --verify-tag --latest=false \
             --title "CGA Plugin Development Kit v$SDK_VERSION" \
             --notes "Joint standards, independent approval policy, Python SDK, schema and guide. Verify SHA-256 and GitHub artifact attestations. This is not a CGA API/Relay update."

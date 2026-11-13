@@ -13,6 +13,8 @@ but the file mostly stays the same.
 from __future__ import annotations
 
 import hashlib
+import json
+from dataclasses import asdict
 from pathlib import Path
 
 from backend.indexer.parser import ParsedFile
@@ -45,15 +47,27 @@ def hash_symbols(parsed: ParsedFile) -> str:
     ):
         line = f"{sym.qualified_name}:{sym.symbol_type}:{sym.line_start}:{sym.line_end}\n"
         h.update(line.encode("utf-8"))
+        if sym.parameters is not None:
+            h.update(json.dumps({
+                "parameters": [asdict(parameter) for parameter in sym.parameters],
+                "method_binding": sym.method_binding,
+            }, sort_keys=True, separators=(",", ":")).encode("utf-8"))
     return h.hexdigest()
 
 
 def hash_calls(parsed: ParsedFile) -> str:
     """Hash the calls extracted in a parsed file (for call graph changes)."""
     h = hashlib.sha256()
-    for call in sorted(parsed.calls, key=lambda c: (c.caller_qname, c.callee_name)):
-        line = f"{call.caller_qname}->{call.callee_name}\n"
-        h.update(line.encode("utf-8"))
+    evidence = [
+        (
+            call.caller_qname, call.callee_name,
+            json.dumps(asdict(call), sort_keys=True, separators=(",", ":"))
+            if call.arguments is not None else f"{call.caller_qname}->{call.callee_name}",
+        )
+        for call in parsed.calls
+    ]
+    for _, _, line in sorted(evidence):
+        h.update(f"{line}\n".encode("utf-8"))
     return h.hexdigest()
 
 

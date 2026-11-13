@@ -20,7 +20,10 @@ from typing import AbstractSet, Iterator
 
 from backend.indexer.language_definitions import REGISTERED_EXTENSIONS, REGISTERED_FILENAMES
 from backend.indexer.language_catalog import is_parser_file_enabled
-from backend.indexer.call_analyzer import RawCall
+from backend.indexer.call_analyzer import (
+    MethodBinding, PythonParameter, PythonScope, RawCall, python_parameters, python_scopes,
+    walk_python_scope, walk_python_scope_context,
+)
 
 
 @dataclass
@@ -31,6 +34,8 @@ class ParsedSymbol:
     file_path: str
     line_start: int
     line_end: int
+    parameters: list[PythonParameter] | None = None
+    method_binding: MethodBinding | None = None
 
 
 @dataclass
@@ -99,101 +104,84 @@ class PythonParser:
         module_qname = path_to_module(file_path)
         result = ParsedFile(path=file_path, language="python")
 
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                class_qname = f"{module_qname}.{node.name}"
+        scopes = python_scopes(tree, module_qname)
+        for scope in scopes:
+            node = scope.node
+            if not isinstance(node, ast.Module):
+                if isinstance(node, ast.ClassDef):
+                    kind = "class"
+                    parameters = None
+                else:
+                    suffix = "method" if scope.method_binding is not None else "function"
+                    kind = f"async_{suffix}" if isinstance(node, ast.AsyncFunctionDef) else suffix
+                    parameters = python_parameters(node.args)
                 result.symbols.append(
                     ParsedSymbol(
                         name=node.name,
-                        qualified_name=class_qname,
-                        symbol_type="class",
-                        file_path=file_path,
-                        line_start=node.lineno,
-                        line_end=node.end_lineno or node.lineno,
-                    )
-                )
-                for item in node.body:
-                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        kind = "async_method" if isinstance(item, ast.AsyncFunctionDef) else "method"
-                        result.symbols.append(
-                            ParsedSymbol(
-                                name=item.name,
-                                qualified_name=f"{class_qname}.{item.name}",
-                                symbol_type=kind,
-                                file_path=file_path,
-                                line_start=item.lineno,
-                                line_end=item.end_lineno or item.lineno,
-                            )
-                        )
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                parent = self._get_parent(tree, node)
-                if isinstance(parent, ast.ClassDef):
-                    continue
-                kind = "async_function" if isinstance(node, ast.AsyncFunctionDef) else "function"
-                result.symbols.append(
-                    ParsedSymbol(
-                        name=node.name,
-                        qualified_name=f"{module_qname}.{node.name}",
+                        qualified_name=scope.qualified_name,
                         symbol_type=kind,
                         file_path=file_path,
                         line_start=node.lineno,
                         line_end=node.end_lineno or node.lineno,
+                        parameters=parameters,
+                        method_binding=scope.method_binding,
                     )
                 )
-            elif isinstance(node, ast.Import):
-                for alias in node.names:
-                    result.imports.append(ParsedImport(source_path=file_path, imported_module=alias.name))
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    result.imports.append(ParsedImport(source_path=file_path, imported_module=node.module))
+            for item in walk_python_scope(node, evaluate_annotations=scope.evaluate_annotations):
+                if isinstance(item, ast.Import):
+                    for alias in item.names:
+                        result.imports.append(ParsedImport(source_path=file_path, imported_module=alias.name))
+                elif isinstance(item, ast.ImportFrom) and item.module:
+                    result.imports.append(ParsedImport(source_path=file_path, imported_module=item.module))
 
-        self._extract_variable_flows(tree, result, module_qname)
+        self._extract_variable_flows(scopes, result)
 
         return result
 
-    def _extract_variable_flows(self, tree: ast.AST, result: ParsedFile, module_qname: str) -> None:
-        for node in ast.walk(tree):
-            if isinstance(node, ast.ClassDef):
-                class_qname = f"{module_qname}.{node.name}"
-                for item in node.body:
-                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                        self._collect_function_variable_flows(item, f"{class_qname}.{item.name}", result)
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                parent = self._get_parent(tree, node)
-                if isinstance(parent, ast.ClassDef):
-                    continue
-                self._collect_function_variable_flows(node, f"{module_qname}.{node.name}", result)
+    def _extract_variable_flows(self, scopes: list[PythonScope], result: ParsedFile) -> None:
+        variables_by_qname: dict[str, ParsedVariable] = {}
+        parameter_qnames: set[str] = set()
+        functions: list[PythonScope] = []
+        for scope in scopes:
+            node = scope.node
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            functions.append(scope)
+            self._ensure_variable(result, variables_by_qname, scope.qualified_name, "__return__", node.lineno, "return")
+            for argument in self._iter_python_args(node.args):
+                parameter_qnames.add(f"{scope.qualified_name}:{argument.arg}")
+                self._ensure_variable(
+                    result, variables_by_qname, scope.qualified_name, argument.arg,
+                    argument.lineno or node.lineno, "parameter",
+                )
+        for scope in functions:
+            self._collect_function_variable_flows(scope, result, variables_by_qname, parameter_qnames)
 
     def _collect_function_variable_flows(
         self,
-        func_node: ast.FunctionDef | ast.AsyncFunctionDef,
-        scope_qname: str,
+        scope: PythonScope,
         result: ParsedFile,
+        variables_by_name: dict[str, ParsedVariable],
+        parameter_qnames: set[str],
     ) -> None:
-        variables_by_name: dict[str, ParsedVariable] = {}
+        scope_qname = scope.qualified_name
         seen_flows: set[tuple[str, str, str, int]] = set()
-
-        return_var = self._ensure_variable(result, variables_by_name, scope_qname, "__return__", func_node.lineno, "return")
-        param_names: set[str] = set()
-        for arg in self._iter_python_args(func_node.args):
-            if arg.arg in {"self", "cls"}:
-                continue
-            param_names.add(arg.arg)
-            self._ensure_variable(result, variables_by_name, scope_qname, arg.arg, arg.lineno or func_node.lineno, "parameter")
-
-        for node in ast.walk(func_node):
+        return_var = variables_by_name[f"{scope_qname}:__return__"]
+        for node, bound in walk_python_scope_context(
+            scope.node, evaluate_annotations=scope.evaluate_annotations,
+        ):
             if isinstance(node, ast.Assign):
                 target_names = self._extract_python_target_names(node.targets)
                 source_names = self._extract_python_source_names(node.value)
                 self._append_python_flows(
                     result,
                     variables_by_name,
-                    scope_qname,
+                    scope,
                     target_names,
                     source_names,
                     node.lineno,
                     "assignment",
-                    param_names,
+                    parameter_qnames,
                     seen_flows,
                 )
             elif isinstance(node, ast.AnnAssign):
@@ -202,12 +190,12 @@ class PythonParser:
                 self._append_python_flows(
                     result,
                     variables_by_name,
-                    scope_qname,
+                    scope,
                     target_names,
                     source_names,
                     node.lineno,
                     "assignment",
-                    param_names,
+                    parameter_qnames,
                     seen_flows,
                 )
             elif isinstance(node, ast.AugAssign):
@@ -216,22 +204,22 @@ class PythonParser:
                 self._append_python_flows(
                     result,
                     variables_by_name,
-                    scope_qname,
+                    scope,
                     target_names,
                     source_names,
                     node.lineno,
                     "assignment",
-                    param_names,
+                    parameter_qnames,
                     seen_flows,
                 )
             elif isinstance(node, ast.Return) and node.value is not None:
                 source_names = self._extract_python_source_names(node.value)
                 for source_name in source_names:
-                    source_role = "parameter" if source_name in param_names else "local"
+                    source_role = "parameter" if scope.variable_qname(source_name) in parameter_qnames else "local"
                     source_var = self._ensure_variable(
                         result,
                         variables_by_name,
-                        scope_qname,
+                        scope.variable_scope(source_name).qualified_name,
                         source_name,
                         node.lineno,
                         source_role,
@@ -249,28 +237,46 @@ class PythonParser:
                             flow_type="return",
                         )
                     )
+            elif isinstance(node, ast.Call):
+                for argument in [*node.args, *(keyword.value for keyword in node.keywords)]:
+                    for name in self._extract_python_source_names(argument, bound):
+                        role = "parameter" if scope.variable_qname(name) in parameter_qnames else "local"
+                        self._ensure_variable(
+                            result, variables_by_name, scope.variable_scope(name).qualified_name,
+                            name, node.lineno, role,
+                        )
 
     @staticmethod
     def _iter_python_args(args: ast.arguments) -> list[ast.arg]:
-        return list(args.posonlyargs) + list(args.args) + list(args.kwonlyargs)
+        return [
+            *args.posonlyargs, *args.args, *([args.vararg] if args.vararg else []),
+            *args.kwonlyargs, *([args.kwarg] if args.kwarg else []),
+        ]
 
     def _append_python_flows(
         self,
         result: ParsedFile,
         variables_by_name: dict[str, ParsedVariable],
-        scope_qname: str,
+        scope: PythonScope,
         target_names: list[str],
         source_names: list[str],
         line_number: int,
         flow_type: str,
-        param_names: set[str],
+        parameter_qnames: set[str],
         seen_flows: set[tuple[str, str, str, int]],
     ) -> None:
+        scope_qname = scope.qualified_name
         for target_name in target_names:
-            target_var = self._ensure_variable(result, variables_by_name, scope_qname, target_name, line_number, "local")
+            target_var = self._ensure_variable(
+                result, variables_by_name, scope.variable_scope(target_name).qualified_name,
+                target_name, line_number, "local",
+            )
             for source_name in source_names:
-                source_role = "parameter" if source_name in param_names else "local"
-                source_var = self._ensure_variable(result, variables_by_name, scope_qname, source_name, line_number, source_role)
+                source_role = "parameter" if scope.variable_qname(source_name) in parameter_qnames else "local"
+                source_var = self._ensure_variable(
+                    result, variables_by_name, scope.variable_scope(source_name).qualified_name,
+                    source_name, line_number, source_role,
+                )
                 key = (source_var.qualified_name, target_var.qualified_name, flow_type, line_number)
                 if key in seen_flows or source_var.qualified_name == target_var.qualified_name:
                     continue
@@ -294,20 +300,21 @@ class PythonParser:
         line_number: int,
         role: str,
     ) -> ParsedVariable:
-        existing = variables_by_name.get(var_name)
+        qualified_name = f"{scope_qname}:{var_name}"
+        existing = variables_by_name.get(qualified_name)
         if existing is not None:
             if existing.role == "local" and role == "parameter":
                 existing.role = role
             return existing
         variable = ParsedVariable(
             name=var_name,
-            qualified_name=f"{scope_qname}:{var_name}",
+            qualified_name=qualified_name,
             scope_qname=scope_qname,
             file_path=result.path,
             line_number=line_number,
             role=role,
         )
-        variables_by_name[var_name] = variable
+        variables_by_name[qualified_name] = variable
         result.variables.append(variable)
         return variable
 
@@ -318,25 +325,19 @@ class PythonParser:
             for node in ast.walk(target):
                 if isinstance(node, ast.Name):
                     names.add(node.id)
-        return sorted(name for name in names if name not in {"self", "cls"})
-
-    @staticmethod
-    def _extract_python_source_names(node: ast.AST | None) -> list[str]:
-        if node is None:
-            return []
-        names: set[str] = set()
-        for child in ast.walk(node):
-            if isinstance(child, ast.Name) and child.id not in {"self", "cls"}:
-                names.add(child.id)
         return sorted(names)
 
     @staticmethod
-    def _get_parent(tree: ast.AST, target: ast.AST) -> ast.AST | None:
-        for node in ast.walk(tree):
-            for child in ast.iter_child_nodes(node):
-                if child is target:
-                    return node
-        return None
+    def _extract_python_source_names(
+        node: ast.AST | None, bound_names: frozenset[str] = frozenset(),
+    ) -> list[str]:
+        if node is None:
+            return []
+        names: set[str] = set()
+        for child, bound in walk_python_scope_context(node, bound_names=bound_names):
+            if isinstance(child, ast.Name) and isinstance(child.ctx, ast.Load) and child.id not in bound:
+                names.add(child.id)
+        return sorted(names)
 
 
 class TypeScriptJavaScriptParser:

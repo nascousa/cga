@@ -3,12 +3,17 @@
 The dependency-free Rust core provides MCP, incremental Git indexing, account
 settings and a loopback gateway. Windows uses the existing native notification
 area UI. macOS is CLI-only; Linux adds a GTK3/Ayatana AppIndicator companion.
-This source implementation is not itself a published,
-signed or native-macOS-verified release.
+Native candidate CI passed on Windows, Linux x64/ARM64 and macOS Intel/Apple
+Silicon on the merged baseline; see the
+[verified run](https://github.com/nascousa/cga/actions/runs/43284448675).
+This is not a published signed release or proof of every desktop/keyring setup.
 
 ## Install a Unix package
 
 Extract the archive for your operating system and CPU, then run from that folder:
+use a trusted signed release when available, or a locally built development
+candidate. A source version or successful CI run does not mean a matching Unix
+archive has been published.
 
 ```sh
 # macOS defaults to CLI (no GUI or automatic background process):
@@ -28,7 +33,8 @@ configuration, scan state and logs.
 No administrator privileges are required for user installation.
 
 - **macOS:** CLI in `~/.local/share/cga-relay/bin/cga-relay`, symlink in
-  `~/.local/bin`. No `.app`, menu bar, Swift or Python dependency. Only an
+  `~/.local/bin` (add it to `PATH` or use the full path). No `.app`, menu bar,
+  Swift or Python dependency. Only an
   explicit `--mode headless` installs the optional `com.nascousa.cga-relay`
   LaunchAgent. `--mode desktop` is rejected.
 - **Linux:** `~/.local/share/cga-relay/bin/cga-relay`, symlink in
@@ -53,14 +59,6 @@ overwritten. Review the API URL and project root before signing in. Keep token
 values out of the config: credential configuration names environment variables,
 not literal secrets.
 
-Set `CGA_RELAY_CREDENTIAL_MODE=session` explicitly to keep new account tokens
-only in that process's memory, for example on a headless machine without a
-keyring. Restarting requires login again; no token is written to a plaintext
-file. Default mode always requires the OS credential store. Legacy Unix
-plaintext sessions are rejected rather than silently reused: sign out to remove
-the old session, then sign in again using secure storage. Credential deletion
-failures retain the reference and report an error so logout can be retried.
-
 If the native credential store is unavailable, login reports an error rather
 than saving plaintext. For an explicitly temporary login, set the process
 environment variable `CGA_RELAY_CREDENTIAL_MODE=session` before starting Relay;
@@ -68,6 +66,8 @@ do not add it to `relay.env`. The token remains only in that process's memory
 and does not survive restart. Legacy Unix plaintext sessions are rejected:
 sign out in local settings, then sign in again to use protected storage.
 Revoke the old token if it may have been exposed.
+Credential deletion failures retain the reference and report an error so logout
+can be retried.
 
 The transport currently permits only **loopback HTTP**. A remote HTTPS server
 requires an independently configured policy-compliant local TLS proxy. Neither
@@ -130,6 +130,10 @@ fixtures authorize the compiled test Relay identity without changing production
 credential storage or requiring GUI consent. Policy and release CI share this
 wrapper. Installer path assertions compare resolved paths because macOS
 temporary directories may be reached through `/var` aliases.
+Credential HTTP fixtures explicitly switch accepted sockets to blocking mode
+before applying read deadlines: macOS can inherit a listener's nonblocking mode.
+A delayed-request regression checks this without skipping native session tests
+or changing production credential storage.
 
 macOS source builds require a Rust toolchain and the system C linker; packaging
 uses `codesign` and `ditto`, with `xcrun notarytool` for formal releases. There is
@@ -176,7 +180,7 @@ Release secrets:
   `CGA_RELAY_APPLE_SIGNING_IDENTITY`, `CGA_RELAY_APPLE_ID`,
   `CGA_RELAY_APPLE_APP_PASSWORD`, `CGA_RELAY_APPLE_TEAM_ID`.
 
-Local Windows/Linux validation is not evidence that macOS CLI execution,
-Keychain prompts, Intel/ARM hardware, desktop-specific Linux indicator hosts
-or Apple notarization have passed. Record those native results before calling
-the corresponding platform release production-ready.
+The linked native CI covers CLI tests, isolated credential fixtures, installers,
+builds and package smoke tests. It does not replace human desktop/keyring checks,
+Apple notarization, trusted signatures or validation of a later release commit.
+Record those results before calling a platform release production-ready.

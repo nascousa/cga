@@ -7,6 +7,10 @@ from contextlib import contextmanager
 from pathlib import Path
 
 
+class QueueLockBusyError(ValueError):
+    pass
+
+
 def atomic_json(path: Path, value: dict) -> None:
     temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -25,7 +29,7 @@ def queue_lock(root: Path):
     try:
         lock.mkdir()
     except FileExistsError as exc:
-        raise ValueError("Update queue is busy. Retry; inspect a stale lock only after stopping its owner.") from exc
+        raise QueueLockBusyError("Update queue is busy. Retry; inspect a stale lock only after stopping its owner.") from exc
     try:
         yield
     finally:

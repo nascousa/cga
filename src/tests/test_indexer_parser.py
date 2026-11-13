@@ -17,6 +17,7 @@ from backend.indexer.parser import (
     RustParser,
     JavaParser,
     discover_files,
+    path_to_module,
     SUPPORTED_EXTENSIONS,
 )
 
@@ -95,6 +96,61 @@ def test_parse_python_variable_flows(tmp_py):
     assert ("prefix", "label", "assignment") in flows
     assert ("label", "result", "assignment") in flows
     assert ("result", "__return__", "return") in flows
+
+
+def test_nested_function_symbols_and_variables_keep_lexical_scopes(tmp_py):
+    path = tmp_py("""\
+        def first(value):
+            def helper(item):
+                local = item
+                return value + local
+            return value
+
+        def second(value):
+            async def helper(item):
+                return item
+            return value
+    """)
+    parsed = PythonParser().parse(path)
+    module = path_to_module(path)
+    symbols = {symbol.qualified_name: symbol.symbol_type for symbol in parsed.symbols}
+    assert symbols == {
+        f"{module}.first": "function",
+        f"{module}.first.helper": "function",
+        f"{module}.second": "function",
+        f"{module}.second.helper": "async_function",
+    }
+    variable_qnames = {variable.qualified_name for variable in parsed.variables}
+    assert {f"{module}.first.helper:item", f"{module}.first.helper:local"} <= variable_qnames
+    assert not {f"{module}.first:item", f"{module}.first:local", f"{module}.first.helper:value"} & variable_qnames
+    flows = {(flow.source_qname, flow.target_qname) for flow in parsed.variable_flows}
+    assert (f"{module}.first:value", f"{module}.first.helper:__return__") in flows
+    assert (f"{module}.first.helper:item", f"{module}.first.helper:local") in flows
+    assert not any(
+        flow.scope_qname == f"{module}.first"
+        and flow.source_qname != f"{module}.first:value"
+        for flow in parsed.variable_flows
+    )
+
+
+def test_nested_class_and_method_local_function_symbols_match_lexical_owners(tmp_py):
+    path = tmp_py("""\
+        class Outer:
+            class Inner:
+                def run(self):
+                    def helper(value):
+                        return value
+                    return helper(1)
+    """)
+    parsed = PythonParser().parse(path)
+    module = path_to_module(path)
+
+    assert {symbol.qualified_name: symbol.symbol_type for symbol in parsed.symbols} == {
+        f"{module}.Outer": "class",
+        f"{module}.Outer.Inner": "class",
+        f"{module}.Outer.Inner.run": "method",
+        f"{module}.Outer.Inner.run.helper": "function",
+    }
 
 
 def test_parse_syntax_error(tmp_py):

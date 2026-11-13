@@ -2,17 +2,24 @@
 
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.132
-- **Status:** Plugin controls, compact ADC, unified reports, maintenance controls and cross-platform Relay source prepared for review; formal releases remain subject to approval and signing gates
+- **Version:** 1.30.133
+- **Status:** Cross-platform source with a verified local security/indexing deployment; published artifacts remain separate from source and CI candidates
 - **Author:** Nate Scott
-- **Date:** 2026-11-11 (release-readiness status)
+- **Date:** 2026-11-12 (release-readiness status)
 
-The source/runtime version above is not a published-release claim. The latest
+The source version above is not a published-release claim. The latest
 published GitHub release is
 [v1.30.113](https://github.com/nascousa/cga/releases/tag/v1.30.113);
 v1.30.125 remains an unpublished draft. See
-[current release readiness](docs/PUBLISHING.md#current-release-readiness-2026-11-10)
-for verified checks and the remaining signing gate.
+[current release readiness](docs/PUBLISHING.md#current-release-readiness-2026-11-12)
+for verified checks and the remaining approval/signing requirements.
+
+The local `http://127.0.0.1:18001/admin` installation was verified on
+2026-11-12 with a **1.30.133 [security/indexing overlay](docs/runtime-operations.md#verified-local-security-and-indexing-update-2026-11-12)**. It preserves the
+previous UI and does **not** deploy every feature in this source tree:
+unified Report and the new maintenance controls remain source-only there.
+Source version, installed runtime, CI candidate and signed public release are
+different states; matching version numbers do not make their contents identical.
 
 CGA, aka Context Graph Agent, is a local-first graph context service that gives AI coding agents focused code evidence instead of dumping whole files or broad search results into prompts.
 
@@ -50,6 +57,26 @@ For the short answers to common questions from agent builders, see [docs/faq.md]
 - Keeps project context local-first while still offering an Admin Dashboard for indexing, settings, schedules, and work activity.
 - Helps agents answer, edit, and search through repositories with less prompt waste and lower evidence ambiguity.
 
+## Platform Support
+
+The **CGA server** and the **local Relay client** are separate components.
+Run the server once; install Relay on the machine that holds the repository.
+
+| Platform | CGA server | Native Relay |
+|---|---|---|
+| Windows | Docker Desktop with Linux containers; optional one-click Windows bundle | Native notification-area UI, CLI, stdio MCP and headless gateway |
+| Linux | Docker Engine with Docker Compose v2; no desktop required for the server | x64/ARM64 CLI and headless gateway; optional GTK3/Ayatana AppIndicator desktop companion |
+| macOS | Docker Desktop with Linux containers | Intel/Apple Silicon CLI and headless gateway; **no menu-bar app or `.app` bundle** |
+
+Native Relay candidate CI has passed on Windows, Linux x64/ARM64 and macOS
+Intel/Apple Silicon; see the [verified baseline run](https://github.com/nascousa/cga/actions/runs/43284448675).
+This does not certify every Linux desktop, all native credential-store behavior
+or Docker image architecture support. Check the selected image/package for your
+CPU; Apple Silicon Relay support is not a multi-architecture server-image claim.
+Unix source and CI candidates are **not signed public releases**. Linux releases
+require trusted GPG verification; macOS releases require Developer ID signing
+and notarization. Never bypass Gatekeeper to install a candidate as a release.
+
 ## Quick Start
 
 Administrators can manage ADC at `/admin/adc`: publish immutable releases, pin
@@ -60,52 +87,123 @@ Desktop Relay, including revision history, diffs and file hashes. Relay provides
 preview-first local synchronization; local edits are never silently overwritten.
 See [remote ADC interfaces](docs/adc-framework.md#remote-adc-interfaces).
 
-For macOS CLI, Linux tray, user services and
-signed-release prerequisites, see the [Desktop Relay guide](src/cga-relay/README.md).
-Unix source/candidate support does not imply a signed public platform release.
-
-### Option A: Docker Desktop Release
+### Option A: Windows Release Bundle
 
 Use this path for the easiest local Windows launch.
 
 1. Install Docker Desktop.
-2. Download `CGA-Docker-Desktop-<version>.zip` from the release artifacts.
+2. Choose a [published release](https://github.com/nascousa/cga/releases) that
+   actually includes `CGA-Docker-Desktop-<version>.zip`; verify its matching
+   SHA-256 checksum. Not every source version has published artifacts.
 3. Unzip it and double-click `start-cga-desktop.cmd`.
 
-Open `http://localhost:18001/admin`.
+Open `http://127.0.0.1:18001/admin`. See the
+[bundle guide](deploy/docker-desktop/README.md) for credentials, mounts and recovery.
 
-### Option B: Run From Source
+### Option B: Server From Source On Windows, Linux Or macOS
 
-Use this path for development from a fresh clone.
+Prerequisites: Git, Docker with **Linux containers**, and Docker Compose v2.
+Linux can use Docker Engine without a GUI; Windows/macOS can use Docker Desktop.
+Docker builds install the backend dependencies and local report assets; a host
+Python, Node.js or Rust toolchain is not needed just to run the server.
+
+For a **new installation**, clone the source. On Linux/macOS:
 
 ```bash
 git clone https://github.com/nascousa/cga.git
 cd cga
-cp .env.example .env
-docker compose --profile dev up --build
+test -f .env || cp .env.example .env
 ```
 
 Windows PowerShell equivalent:
 
 ```powershell
-Copy-Item .env.example .env
-docker compose --profile dev up --build
+git clone https://github.com/nascousa/cga.git
+Set-Location cga
+if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-Open:
+Before starting, edit `.env`:
 
-- Admin UI: `http://localhost:8001/admin`
-- MCP discovery: `http://localhost:8001/mcp`
-- FalkorDB Browser: `http://localhost:13000`
+- Replace `JWT_SECRET_KEY` with a cryptographically random secret of at least
+  **32 bytes**, and set a non-default `ADMIN_PASSWORD`. Example placeholders
+  are not usable security credentials.
+- Set `CGA_REPOS_MOUNT` to the host repository folder. Register its
+  **container-visible `/repos/...` path** in CGA, not the host's Windows/macOS path.
+- Keep API/database bindings on loopback. Configure TLS, firewall rules and
+  authentication before any remote exposure; see [security baselines](SECURITY.md).
 
-For the repository-root desktop stack, use:
+If CGA is already installed, use its existing Compose file and volumes instead
+of these fresh-install commands. Reuse a healthy instance; do not overwrite its
+configuration or create a second stack.
+
+Start the repository-root desktop-layout stack on Linux/macOS:
+
+```bash
+docker compose -f docker-compose.desktop.yml up -d --build
+```
+
+On Windows, the launcher also recognizes the existing recovered installation:
 
 ```powershell
-Copy-Item .env.example .env
-./src/scripts/start-desktop.ps1 start
+.\src\scripts\start-desktop.ps1 start
 ```
 
-That stack opens the Admin UI at `http://localhost:18001/admin`.
+Default endpoints for this stack:
+
+- Admin UI: `http://127.0.0.1:18001/admin`
+- MCP discovery: `http://127.0.0.1:18001/mcp`
+- FalkorDB Browser: `http://127.0.0.1:13001`
+
+**Existing installation:** reuse its Compose file, volumes and configured
+**18001** endpoint; do not start a parallel stack or change ports to evade a
+conflict. See [fixed local endpoint policy](docs/runtime-operations.md#fixed-local-endpoint).
+The separate contributor `dev` profile uses 8001/13000 by default; it is not
+a replacement or fallback port for this installation. See
+[dev profile operations](docs/runtime-operations.md#dev-compose-profile).
+
+### Relay On Linux And macOS
+
+Relay is optional for browser administration, but recommended for local
+repository scanning, ADC synchronization and agent stdio MCP. Choose a package
+matching the OS and CPU. If no trusted release exists, build a **development
+candidate** from source; see [build and test](src/cga-relay/README.md#build-test-and-release).
+
+From an extracted Unix Relay package:
+
+```sh
+# macOS: CLI only, no automatic background process
+sh scripts/install-unix.sh --mode cli --project-root "$HOME/my-project"
+# Linux desktop (requires GTK3 and an AppIndicator host)
+sh scripts/install-unix.sh --mode desktop --project-root "$HOME/my-project"
+# Either OS: optional headless user service
+sh scripts/install-unix.sh --mode headless --project-root "$HOME/my-project"
+```
+
+These are **alternatives**, not three services to start together. Installation
+is per-user without `sudo`; config is `~/.cga/relay.env`, binaries are under
+`~/.local/share/cga-relay/bin`, with a `~/.local/bin/cga-relay` symlink.
+Add `~/.local/bin` to `PATH` or invoke that full path.
+
+- Linux desktop needs Python3, PyGObject, GTK3 and Ayatana AppIndicator plus
+  a desktop indicator host. CLI/headless mode does not need those GUI packages.
+- Saved Linux account credentials require `secret-tool` (`libsecret-tools`)
+  and an unlocked Secret Service; macOS uses the login Keychain. There is no
+  plaintext fallback. Explicit `CGA_RELAY_CREDENTIAL_MODE=session` keeps
+  account tokens only in process memory and requires login again after restart.
+- Linux headless installation uses a systemd **user** service; macOS headless
+  installation uses an optional LaunchAgent. Without a service manager, install
+  CLI mode and run `~/.local/bin/cga-relay serve --config "$HOME/.cga/relay.env"`.
+- Relay currently accepts only **loopback HTTP** upstreams. Remote CGA requires
+  an independently configured, authenticated, certificate-verified local tunnel
+  or TLS proxy; direct remote HTTPS is not implemented by Relay.
+- Stop the current tray/service before starting another CLI or stdio-MCP
+  process under the same user. The gateway does not automatically watch or
+  synchronize every project.
+
+See the [Relay installation guide](src/cga-relay/README.md) for exact dependency
+packages, settings, service management, upgrade/uninstall and signing checks,
+and the [Relay reference](docs/cga-relay.md) for CLI and agent configuration.
 
 ## What You Get
 
@@ -130,7 +228,7 @@ Dashboard, Automation and Report entry points also depend on enabled plugins.
   rollback checks are required; the ordinary API receives no Docker socket.
 
 These features are implemented in source, **not deployed to the current local
-1.30.132 runtime**. Online installation additionally requires operator provisioning
+1.30.133 security/indexing overlay**. Online installation additionally requires operator provisioning
 and a newer signed release; it supports single-process JSON Docker Compose first,
 not Relay/native installers or automatic schema migrations. See
 [maintenance operations](docs/runtime-operations.md#audit-retention-change-logs-and-confirmed-updates)
@@ -205,6 +303,13 @@ draft artifacts are not approved API/Relay updates.
 - **Project Extensions:** project-scoped extension pages and runs, starting with Azure Policy Change Monitor for cloud parity, GUID/version consistency, risky-effect scans, and Docker Desktop `/repos` path mapping.
 - **Runtime Backup:** PostgreSQL and FalkorDB snapshots for local-first persistence and recovery.
 - **Safe Graph Updates:** isolated generation builds retain the last successful graph on failure, with versioned parse evidence and deterministic cross-file relationships. See [graph integrity and recovery](docs/graph-reliability.md).
+- **1.30.133 security/indexing fixes:** MCP SSE sessions bind to the verified
+  project and exact credential; another token cannot reuse a session. Python
+  nested scopes and positional/keyword/repeated argument flows are corrected.
+  Source index format 4 also corrects eager annotations and comprehension-local
+  shadowing; the deployed overlay remains on format 3. Older evidence is
+  reparsed on the next repository indexing job after installing the newer source;
+  deploying does not automatically rebuild existing project graphs.
 - **Upgrade Center:** admin-visible upgrade readiness, backup status, schema compatibility, relay guidance, and copyable upgrade commands.
 
 ## Supported Languages And Formats
@@ -289,6 +394,9 @@ Files and formats not listed above are not claimed as supported by the current r
 
 ## Screenshots
 
+Illustrative captures from earlier local builds; current navigation and
+source-only workspaces may differ.
+
 | Project Console | Work Dashboard |
 |---|---|
 | ![CGA project console with retrieval highlights and indexing status](docs/site/cga-ui-projects.png) | ![CGA work dashboard with cross-project activity briefing](docs/site/cga-ui-work-briefing.png) |
@@ -322,6 +430,8 @@ The run is intentionally reported with nuance: one project's HPS increased under
 ## Documentation
 
 - [Docker Desktop bundle](deploy/docker-desktop/README.md) - one-click local distribution and release zip behavior.
+- [Relay installation](src/cga-relay/README.md) - Windows/Linux/macOS modes, Unix packages, credential stores and signing requirements.
+- [Relay reference](docs/cga-relay.md) - CLI, stdio MCP, local synchronization and account configuration.
 - [Runtime operations](docs/runtime-operations.md) - work briefing, schedules, Azure Policy proxy operations, persistence, backup, and default local runtimes.
 - [AI-first readiness](docs/ai-first-readiness.md) - readiness snapshots and observe-only evidence packs for AI-first team planning.
 - [AI-first correlation contract](docs/ai-first-correlation-contract.md) - standard task, issue, PR, and activity ids for evidence packs and traces.

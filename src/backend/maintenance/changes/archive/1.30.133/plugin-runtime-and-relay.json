@@ -8,6 +8,12 @@
     "Changed": [
       "Automation, browser tasks, workflows, reports, notifications and evaluation retain their existing integration contracts behind optional-plugin host checks.",
       "Cross-platform Relay release workflows require their platform signing and notarization prerequisites; source candidates do not imply published platform releases."
+    ],
+    "Fixed": [
+      "Review fixes preserve ADC exemptions and CRLF snapshots, expose per-file collection review and include research-report conventions in generated templates.",
+      "Plugin selection survives leaner bundles; briefing holds execution leases and evaluation resumes pending Redis traces after restart.",
+      "Confirmed upgrades wait for audit cleanup and require request-specific drain receipts; reports stream bounded summary projections and reject oversized results.",
+      "Release publication rejects existing SDK tags, validates trusted workflow provenance and delays public image tag promotion until release gates pass."
     ]
   }
 }

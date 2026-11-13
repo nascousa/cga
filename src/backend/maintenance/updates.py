@@ -122,24 +122,39 @@ async def request_install(current_version: str, version: str, image: str, actor:
     with queue_lock(root):
         if pending():
             raise ValueError("An update is already queued or active.")
+        (root / "drain.json").unlink(missing_ok=True)
         atomic_json(root / "request.json", request)
     return {"status": "queued", "id": request["id"], "version": version}
 
 
 async def drain_loop(app) -> None:
     from backend.plugins.host import catalog_status
+    from backend.maintenance.retention import active_cleanups
 
     while True:
         try:
             if pending():
-                consumer = getattr(app.state, "consumer", None)
-                plugins = catalog_status()["items"]
-                idle = consumer is not None and consumer._idle.is_set()
-                idle = idle and not any(plugin["active_executions"] for plugin in plugins)
-                idle = idle and getattr(app.state, "maintenance_inflight", 0) == 0
-                atomic_json(state_directory() / "drain.json", {
-                    "ready": idle, "version": app.version, "heartbeat": time.time(),
-                })
+                root = state_directory()
+                with queue_lock(root):
+                    request_path = root / "active.json"
+                    if not request_path.exists():
+                        request_path = root / "request.json"
+                    if request_path.exists():
+                        request = json.loads(request_path.read_text(encoding="utf-8"))
+                        consumer = getattr(app.state, "consumer", None)
+                        plugins = catalog_status()["items"]
+                        idle = consumer is not None and consumer._idle.is_set()
+                        idle = idle and not any(plugin["active_executions"] for plugin in plugins)
+                        idle = idle and getattr(app.state, "maintenance_inflight", 0) == 0
+                        idle = idle and active_cleanups() == 0
+                        atomic_json(root / "drain.json", {
+                            "request_id": request["id"], "ready": idle,
+                            "version": app.version, "heartbeat": time.time(),
+                        })
+            elif os.getenv("CGA_UPDATE_STATE_DIR", "").strip():
+                with queue_lock(state_directory()):
+                    if not pending():
+                        (state_directory() / "drain.json").unlink(missing_ok=True)
         except Exception:
             log.exception("updates.drain_probe_failed")
         await asyncio.sleep(1)
@@ -154,4 +169,5 @@ def cancel_queued() -> dict:
         if not request.exists():
             raise ValueError("No queued update.")
         request.rename(root / f"cancelled-{uuid.uuid4().hex}.json")
+        (root / "drain.json").unlink(missing_ok=True)
     return {"status": "cancelled"}

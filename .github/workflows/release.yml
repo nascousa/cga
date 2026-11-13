@@ -148,16 +148,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and publish API image
+      - name: Build and stage API image by digest only
         id: api-image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: Dockerfile.prod
-          push: true
-          tags: |
-            ${{ env.API_IMAGE }}:${{ github.ref_name }}
-            ${{ env.API_IMAGE }}:latest
+          outputs: type=image,name=${{ env.API_IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Sign API update manifest and generate matching release notes
         shell: bash
@@ -207,3 +204,15 @@ jobs:
             .env.example
             SHA256SUMS.txt
             update-manifest.jwt
+
+      - name: Promote verified API digest to public tags
+        shell: bash
+        env:
+          API_DIGEST: ${{ steps.api-image.outputs.digest }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --prefer-index=false \
+            --tag "$API_IMAGE:$GITHUB_REF_NAME" \
+            --tag "$API_IMAGE:latest" \
+            "$API_IMAGE@$API_DIGEST"

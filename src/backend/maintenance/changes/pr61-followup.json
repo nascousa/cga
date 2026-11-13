@@ -1,0 +1,14 @@
+{
+  "summary": "Correct updater polling, template destinations and Python expression scope",
+  "changes": {
+    "Fixed": [
+      "Keep the host updater and heartbeat running across transient queue-lock contention without suppressing recovery errors.",
+      "Resolve relative ADC template destinations from the caller's PowerShell location rather than the process startup directory.",
+      "Attribute eager function parameter and return annotation calls to their defining scope while respecting postponed annotations.",
+      "Keep comprehension-local names from resolving to outside imports or creating false argument dependencies, without hiding legitimate enclosing calls."
+    ],
+    "Changed": [
+      "Advance parse evidence to format 4 so the next normal repository indexing job reparses older annotation and comprehension evidence atomically."
+    ]
+  }
+}

@@ -15,6 +15,8 @@ from backend.workbriefing.models import WorkActivity
 
 DEFAULT_DSN_ENV = "WORKBRIEFING_POSTGRES_DSN"
 DEFAULT_DSN = "postgresql://app:app@localhost:15432/appdb"
+REPORT_BYTE_LIMIT = 16 * 1024 * 1024
+REPORT_ROW_BYTE_LIMIT = 256 * 1024
 
 
 log = structlog.get_logger()
@@ -24,6 +26,10 @@ _ACTIVITY_COLUMNS = (
     "event_type, title, summary, body_text, status, priority, owner, source_url, tags, occurred_at, "
     "synced_at, content_hash, raw_metadata, embedding_text"
 )
+
+
+class ReportSizeError(ValueError):
+    pass
 
 
 @dataclass(frozen=True)
@@ -387,15 +393,43 @@ class PgVectorActivityStore:
                 params.append(value)
                 filters.append(expression.format(f"${len(params)}"))
         params.append(min(max(limit, 1), 10001))
+        learning = "(event_type = 'agent_learning' OR source_item_id LIKE 'learning:%')"
+        projection = (
+            "activity_id, '' AS plugin_id, '' AS source_system, '' AS source_type, "
+            "source_item_id, project_id, event_type, title, summary, status, occurred_at, synced_at, "
+            "'' AS content_hash, '' AS embedding_text, "
+            + ", ".join(
+                f"CASE WHEN {learning} THEN {column} ELSE {empty} END AS {column}"
+                for column, empty in (
+                    ("workspace_name", "NULL"), ("body_text", "''"),
+                    ("priority", "NULL"), ("owner", "NULL"), ("source_url", "NULL"),
+                    ("tags", "ARRAY[]::text[]"), ("raw_metadata", "'{}'::jsonb"),
+                )
+            )
+        )
+        sql = (
+            "SELECT octet_length(payload) AS report_bytes, "
+            f"CASE WHEN octet_length(payload) <= {REPORT_ROW_BYTE_LIMIT} THEN payload END AS payload "
+            f"FROM (SELECT row_to_json(projected)::text AS payload FROM (SELECT {projection} "
+            f"FROM {self._qualified('work_activities')} WHERE "
+            + " AND ".join(filters)
+            + f" ORDER BY occurred_at DESC, activity_id LIMIT ${len(params)}) projected) sized"
+        )
+        activities: list[WorkActivity] = []
+        total_bytes = 0
         async with pool.acquire() as conn:
             async with conn.transaction(readonly=True):
                 await conn.execute("SET LOCAL statement_timeout = '15s'")
-                rows = await conn.fetch(
-                    f"SELECT {_ACTIVITY_COLUMNS} FROM {self._qualified('work_activities')} WHERE "
-                    + " AND ".join(filters)
-                    + f" ORDER BY occurred_at DESC, activity_id LIMIT ${len(params)}", *params,
-                )
-        return [self._activity_from_row(row) for row in rows]
+                async for row in conn.cursor(sql, *params, prefetch=1):
+                    total_bytes += row["report_bytes"]
+                    if row["payload"] is None or total_bytes > REPORT_BYTE_LIMIT:
+                        log.warning("report.byte_limit_exceeded", bytes=total_bytes)
+                        raise ReportSizeError("Report data exceeds the byte limit. Narrow the report filters.")
+                    value = json.loads(row["payload"])
+                    for column in ("occurred_at", "synced_at"):
+                        value[column] = datetime.fromisoformat(value[column])
+                    activities.append(self._activity_from_row(value))
+        return activities
 
     async def count_recent(self, project_id: str | None = None) -> int:
         await self.ensure_schema()

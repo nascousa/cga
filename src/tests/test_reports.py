@@ -1,3 +1,5 @@
+import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -11,6 +13,7 @@ from backend.auth.dependencies import require_admin
 from backend.auth.database import get_db
 from backend.reports import ReportFilters, build_report
 from backend.workbriefing.service import WorkBriefingService
+from backend.workbriefing import store as activity_store
 
 
 def filters(**changes):
@@ -88,5 +91,108 @@ async def test_report_api_requires_admin_and_validated_filters(monkeypatch):
             monkeypatch.setattr(main_module, "_work_briefing_service", service)
             response = await client.post("/api/admin/reports/generate", json=body)
             assert response.status_code == 200 and response.json()["counts"]["events"] == 0
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
+async def test_report_projects_summaries_without_loading_unbounded_ingestion_fields(pg_activity_store, monkeypatch):
+    service = WorkBriefingService(store=pg_activity_store)
+    await service.record_activity({
+        "project_id": "P1", "occurred_at": "2026-11-02T00:00:00Z",
+        "event_type": "review", "title": "Small evidence", "summary": "Summary",
+        "body_text": "private body" * 100000,
+        "metadata": {"unused": "private metadata" * 100000},
+    })
+    rows = await pg_activity_store.report_rows(**filters().model_dump(), limit=2)
+    assert len(rows) == 1
+    assert rows[0].title == "Small evidence"
+    assert rows[0].body_text == rows[0].embedding_text == ""
+    assert rows[0].raw_metadata == {}
+    result = await build_report(service, filters())
+    assert result["counts"]["events"] == 1
+    with monkeypatch.context() as bounds:
+        bounds.setattr(activity_store, "REPORT_BYTE_LIMIT", 1)
+        with pytest.raises(activity_store.ReportSizeError, match="Narrow"):
+            await pg_activity_store.report_rows(**filters().model_dump(), limit=2)
+    await service.record_activity({
+        "project_id": "P1", "occurred_at": "2026-11-02T00:00:00Z",
+        "event_type": "review", "title": "x" * (activity_store.REPORT_ROW_BYTE_LIMIT + 1),
+    })
+    with pytest.raises(activity_store.ReportSizeError, match="Narrow"):
+        await pg_activity_store.report_rows(**filters().model_dump(), limit=2)
+
+
+@pytest.mark.asyncio
+async def test_report_preserves_learning_safety_validation_with_summary_projection(pg_activity_store):
+    service = WorkBriefingService(store=pg_activity_store)
+    recorded = await service.record_learning(
+        project_id="P1", title="Valid candidate", lesson="A bounded lesson",
+        category="environment_fact", outcome="neutral",
+    )
+    now = datetime.now(timezone.utc)
+    recent = ReportFilters(start=now.replace(year=now.year - 1), end=now)
+    rows, _ = await service.report_rows(**recent.model_dump(), limit=5)
+    assert [row.activity_id for row in rows] == [recorded.activity.activity_id]
+    pool = await pg_activity_store._get_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"UPDATE {pg_activity_store._qualified('work_activities')} SET body_text='invalid learning body'"
+        )
+    rows, _ = await service.report_rows(**recent.model_dump(), limit=5)
+    assert rows == [], "Projection must retain fields needed to reject malformed learning records"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("oversized_row", [False, True])
+async def test_report_stream_rejects_row_and_total_byte_overflow_without_fetch_all(monkeypatch, oversized_row):
+    store = activity_store.PgVectorActivityStore()
+    monkeypatch.setattr(store, "ensure_schema", AsyncMock())
+    monkeypatch.setattr(activity_store, "REPORT_BYTE_LIMIT", 20)
+    consumed = []
+
+    async def cursor(sql, *args, prefetch):
+        assert prefetch == 1
+        if oversized_row:
+            consumed.append(1)
+            yield {"report_bytes": activity_store.REPORT_ROW_BYTE_LIMIT + 1, "payload": None}
+        else:
+            for number in range(10):
+                consumed.append(number)
+                yield {"report_bytes": 12, "payload": json.dumps({
+                    "occurred_at": "2026-11-02T00:00:00+00:00",
+                    "synced_at": "2026-11-02T00:00:00+00:00",
+                })}
+
+    @asynccontextmanager
+    async def transaction(**kwargs):
+        yield
+
+    conn = SimpleNamespace(transaction=transaction, execute=AsyncMock(), cursor=cursor)
+
+    @asynccontextmanager
+    async def acquire():
+        yield conn
+
+    monkeypatch.setattr(store, "_get_pool", AsyncMock(return_value=SimpleNamespace(acquire=acquire)))
+    monkeypatch.setattr(store, "_activity_from_row", lambda row: row)
+    with pytest.raises(activity_store.ReportSizeError, match="Narrow"):
+        await store.report_rows(**filters().model_dump(), limit=10000)
+    assert len(consumed) == (1 if oversized_row else 2)
+
+
+@pytest.mark.asyncio
+async def test_report_api_surfaces_byte_limit_as_actionable_error(monkeypatch):
+    app = main_module.app
+    app.dependency_overrides[require_admin] = lambda: {"role": "admin"}
+    service = SimpleNamespace(report_rows=AsyncMock(side_effect=activity_store.ReportSizeError(
+        "Report data exceeds the byte limit. Narrow the report filters."
+    )))
+    monkeypatch.setattr(main_module, "_work_briefing_service", service)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post("/api/admin/reports/generate", json=filters().model_dump(mode="json"))
+        assert response.status_code == 413
+        assert "Narrow" in response.json()["detail"]
     finally:
         app.dependency_overrides.clear()
