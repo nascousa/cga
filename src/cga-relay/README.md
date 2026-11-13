@@ -130,6 +130,10 @@ fixtures authorize the compiled test Relay identity without changing production
 credential storage or requiring GUI consent. Policy and release CI share this
 wrapper. Installer path assertions compare resolved paths because macOS
 temporary directories may be reached through `/var` aliases.
+Credential HTTP fixtures explicitly switch accepted sockets to blocking mode
+before applying read deadlines: macOS can inherit a listener's nonblocking mode.
+A delayed-request regression checks this without skipping native session tests
+or changing production credential storage.
 
 macOS source builds require a Rust toolchain and the system C linker; packaging
 uses `codesign` and `ditto`, with `xcrun notarytool` for formal releases. There is
