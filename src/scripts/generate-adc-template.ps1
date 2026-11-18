@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $SourceDir = (Resolve-Path (Join-Path $PSScriptRoot '..\..\adc-template')).Path
-$Destination = [System.IO.Path]::GetFullPath($TargetDir)
+$Destination = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($TargetDir)
 
 # Generate from the maintained template, never a second embedded rule catalog.
 if (Test-Path -LiteralPath $Destination) {

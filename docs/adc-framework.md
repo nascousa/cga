@@ -223,7 +223,9 @@ bundles using the existing preview-first Relay workflow.
 To scaffold the maintained ADC template, run
 `.\src\scripts\generate-adc-template.ps1 -TargetDir <new-directory>`.
 It copies `adc-template` byte-for-byte, including the indexed research-report
-convention, and refuses an existing destination. It does not publish an ADC
+convention, and refuses an existing destination. Relative targets follow the
+caller's current PowerShell location, including after `Set-Location`, rather
+than the process startup directory. It does not publish an ADC
 release or update existing project bindings.
 
 Admin-only account endpoints:

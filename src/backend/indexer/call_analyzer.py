@@ -52,30 +52,65 @@ class RawCall:
     callee_qualifier: str | None = None
     arguments: list[CallArgument] | None = None
     result_var_qname: str | None = None
+    callee_is_shadowed: bool = False
 
 
-def walk_python_scope(node: ast.AST) -> Iterator[ast.AST]:
-    """Walk one scope, visiting definition-time expressions but not nested bodies."""
+def walk_python_scope_context(
+    node: ast.AST, *, evaluate_annotations: bool = True,
+    bound_names: frozenset[str] = frozenset(),
+) -> Iterator[tuple[ast.AST, frozenset[str]]]:
+    """Walk one named scope while tracking comprehension-local bindings."""
     roots: list[ast.AST] = (
         list(node.body) if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
         else [node]
     )
-    pending = list(reversed(roots))
+    pending = [(root, bound_names) for root in reversed(roots)]
     while pending:
-        current = pending.pop()
-        yield current
+        current, bound = pending.pop()
+        yield current, bound
+        if isinstance(current, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            local = bound | frozenset(
+                name.id for generator in current.generators
+                for name in ast.walk(generator.target) if isinstance(name, ast.Name)
+            )
+            children = []
+            for index, generator in enumerate(current.generators):
+                children.extend([
+                    (generator.iter, bound if index == 0 else local),
+                    (generator.target, local),
+                    *((condition, local) for condition in generator.ifs),
+                ])
+            values = [current.key, current.value] if isinstance(current, ast.DictComp) else [current.elt]
+            children.extend((value, local) for value in values)
+            pending.extend(reversed(children))
+            continue
         if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            children: list[ast.AST] = [
+            expressions: list[ast.AST] = [
                 *current.args.defaults,
                 *(default for default in current.args.kw_defaults if default is not None),
             ]
             if not isinstance(current, ast.Lambda):
-                children.extend(current.decorator_list)
+                expressions.extend(current.decorator_list)
+                if evaluate_annotations:
+                    arguments = [
+                        *current.args.posonlyargs, *current.args.args, *current.args.kwonlyargs,
+                        *([current.args.vararg] if current.args.vararg else []),
+                        *([current.args.kwarg] if current.args.kwarg else []),
+                    ]
+                    expressions.extend(argument.annotation for argument in arguments if argument.annotation is not None)
+                    if current.returns is not None:
+                        expressions.append(current.returns)
         elif isinstance(current, ast.ClassDef):
-            children = [*current.bases, *current.keywords, *current.decorator_list]
+            expressions = [*current.bases, *current.keywords, *current.decorator_list]
         else:
-            children = list(ast.iter_child_nodes(current))
-        pending.extend(reversed(children))
+            expressions = list(ast.iter_child_nodes(current))
+        pending.extend((child, bound) for child in reversed(expressions))
+
+
+def walk_python_scope(node: ast.AST, *, evaluate_annotations: bool = True) -> Iterator[ast.AST]:
+    """Walk definition-time expressions without entering nested named bodies."""
+    for child, _ in walk_python_scope_context(node, evaluate_annotations=evaluate_annotations):
+        yield child
 
 
 def python_parameters(args: ast.arguments) -> list[PythonParameter]:
@@ -108,6 +143,7 @@ class PythonScope:
     bound_names: set[str] = field(default_factory=set)
     global_names: set[str] = field(default_factory=set)
     nonlocal_names: set[str] = field(default_factory=set)
+    evaluate_annotations: bool = True
 
     @property
     def lexical_parent(self) -> PythonScope | None:
@@ -156,24 +192,23 @@ def python_scopes(tree: ast.AST, module_qname: str) -> list[PythonScope]:
     if not isinstance(tree, ast.Module):
         raise TypeError("Python scope extraction requires a module AST")
     scopes: list[PythonScope] = []
+    evaluate_annotations = not any(
+        isinstance(node, ast.ImportFrom) and node.module == "__future__"
+        and any(alias.name == "annotations" for alias in node.names)
+        for node in tree.body
+    )
 
     def collect(node: PythonScopeNode, qualified_name: str, parent: PythonScope | None) -> None:
-        scope = PythonScope(node, qualified_name, parent)
+        scope = PythonScope(node, qualified_name, parent, evaluate_annotations=evaluate_annotations)
         scopes.append(scope)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             scope.bound_names.update(parameter.name for parameter in python_parameters(node.args))
-        nodes = list(walk_python_scope(node))
-        comprehension_targets = {
-            child
-            for item in nodes if isinstance(item, ast.comprehension)
-            for child in ast.walk(item.target)
-        }
-        for item in nodes:
+        for item, bound in walk_python_scope_context(node, evaluate_annotations=evaluate_annotations):
             if isinstance(item, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
                 scope.bound_names.add(item.name)
                 collect(item, f"{qualified_name}.{item.name}", scope)
             elif isinstance(item, ast.Name) and isinstance(item.ctx, (ast.Store, ast.Del)):
-                if item not in comprehension_targets:
+                if item.id not in bound:
                     scope.bound_names.add(item.id)
             elif isinstance(item, ast.Import):
                 scope.bound_names.update(alias.asname or alias.name.split(".")[0] for alias in item.names)
@@ -217,24 +252,28 @@ class CallAnalyzer:
         out: list[RawCall],
         parent_map: dict[ast.AST, ast.AST],
     ) -> None:
-        for node in walk_python_scope(scope.node):
+        for node, bound in walk_python_scope_context(
+            scope.node, evaluate_annotations=scope.evaluate_annotations,
+        ):
             if not isinstance(node, ast.Call):
                 continue
             name = self._extract_call_name(node)
             if name:
                 result_name = self._extract_result_var_name(node, parent_map)
+                qualifier = ast.unparse(node.func)
                 out.append(
                     RawCall(
                         caller_qname=scope.qualified_name,
                         callee_name=name,
-                        arg_names=self._extract_arg_names(node),
+                        arg_names=self._extract_arg_names(node, bound),
                         result_var_name=result_name,
-                        callee_qualifier=ast.unparse(node.func),
-                        arguments=self._extract_arguments(node, scope),
+                        callee_qualifier=qualifier,
+                        arguments=self._extract_arguments(node, scope, bound),
                         result_var_qname=(
                             f"{scope.qualified_name}:__return__" if result_name == "__return__"
                             else scope.variable_qname(result_name) if result_name else None
                         ),
+                        callee_is_shadowed=qualifier.split(".", 1)[0] in bound,
                     )
                 )
 
@@ -246,21 +285,23 @@ class CallAnalyzer:
             return call.func.attr
         return None
     @staticmethod
-    def _extract_arg_names(call: ast.Call) -> list[str]:
+    def _extract_arg_names(call: ast.Call, bound_names: frozenset[str] = frozenset()) -> list[str]:
         names: list[str] = []
         for arg in list(call.args) + [kw.value for kw in call.keywords if kw.value is not None]:
-            for node in walk_python_scope(arg):
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            for node, bound in walk_python_scope_context(arg, bound_names=bound_names):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id not in bound:
                     names.append(node.id)
         return list(dict.fromkeys(names))
 
     @staticmethod
-    def _extract_arguments(call: ast.Call, scope: PythonScope) -> list[CallArgument]:
+    def _extract_arguments(
+        call: ast.Call, scope: PythonScope, bound_names: frozenset[str] = frozenset(),
+    ) -> list[CallArgument]:
         def dependencies(expression: ast.AST) -> list[str]:
             return sorted({
                 scope.variable_qname(node.id)
-                for node in walk_python_scope(expression)
-                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                for node, bound in walk_python_scope_context(expression, bound_names=bound_names)
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id not in bound
             })
 
         return [

@@ -2,6 +2,8 @@
 
 import ast
 
+import pytest
+
 from backend.indexer.call_analyzer import CallAnalyzer
 
 
@@ -107,3 +109,46 @@ def outer():
         ("mymod.outer", "prepare"),
         ("mymod.outer.inner", "deferred"),
     }
+
+
+@pytest.mark.parametrize("postponed", [False, True])
+@pytest.mark.parametrize("definition", ["def", "async def"])
+def test_definition_annotations_execute_in_parent_only_when_eager(postponed, definition):
+    future = "from __future__ import annotations\n" if postponed else ""
+    calls = _analyze(future + f"""
+def outer():
+    {definition} inner(pos: positional_type(), /, value: parameter_type(),
+                      *items: variadic_type(), flag: keyword_type() = prepare(),
+                      **options: options_type()) -> return_type():
+        deferred()
+    def quoted(value: "not_executed()"):
+        pass
+""")
+    expected = {
+        ("mymod.outer", "prepare"),
+        ("mymod.outer.inner", "deferred"),
+    }
+    if not postponed:
+        expected.update(("mymod.outer", name) for name in (
+            "positional_type", "parameter_type", "variadic_type",
+            "keyword_type", "options_type", "return_type",
+        ))
+    assert {(call.caller_qname, call.callee_name) for call in calls} == expected
+
+
+@pytest.mark.parametrize("expression", [
+    "[helper() for helper in items]",
+    "{helper() for helper in items}",
+    "{helper(): item for helper in items}",
+    "(helper() for helper in items)",
+])
+def test_comprehension_callees_keep_local_shadowing_without_hiding_outside_calls(expression):
+    calls = _analyze(f"""
+from wanted import helper
+def caller(items):
+    helper()
+    result = {expression}
+    helper()
+""")
+    assert [call.callee_name for call in calls] == ["helper", "helper", "helper"]
+    assert [call.callee_is_shadowed for call in calls] == [False, True, False]

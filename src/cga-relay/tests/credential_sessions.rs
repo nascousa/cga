@@ -10,6 +10,14 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const TOKEN: &str = "CREDENTIAL_TEST_PRIVATE_VALUE";
 
+fn configure_backend_stream(stream: &TcpStream) {
+    // macOS can inherit the listener's nonblocking mode on accepted sockets.
+    stream.set_nonblocking(false).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+}
+
 struct Fixture {
     root: PathBuf,
     stop: Arc<AtomicBool>,
@@ -38,9 +46,7 @@ impl Fixture {
                     thread::sleep(Duration::from_millis(5));
                     continue;
                 };
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(3)))
-                    .unwrap();
+                configure_backend_stream(&stream);
                 let mut bytes = Vec::new();
                 let mut buffer = [0; 4096];
                 loop {
@@ -181,6 +187,25 @@ impl Drop for Relay {
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
+}
+
+#[test]
+fn backend_fixture_reads_delayed_data_from_an_initially_nonblocking_socket() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut stream, _) = listener.accept().unwrap();
+    stream.set_nonblocking(true).unwrap();
+    configure_backend_stream(&stream);
+
+    let writer = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(50));
+        client.write_all(b"delayed request").unwrap();
+    });
+    let mut request = [0; 15];
+    let result = stream.read_exact(&mut request);
+    writer.join().unwrap();
+    result.unwrap();
+    assert_eq!(&request, b"delayed request");
 }
 
 #[test]

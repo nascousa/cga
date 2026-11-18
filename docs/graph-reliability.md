@@ -28,6 +28,12 @@ keeps nested definition bodies out of their parent's direct calls and local
 variable flows. Argument dependencies retain positional slots, keyword names
 and repeated inputs; unresolved `*args`/`**kwargs` expansion does not fabricate
 confident cross-function bindings.
+Format 4 additionally attributes eager parameter/return annotation calls to
+their defining scope while respecting `from __future__ import annotations`.
+Comprehension-local targets shadow outer imports only inside the comprehension;
+the first iterable is resolved in its enclosing scope. Calls and argument
+dependencies through unknown local targets remain unresolved instead of
+borrowing a same-named outer function or parameter.
 
 ## Existing graphs
 
@@ -37,7 +43,7 @@ incremental update loads legacy files from the authorized repository when that
 metadata is absent, rather than trusting a possibly incomplete content hash.
 A full rebuild from a valid, nonempty repository repairs historical missing
 relationships using the same atomic publication mechanism.
-Version 3 invalidates older cached parse evidence, including unchanged files,
+The current format 4 invalidates older cached parse evidence, including format 3 and unchanged files,
 when that repository next indexes. Deploying the code does not rewrite existing
 graphs or trigger a fleet-wide reindex. Upgrade selected repositories through
 their normal authorized indexing jobs after verifying backups; the old

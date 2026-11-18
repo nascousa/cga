@@ -442,3 +442,85 @@ def test_legacy_snapshot_is_readable_but_reparsed_even_without_changed_paths(tmp
     writes = [call.args[1] for call in stage.query.call_args_list if call.args[0] == S.SET_FILE_SNAPSHOT]
     assert writes[0]["version"] == INDEX_FORMAT_VERSION
     assert all(call.arguments is not None for call in FileSnapshot.deserialize(writes[0]["metadata"]).parsed.calls)
+
+
+@pytest.mark.parametrize("expression", [
+    "[helper(x) for helper in items]",
+    "{helper(x) for helper in items}",
+    "{helper(x): y for helper in items}",
+    "(helper(x) for helper in items)",
+])
+def test_comprehension_shadowing_does_not_create_argument_edges_to_outside_function(tmp_path, expression):
+    module, stage = _index_python_source(tmp_path, f"""\
+        def helper(value):
+            return value
+        def consume(value):
+            return value
+        def caller(items, x, y):
+            result = {expression}
+            consume([helper for helper in items])
+            return helper(y)
+    """)
+    assert _argument_edges(stage) == {
+        (f"{module}.caller:items", f"{module}.consume:value"),
+        (f"{module}.caller:y", f"{module}.helper:value"),
+    }
+
+
+def test_comprehension_local_arguments_do_not_alias_an_enclosing_parameter(tmp_path):
+    module, stage = _index_python_source(tmp_path, """\
+        def helper(value):
+            return value
+        def caller(items, value, outside):
+            result = [helper(value) for value in items]
+            return helper(outside)
+    """)
+    assert _argument_edges(stage) == {
+        (f"{module}.caller:outside", f"{module}.helper:value"),
+    }
+
+
+@pytest.mark.parametrize("postponed", [False, True])
+def test_annotation_calls_write_edges_in_the_defining_scope_only_when_eager(tmp_path, postponed):
+    future = "from __future__ import annotations\n" if postponed else ""
+    module, stage = _index_python_source(tmp_path, future + """\
+def prepare(value):
+    return value
+def outer(item):
+    def inner(value: prepare(item)) -> prepare(item):
+        return value
+    return inner(item)
+""")
+    edges = _argument_edges(stage)
+    annotation = (f"{module}.outer:item", f"{module}.prepare:value")
+    assert (annotation in edges) is not postponed
+    assert (f"{module}.outer:item", f"{module}.outer.inner:value") in edges
+    assert not any(source.startswith(f"{module}.outer.inner:") for source, _ in edges)
+
+
+def test_previous_format_reparses_unchanged_annotation_and_comprehension_evidence(tmp_path):
+    source = tmp_path / "service.py"
+    source.write_text(
+        "def helper(value=0):\n    return value\n"
+        "def caller(items):\n"
+        "    def inner(value: helper()):\n        pass\n"
+        "    return [helper() for helper in items]\n",
+        encoding="utf-8",
+    )
+    cached = parse_snapshot(str(source))
+    legacy = json.loads(cached.serialize())
+    legacy["parsed"]["calls"] = [
+        call for call in legacy["parsed"]["calls"] if call.pop("callee_is_shadowed")
+    ]
+    metadata = json.dumps(legacy)
+    live, stage = _graphs([[str(source), cached.content_hash, metadata, INDEX_FORMAT_VERSION - 1]])
+
+    stats = IndexPipeline(live).index_incremental(str(tmp_path), [])
+
+    assert stats["files"] == 1
+    written = next(
+        call.args[1] for call in stage.query.call_args_list if call.args[0] == S.SET_FILE_SNAPSHOT
+    )
+    refreshed = FileSnapshot.deserialize(written["metadata"])
+    assert [call.callee_is_shadowed for call in refreshed.parsed.calls] == [False, True]
+    assert _argument_edges(stage) == set()
