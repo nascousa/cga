@@ -112,7 +112,7 @@ async function adcCollectSnapshots() {
   const blocked = adcState.collections.filter(p => p.status === 'blocked').length;
   adcState.collectionStatus.textContent = `${saved} snapshots committed; ${failed} collection failures; ${blocked} projects blocked overall. Local files were not deleted.`;
   adcState.versionsStale = true;
-  if (adcState.projectSelect.value) await adcLoadProject();
+  if (adcState.projectSelect.value && !adcHasProjectDraft()) await adcLoadProject();
   if (blocked) throw new Error(`Collection is incomplete: ${blocked} projects remain blocked. See each project result.`);
   toast(`${saved} project rule snapshots collected into CGA.`);
 }
