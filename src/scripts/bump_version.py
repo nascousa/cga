@@ -76,6 +76,9 @@ def bump_version(root: Path) -> str:
             if count != 1:
                 raise ValueError("README.md: expected one release date")
         replacements[path] = text
+    from backend.maintenance.history import ChangeNote
+
+    ChangeNote.model_validate({key: pending[key] for key in ("summary", "changes")})
     pending.update(version=updated, date=date.today().isoformat())
     replacements[notes_root / "change-logs.json"] = json.dumps(
         [pending, *notes["releases"]], indent=2, ensure_ascii=True,
