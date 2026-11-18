@@ -1438,6 +1438,8 @@ mutex. There is **no TTL**, and PID/age never authorize deletion. Missing,
 legacy, corrupt or unreadable owner metadata produces an explicit diagnostic
 status while leaving the lock intact; raw metadata and credentials are not
 included in errors. This is diagnostic evidence, not proof of process liveness.
+JSON decoder recursion failures are treated as invalid metadata, so contention
+still follows the normal busy retry path without stopping the updater heartbeat.
 Normal owner release removes only its own metadata and directory; an ownership
 change prevents cleanup rather than deleting another owner's lock.
 

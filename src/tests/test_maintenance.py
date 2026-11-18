@@ -70,7 +70,10 @@ except QueueLockBusyError as error:
         pass
 
 
-@pytest.mark.parametrize("record", [None, "not-json-secret-sentinel", '{"pid":true}', "x" * 4097])
+@pytest.mark.parametrize("record", [
+    None, "not-json-secret-sentinel", '{"pid":true}', "x" * 4097,
+    pytest.param("[" * 2000 + "]" * 2000, id="deeply-nested"),
+])
 def test_queue_lock_legacy_or_invalid_owner_remains_locked(tmp_path, record):
     lock = tmp_path / "queue.lock"
     lock.mkdir()
@@ -86,6 +89,28 @@ def test_queue_lock_legacy_or_invalid_owner_remains_locked(tmp_path, record):
     assert "secret-sentinel" not in str(caught.value)
     assert lock.is_dir()
     assert {path.name: path.read_bytes() for path in lock.iterdir()} == before
+
+
+def test_queue_lock_decoder_recursion_remains_busy_without_removing_owner(tmp_path, monkeypatch):
+    lock = tmp_path / "queue.lock"
+    lock.mkdir()
+    path = lock / "owner.json"
+    original = ("[" * 1100 + "]" * 1100).encode()
+    path.write_bytes(original)
+
+    def decode_recursion(raw):
+        assert raw == original
+        raise RecursionError("private-error-sentinel")
+
+    monkeypatch.setattr(json, "loads", decode_recursion)
+    with pytest.raises(QueueLockBusyError) as caught:
+        with queue_lock(tmp_path):
+            pytest.fail("Decoder recursion must not bypass the lock")
+    assert caught.value.details["metadata_status"] == "unavailable"
+    assert caught.value.details["owner"] is None
+    assert caught.value.details["metadata_error"] == "Invalid owner metadata"
+    assert "private-error-sentinel" not in str(caught.value)
+    assert path.read_bytes() == original
 
 
 def test_queue_lock_reports_metadata_permission_error_without_leaking_or_removing_owner(tmp_path, monkeypatch):

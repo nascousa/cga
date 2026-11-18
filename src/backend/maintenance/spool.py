@@ -27,7 +27,10 @@ def _read_owner(path: Path) -> dict:
         raw = handle.read(4097)
     if len(raw) > 4096:
         raise ValueError("owner metadata exceeds 4096 bytes")
-    owner = json.loads(raw)
+    try:
+        owner = json.loads(raw)
+    except RecursionError as exc:
+        raise ValueError("owner metadata exceeds nesting limit") from exc
     if not isinstance(owner, dict):
         raise ValueError("owner metadata is not an object")
     if type(owner.get("pid")) is not int or owner["pid"] <= 0:
