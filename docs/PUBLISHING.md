@@ -120,6 +120,9 @@ For each product change, add or update a JSON fragment under
 
 Supported categories are Added, Changed, Fixed, Security, Removed, Deprecated
 and Breaking. Include nonempty entries only; do not invent older history.
+Fragment summaries are joined with `; ` when frozen. Keep the combined summary
+within 500 characters; an oversized summary aborts before any version or archive
+write. Shorten the fragment summaries and rerun instead of editing frozen history.
 Use the existing version increment once the iteration is complete:
 
 ```powershell

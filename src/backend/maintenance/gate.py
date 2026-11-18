@@ -1,7 +1,27 @@
+from contextlib import contextmanager
+
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from backend.maintenance.spool import pending
+
+_mcp_inflight = 0
+
+
+def active_mcp_invocations() -> int:
+    return _mcp_inflight
+
+
+@contextmanager
+def mcp_invocation():
+    global _mcp_inflight
+    if pending():
+        raise RuntimeError("Upgrade maintenance is draining writes. Retry after completion.")
+    _mcp_inflight += 1
+    try:
+        yield
+    finally:
+        _mcp_inflight -= 1
 
 
 class MaintenanceGate:

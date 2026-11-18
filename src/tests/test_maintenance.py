@@ -556,3 +556,68 @@ async def test_maintenance_gate_drains_complete_response_and_rejects_new_writes(
     release.set()
     await task
     assert state.maintenance_inflight == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
+async def test_drain_tracks_actual_core_mcp_invocations_and_rejects_late_dispatch(tmp_path, monkeypatch, outcome):
+    from backend.maintenance.gate import active_mcp_invocations
+    from backend.plugins import host
+    from backend.tools import server
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    monkeypatch.setenv("CGA_UPDATE_STATE_DIR", str(tmp_path))
+    monkeypatch.setattr(host, "catalog_status", lambda: {"items": []})
+    started, release = asyncio.Event(), asyncio.Event()
+
+    async def record_learning(**kwargs):
+        started.set()
+        await release.wait()
+        if outcome == "failure":
+            raise RuntimeError("Injected storage failure")
+        return SimpleNamespace(operation="created", activity=SimpleNamespace(to_dict=lambda: {"id": "learning"}))
+
+    service = SimpleNamespace(record_learning=AsyncMock(side_effect=record_learning))
+    monkeypatch.setattr(server, "_work_briefing_service", service)
+    idle = asyncio.Event()
+    idle.set()
+    app = SimpleNamespace(version="1.30.133", state=SimpleNamespace(
+        consumer=SimpleNamespace(_idle=idle), maintenance_inflight=0,
+    ))
+    arguments = dict(title="Test", lesson="Evidence", category="decision", outcome="neutral", project_id="CGA")
+    task = asyncio.create_task(server.mcp.call_tool("workassist_record_learning", arguments))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert active_mcp_invocations() == 1
+        atomic_json(tmp_path / "request.json", {"id": "current"})
+        with pytest.raises(RuntimeError, match="draining"):
+            await server.mcp.call_tool("workassist_record_learning", arguments)
+        assert service.record_learning.await_count == 1
+
+        async def end_iteration(_delay):
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(updates.asyncio, "sleep", end_iteration)
+        with pytest.raises(asyncio.CancelledError):
+            await updates.drain_loop(app)
+        assert not json.loads((tmp_path / "drain.json").read_text())["ready"]
+        if outcome == "cancel":
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        elif outcome == "failure":
+            release.set()
+            with pytest.raises(ToolError, match="Injected storage failure"):
+                await task
+        else:
+            release.set()
+            await task
+        assert active_mcp_invocations() == 0
+        with pytest.raises(asyncio.CancelledError):
+            await updates.drain_loop(app)
+        assert json.loads((tmp_path / "drain.json").read_text())["ready"]
+    finally:
+        release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

@@ -66,3 +66,27 @@ def test_invalid_metadata_is_rejected_before_writing(tmp_path: Path, broken_file
     with pytest.raises(ValueError):
         bump_version(tmp_path)
     assert {path: path.read_bytes() for path in before} == before
+
+
+def test_combined_summary_is_rejected_without_writes_and_can_be_shortened(tmp_path: Path) -> None:
+    from backend.maintenance.history import history
+
+    version_fixture(tmp_path)
+    notes_root = tmp_path / "src/backend/maintenance"
+    for name in ("test", "second"):
+        (notes_root / f"changes/{name}.json").write_text(json.dumps({
+            "summary": name[0] * 300, "changes": {"Fixed": [f"{name} behavior"]},
+        }))
+    before = {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError, match="Combined.*500.*shorten"):
+        bump_version(tmp_path)
+    assert {path: path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()} == before
+    assert not (notes_root / "changes/archive").exists()
+
+    (notes_root / "changes/second.json").write_text(json.dumps({
+        "summary": "Concise second change", "changes": {"Fixed": ["second behavior"]},
+    }))
+    assert bump_version(tmp_path) == "1.30.129"
+    release = history("1.30.129", notes_root)["releases"][0]
+    assert release["summary"] == "Concise second change; " + "t" * 300
+    assert release["changes"]["Fixed"] == ["second behavior", "test behavior"]

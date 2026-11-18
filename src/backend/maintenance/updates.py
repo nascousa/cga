@@ -130,6 +130,7 @@ async def request_install(current_version: str, version: str, image: str, actor:
 async def drain_loop(app) -> None:
     from backend.plugins.host import catalog_status
     from backend.maintenance.retention import active_cleanups
+    from backend.maintenance.gate import active_mcp_invocations
 
     while True:
         try:
@@ -146,6 +147,7 @@ async def drain_loop(app) -> None:
                         idle = consumer is not None and consumer._idle.is_set()
                         idle = idle and not any(plugin["active_executions"] for plugin in plugins)
                         idle = idle and getattr(app.state, "maintenance_inflight", 0) == 0
+                        idle = idle and active_mcp_invocations() == 0
                         idle = idle and active_cleanups() == 0
                         atomic_json(root / "drain.json", {
                             "request_id": request["id"], "ready": idle,

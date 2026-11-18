@@ -63,23 +63,32 @@ function adcUpdateCollectionButton() {
 }
 
 async function adcPreviewCollections() {
+  const state = adcState, token = _jwt;
+  const current = () => adcState === state && _jwt === token;
+  if (!state) return;
   if (adcState.collecting) throw new Error('Wait for collection to finish before previewing again.');
   adcState.collections = null;
   adcUpdateCollectionButton();
   adcState.collectionList.replaceChildren();
   adcState.collectionStatus.textContent = 'Scanning registered checkout rule snapshots...';
   try {
-    adcState.collections = await api('GET', '/adc/rules/preview');
+    const collections = await api('GET', '/adc/rules/preview');
+    if (!current()) return;
+    state.collections = collections;
     adcRenderCollections();
     const blocked = adcState.collections.filter(p => p.status === 'blocked').length;
     adcState.collectionStatus.textContent = `${adcState.collections.length} projects checked; ${blocked} blocked. Review and acknowledge every ready project: collection commits all ready snapshots, not only the selected project. Resolve exemptions explicitly in Amendments and preview again.`;
   } catch (error) {
+    if (!current()) return;
     adcState.collectionStatus.textContent = `Preview failed: ${error.message}`;
     throw error;
   }
 }
 
 async function adcCollectSnapshots() {
+  const state = adcState, token = _jwt;
+  const current = () => adcState === state && _jwt === token;
+  if (!state) return;
   if (!adcState.collections) throw new Error('Preview project rules first.');
   if (adcHasProjectDraft()) throw new Error('Save or discard staged or unstaged project changes before collecting rules.');
   const ready = adcState.collections.filter(p => p.status === 'ready');
@@ -92,15 +101,18 @@ async function adcCollectSnapshots() {
   adcState.collecting = true;
   adcUpdateCollectionButton();
   for (const item of ready) {
+    if (!current()) return;
     try {
       const result = await api('POST', `/adc/projects/${item.project_id}/rules/collect`, {
         release_id:item.release_id, expected_revision:item.expected_revision,
         snapshot_sha256:item.snapshot_sha256, reason:reason.trim(),
       });
+      if (!current()) return;
       item.status = 'managed';
       item.revision = result.revision;
       saved++;
     } catch (error) {
+      if (!current()) return;
       item.status = 'blocked';
       item.error = error.message;
       failed++;
@@ -112,7 +124,8 @@ async function adcCollectSnapshots() {
   const blocked = adcState.collections.filter(p => p.status === 'blocked').length;
   adcState.collectionStatus.textContent = `${saved} snapshots committed; ${failed} collection failures; ${blocked} projects blocked overall. Local files were not deleted.`;
   adcState.versionsStale = true;
-  if (adcState.projectSelect.value) await adcLoadProject();
+  if (adcState.projectSelect.value && !adcHasProjectDraft()) await adcLoadProject();
+  if (!current()) return;
   if (blocked) throw new Error(`Collection is incomplete: ${blocked} projects remain blocked. See each project result.`);
   toast(`${saved} project rule snapshots collected into CGA.`);
 }

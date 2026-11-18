@@ -47,13 +47,16 @@ def bump_version(root: Path) -> str:
     major, minor, patch = (int(part) for part in current.split("."))
     updated = f"{major}.{minor}.{patch + 1}"
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-    from backend.maintenance.history import history
+    from backend.maintenance.history import ChangeNote, history
 
     notes_root = root / "src/backend/maintenance"
     notes = history(current, notes_root)
     pending = notes["unreleased"]
     if not pending["changes"]:
         raise ValueError("Add a user-facing Change Logs fragment before incrementing a product iteration.")
+    if len(pending["summary"]) > 500:
+        raise ValueError("Combined Change Logs summary exceeds 500 characters; shorten the fragment summaries before bumping.")
+    ChangeNote.model_validate({key: pending[key] for key in ("summary", "changes")})
     if any(item["version"] == updated for item in notes["releases"]):
         raise ValueError("The target Change Logs version already exists; published history cannot be overwritten.")
     replacements = {}
