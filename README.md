@@ -15,7 +15,8 @@ v1.30.125 remains an unpublished draft. See
 for verified checks and the remaining approval/signing requirements.
 
 The local `http://127.0.0.1:18001/admin` installation was verified on
-2026-11-12 with a **1.30.133 [security/indexing overlay](docs/runtime-operations.md#verified-local-security-and-indexing-update-2026-11-12)**. It preserves the
+2026-11-18 with a **1.30.135 [lock-diagnostics overlay](docs/runtime-operations.md#verified-local-lock-diagnostics-update-2026-11-18)** retaining the installed indexing repair.
+It preserves the
 previous UI and does **not** deploy every feature in this source tree:
 unified Report and the new maintenance controls remain source-only there.
 Source version, installed runtime, CI candidate and signed public release are
@@ -228,7 +229,7 @@ Dashboard, Automation and Report entry points also depend on enabled plugins.
   rollback checks are required; the ordinary API receives no Docker socket.
 
 These features are implemented in source, **not deployed to the current local
-1.30.133 security/indexing overlay**. Online installation additionally requires operator provisioning
+1.30.135 scoped local overlay**. Online installation additionally requires operator provisioning
 and a newer signed release; it supports single-process JSON Docker Compose first,
 not Relay/native installers or automatic schema migrations. See
 [maintenance operations](docs/runtime-operations.md#audit-retention-change-logs-and-confirmed-updates)
