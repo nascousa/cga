@@ -142,12 +142,12 @@ function adcDisclosure(parent, title) {
 
 async function adcAction(action) {
   if (!adcState || adcState.busy) return;
-  const state = adcState;
+  const state = adcState, token = _jwt;
   state.busy = true;
   state.error.textContent = '';
   try { await action(); }
   catch (error) {
-    if (adcState === state) {
+    if (adcState === state && _jwt === token) {
       state.error.textContent = error.message;
       toast(error.message, 'error');
     }
@@ -538,6 +538,8 @@ function adcSelectChange() {
 }
 
 async function adcLoadProject() {
+  const manager = adcState, token = _jwt;
+  if (!manager) return;
   adcState.versionsStale = true;
   adcState.projectDirty=false;
   adcState.current=null;
@@ -551,12 +553,14 @@ async function adcLoadProject() {
   if (!adcState.projectSelect.value) { adcState.summary.textContent='Choose a project.'; return; }
   const id=Number(adcState.projectSelect.value);
   const state=await api('GET', `/adc/projects/${id}`);
+  if (adcState !== manager || _jwt !== token) return;
   adcState.current=state;
   adcState.changes=state.changes;
   adcState.summary.textContent=state.release?`ADC ${state.release.version} / revision ${state.revision}`:'No baseline adopted.';
   adcState.targetRelease.value=state.release?.id||adcState.releases[0]?.id||'';
   adcRenderChanges();
   const history=await api('GET', `/adc/projects/${id}/history`);
+  if (adcState !== manager || _jwt !== token) return;
   adcElement('h4','Immutable project history',adcState.history);
   for (const entry of history) {
     const row=adcElement('div',undefined,adcState.history);

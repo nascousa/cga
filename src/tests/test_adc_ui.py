@@ -33,7 +33,7 @@ def test_adc_collection_browser_review_and_acknowledgments():
         if path == "/admin":
             route.fulfill(content_type="text/html", body="""<!doctype html>
                 <html><body><main id="adc-manager"></main><script>
-                const _me={role:'admin'}; const toast=()=>{};
+                const _me={role:'admin'}, _jwt='test-only'; const toast=()=>{};
                 async function api(method,path,body) {
                   const response=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json'},
                     body:body?JSON.stringify(body):undefined});
@@ -159,7 +159,7 @@ const window = {echarts:{init:()=>chart},innerHeight:900,listeners:{},addEventLi
 const ResizeObserver = class {observe(){} disconnect(){disconnected++;}};
 const MutationObserver = class {observe(){} disconnect(){disconnected++;}};
 const getComputedStyle=()=>({getPropertyValue:name=>name==='--text'?'#ddd':'#111'});
-const _me={role:'admin'}, _jwt='test-only';
+const _me={role:'admin'}; let _jwt='test-only';
 const toast=()=>{}; let confirm=()=>true; const prompt=()=> 'Reviewed centralized rules';
 const release={id:1,version:'1.0.0',major:1,minor:0,patch:0,documents:{'.adc/index.md':'Master'},
   source:'test',actor:'admin',created_at:'now',reason:'initial',sha256:'hash'};
@@ -390,6 +390,26 @@ let api=async(method,path)=>{
   assert.deepEqual(committed,['/adc/projects/7/rules/collect','/adc/projects/8/rules/collect']);
   assert.equal(adcState.collections.every(p=>p.status==='managed'),true);
   assert.equal(adcState.collectionPreviewButton.disabled,false);
+  let finishReload, reloadCalls=0;
+  adcState.projectSelect.value='7';
+  api=async()=>{
+    reloadCalls++;
+    return await new Promise(resolve=>{finishReload=resolve;});
+  };
+  const reloading=adcLoadProject();
+  _jwt='replacement-session';
+  finishReload({changes:[],release:{id:1}});
+  await reloading;
+  assert.equal(reloadCalls,1);
+  assert.equal(adcState.current,null);
+  let rejectOldAction;
+  const oldAction=adcAction(()=>new Promise((resolve,reject)=>{rejectOldAction=reject;}));
+  _jwt='another-session';
+  rejectOldAction(new Error('Stale reload error'));
+  await oldAction;
+  assert.equal(adcState.error.textContent,'');
+  _jwt='test-only';
+  adcState.projectSelect.value='';
   api=async()=>{throw new Error('Forbidden');};
   await assert.rejects(adcRefreshVersions,/Forbidden/);
   assert.equal(adcState.versionData,null);
@@ -408,4 +428,57 @@ let api=async(method,path)=>{
                        for file in ("adc-versions.js", "adc-collection.js", "adc.js"))
     result = subprocess.run([node], input=setup + source + assertions,
                             capture_output=True, text=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize("operation", ["preview", "collect"])
+@pytest.mark.parametrize("completion", ["success", "failure"])
+@pytest.mark.parametrize("session_change", ["logout", "replacement", "token"])
+def test_collection_discards_stale_session_continuations(operation, completion, session_change):
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is needed to execute frontend JavaScript")
+    source = (Path(__file__).resolve().parents[1] / "frontend/adc-collection.js").read_text(encoding="utf-8")
+    setup = r"""
+const assert = require('node:assert/strict');
+let _jwt='original', renders=0, notifications=0, loads=0, complete;
+const calls=[];
+const makeState=()=>({
+  collections:[7,8].map(project_id=>({project_id,status:'ready',reviewed:true})),
+  collectionList:{replaceChildren(){}},collectionStatus:{textContent:'Original'},
+  projectSelect:{value:''}
+});
+let adcState=makeState();
+const api=async(method,path)=>{
+  calls.push({method,path,token:_jwt});
+  return await new Promise((resolve,reject)=>{complete={resolve,reject};});
+};
+const confirm=()=>true, prompt=()=> 'Reviewed', adcHasProjectDraft=()=>false;
+const toast=()=>{notifications++;}, adcLoadProject=async()=>{loads++;};
+"""
+    assertions = r"""
+adcUpdateCollectionButton=()=>{};
+adcRenderCollections=()=>{renders++;};
+(async()=>{
+  const original=adcState;
+  const running=OPERATION==='preview'?adcPreviewCollections():adcCollectSnapshots();
+  assert.equal(calls.length,1);
+  const before=JSON.stringify(original);
+  if(SESSION_CHANGE==='logout') {adcState=null;_jwt='';}
+  if(SESSION_CHANGE==='replacement') {adcState=makeState();_jwt='replacement';}
+  if(SESSION_CHANGE==='token') _jwt='replacement';
+  const currentBefore=JSON.stringify(adcState);
+  if(COMPLETION==='success') complete.resolve(OPERATION==='preview'?[]:{revision:3});
+  else complete.reject(new Error('Old session request failed'));
+  await running;
+  assert.equal(calls.length,1,'Must not submit the next project under a replacement session');
+  assert.equal(calls[0].token,'original');
+  assert.equal(JSON.stringify(original),before);
+  assert.equal(JSON.stringify(adcState),currentBefore);
+  assert.deepEqual([renders,notifications,loads],[0,0,0]);
+})().catch(error=>{console.error(error);process.exitCode=1;});
+"""
+    for name, value in (("OPERATION", operation), ("COMPLETION", completion), ("SESSION_CHANGE", session_change)):
+        assertions = assertions.replace(name, repr(value))
+    result = subprocess.run([node], input=setup + source + assertions, capture_output=True, text=True, timeout=10)
     assert result.returncode == 0, result.stderr

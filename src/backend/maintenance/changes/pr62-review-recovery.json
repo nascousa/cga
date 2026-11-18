@@ -1,0 +1,11 @@
+{
+  "summary": "Keep trace recovery, maintenance drain and rule collection safe across failed entries and session changes.",
+  "changes": {
+    "Fixed": [
+      "Alternate pending trace recovery with new batches and quarantine repeatedly failing entries after three attempts without hiding acknowledgement failures.",
+      "Wait for individual core and plugin MCP tool invocations before upgrade drain readiness and reject new dispatch during maintenance.",
+      "Stop rule preview, collection and follow-up project reload continuations when the originating manager or login token changes.",
+      "Reject oversized combined release summaries before changing version metadata or archiving fragments, with actionable correction guidance."
+    ]
+  }
+}

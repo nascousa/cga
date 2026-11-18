@@ -9,7 +9,7 @@ import shutil
 import subprocess
 import sys
 from dataclasses import replace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -417,7 +417,7 @@ async def test_evaluator_resumes_claimed_batch_after_plugin_is_disabled(plugin_c
     evaluator._client = AsyncMock()
     evaluator._client.xreadgroup.side_effect = read
     monkeypatch.setattr("backend.eval.trace_eval.asyncio.sleep", resume)
-    monkeypatch.setattr(evaluator, "_evaluate_trace", evaluate)
+    monkeypatch.setattr(evaluator, "_process_trace", evaluate)
     await asyncio.wait_for(evaluator._loop(), timeout=1)
     assert processed == ["1", "2"]
     evaluator._client.xreadgroup.assert_awaited_once()
@@ -448,12 +448,93 @@ async def test_evaluator_recovers_paused_pending_entries_after_restart_before_ne
             evaluator._running = False
 
     monkeypatch.setattr("backend.eval.trace_eval.asyncio.sleep", resume)
-    monkeypatch.setattr(evaluator, "_evaluate_trace", evaluate)
+    monkeypatch.setattr(evaluator, "_process_trace", evaluate)
     await asyncio.wait_for(evaluator._loop(), timeout=1)
     assert processed == ["old-1", "old-2", "new-1"]
     assert [
         call.args[2][_TRACE_STREAM] for call in evaluator._client.xreadgroup.await_args_list
-    ] == ["0", "0", ">"]
+    ] == ["0", ">", "old-2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["malformed", "ack", "quarantine"])
+async def test_evaluator_poison_pending_does_not_block_new_traces(plugin_config, monkeypatch, failure):
+    import redis.asyncio as redis
+    from backend.eval import trace_eval
+
+    select("evaluation")
+    monkeypatch.setattr(trace_eval, "_BATCH", 1)
+    evaluator = trace_eval.TraceEvaluator("redis://unused", None)
+    evaluator._running = True
+    poison = {"payload": "{"} if failure != "ack" else {"payload": '{"tool":"other"}'}
+    pending = {"1-0": poison, "2-0": {"payload": '{"tool":"other"}'}}
+    attempts, reads, acknowledged, quarantined = {}, [], [], []
+    fresh = [("3-0", {"payload": '{"tool":"other"}'})]
+    client = AsyncMock()
+    pipe = MagicMock()
+    pipe.__aenter__ = AsyncMock(return_value=pipe)
+    pipe.__aexit__ = AsyncMock(return_value=False)
+    client.pipeline = MagicMock(return_value=pipe)
+
+    async def read(_group, _consumer, streams, **kwargs):
+        cursor = streams[trace_eval._TRACE_STREAM]
+        reads.append(cursor)
+        assert len(reads) < 30, "Pending recovery never reached quarantine"
+        if not pending and not fresh:
+            evaluator._running = False
+            return []
+        if cursor == ">":
+            entries = fresh[:]
+            fresh.clear()
+            pending.update(entries)
+        else:
+            entries = [(key, data) for key, data in sorted(pending.items()) if key > cursor][:1]
+        return [(trace_eval._TRACE_STREAM, entries)] if entries else []
+
+    async def increment(_key, message_id, _amount):
+        attempts[message_id] = attempts.get(message_id, 0) + 1
+        return attempts[message_id]
+
+    async def clear(_key, message_id):
+        attempts.pop(message_id, None)
+
+    async def ack(_stream, _group, message_id):
+        if message_id == "1-0":
+            raise redis.ConnectionError("Injected acknowledgement failure")
+        acknowledged.append(message_id)
+        pending.pop(message_id)
+        return 1
+
+    async def commit_quarantine():
+        if failure == "quarantine" and pipe.execute.await_count == 1:
+            raise redis.ConnectionError("Injected unavailable quarantine")
+        assert "3-0" in acknowledged, "New entries were starved by pending recovery"
+        record = pipe.xadd.call_args.args[1]
+        assert int(record["attempts"]) >= 3
+        quarantined.append(record)
+        pending.pop("1-0")
+        attempts.pop("1-0")
+
+    async def no_wait(_delay):
+        pass
+
+    client.xreadgroup.side_effect = read
+    client.hincrby.side_effect = increment
+    client.hdel.side_effect = clear
+    client.xack.side_effect = ack
+    pipe.execute = AsyncMock(side_effect=commit_quarantine)
+    evaluator._client = client
+    monkeypatch.setattr(trace_eval.asyncio, "sleep", no_wait)
+    await asyncio.wait_for(evaluator._loop(), timeout=1)
+    assert reads[:2] == ["0", ">"]
+    assert "1-0" in reads
+    assert sorted(acknowledged) == ["2-0", "3-0"]
+    assert len(quarantined) == 1
+    assert json.loads(quarantined[0]["data"]) == poison
+    assert not attempts
+    client.pipeline.assert_called_with(transaction=True)
+    pipe.xack.assert_called_with(trace_eval._TRACE_STREAM, trace_eval._TRACE_GROUP, "1-0")
+    assert client.xack.await_count == (5 if failure == "ack" else 2)
 
 
 @pytest.mark.parametrize("plugins", ["", *CATALOG])

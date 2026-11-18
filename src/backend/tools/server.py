@@ -27,7 +27,7 @@ from copy import deepcopy
 import os
 import time
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import structlog
 from fastapi import HTTPException
@@ -58,6 +58,7 @@ from backend.graph.query_policy import (
     select_query_tool,
 )
 from backend.indexer.paths import RepositoryPathError, resolve_changed_path
+from backend.maintenance.gate import mcp_invocation
 from backend.plugins.host import execution, is_enabled, require_enabled
 from backend.tools.producer import MCPProducer
 from backend.queue.streams import JobConsumer
@@ -70,6 +71,10 @@ def _csv_env(name: str) -> list[str]:
 
 
 class PluginAwareMCP(FastMCP):
+    async def call_tool(self, name: str, arguments: dict[str, Any]):
+        with mcp_invocation():
+            return await super().call_tool(name, arguments)
+
     async def list_tools(self):
         plugin_tools = {
             "run_eval": "evaluation",

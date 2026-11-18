@@ -82,7 +82,12 @@ selection API, selective Docker builds and adapter-specific scheduling APIs.
 - Enabling evaluation after starting with it disabled requires an API restart
   to start background trace recording/evaluation. Direct benchmarks are usable
   immediately; disabling pauses an already-started worker. On restart, the
-  evaluator recovers its Redis consumer's pending traces before reading new ones.
+  evaluator alternates cursor-based pending recovery with new trace batches.
+  Failed evaluations or acknowledgements have three durable attempts before
+  atomic quarantine and acknowledgement. Quarantine retains the original entry
+  and error type in `contextgraph:traces:quarantine` (at most 1,000 entries);
+  payloads are not written to logs. Redis/quarantine outages defer entries for
+  later recovery without blocking healthy new traces.
 - A leaner image pauses saved selections for omitted plugins without preventing
   startup. Their selection and settings remain persisted and resume when a
   distribution containing them returns. The catalog exposes these IDs under
@@ -1314,6 +1319,8 @@ The first implementation supports **one API process and an existing JSON
 Docker Compose installation**. It does not update Relay/native installers,
 support multi-replica orchestration or perform database/schema migrations.
 An older formal release is never offered as an upgrade for a newer local build.
+Drain readiness includes individual MCP invocations, including core writes on
+existing SSE connections; new tool dispatch is rejected while draining.
 Checks occur every ten minutes; failures are explicit, not treated as
 "up to date". Version-pinned installations cannot install automatically.
 

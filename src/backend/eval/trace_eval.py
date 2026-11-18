@@ -37,6 +37,9 @@ _TRACE_STREAM = "contextgraph:traces"
 _TRACE_GROUP = "eval-group"
 _BATCH = 20
 _BLOCK_MS = 2000
+_TRACE_ATTEMPTS = f"{_TRACE_STREAM}:attempts"
+_TRACE_QUARANTINE = f"{_TRACE_STREAM}:quarantine"
+_MAX_ATTEMPTS = 3
 
 
 @dataclass
@@ -117,6 +120,7 @@ class TraceEvaluator:
     async def _loop(self) -> None:
         pending: list[tuple[str, dict]] = []
         recovering = True
+        recovery_cursor = "0"
         while self._running:
             if not is_enabled("evaluation") or not tracing_enabled():
                 await asyncio.sleep(2)
@@ -126,20 +130,24 @@ class TraceEvaluator:
                     messages = await self._client.xreadgroup(
                         _TRACE_GROUP,
                         "eval-worker-0",
-                        {_TRACE_STREAM: "0" if recovering else ">"},
+                        {_TRACE_STREAM: recovery_cursor if recovering else ">"},
                         count=_BATCH,
                         block=_BLOCK_MS,
                     )
                     pending = [entry for _stream, entries in messages for entry in entries]
-                    if recovering and not pending:
-                        recovering = False
-                        continue
+                    if recovering:
+                        recovery_cursor = pending[-1][0] if pending else "0"
+                    recovering = not recovering
                 while pending:
                     if not tracing_enabled():
                         break
                     msg_id, data = pending[0]
                     with execution("evaluation"):
-                        await self._evaluate_trace(msg_id, data)
+                        try:
+                            await self._process_trace(msg_id, data)
+                        except aioredis.RedisError as exc:
+                            log.warning("trace_eval.entry_deferred", msg_id=msg_id, error_type=type(exc).__name__)
+                            await asyncio.sleep(2)
                     pending.pop(0)
             except PluginUnavailableError:
                 log.info("trace_eval.paused")
@@ -150,39 +158,56 @@ class TraceEvaluator:
                 log.error("trace_eval.unexpected", error=str(exc))
                 await asyncio.sleep(2)
 
-    async def _evaluate_trace(self, msg_id: str, data: dict) -> None:
+    async def _process_trace(self, msg_id: str, data: dict) -> None:
+        attempt = await self._client.hincrby(_TRACE_ATTEMPTS, msg_id, 1)
         try:
-            payload = json.loads(data.get("payload", "{}"))
-            tool = payload.get("tool", "")
-            results = payload.get("results", [])
-            latency_ms = payload.get("latency_ms", 0.0)
-
-            if tool not in {"find_symbol", "find_callers", "find_callees", "retrieve_context"}:
-                await self._ack(msg_id)
-                return
-
-            # Check each result for existence in graph
-            non_existent = 0
-            total = 0
-            for item in results:
-                qname = item if isinstance(item, str) else (item.get("qualified_name") if isinstance(item, dict) else None)
-                if qname:
-                    total += 1
-                    if not await self._symbol_exists(qname):
-                        non_existent += 1
-
-            score = non_existent / total if total else 0.0
-            log.info(
-                "trace_eval.score",
-                tool=tool,
-                hallucination_proxy=round(score, 4),
-                total_results=total,
-                non_existent=non_existent,
-                latency_ms=round(latency_ms, 2),
-            )
-            await self._ack(msg_id)
+            if attempt > _MAX_ATTEMPTS:
+                raise ValueError("Trace retry limit reached")
+            await self._evaluate_trace(msg_id, data)
         except Exception as exc:
-            log.error("trace_eval.eval_error", msg_id=msg_id, error=str(exc))
+            log.error("trace_eval.eval_error", msg_id=msg_id, attempt=attempt, error_type=type(exc).__name__)
+            if attempt >= _MAX_ATTEMPTS:
+                async with self._client.pipeline(transaction=True) as pipe:
+                    pipe.xadd(_TRACE_QUARANTINE, {
+                        "message_id": msg_id, "data": json.dumps(data),
+                        "attempts": str(attempt), "error_type": type(exc).__name__,
+                    }, maxlen=1000, approximate=False)
+                    pipe.xack(_TRACE_STREAM, _TRACE_GROUP, msg_id)
+                    pipe.hdel(_TRACE_ATTEMPTS, msg_id)
+                    await pipe.execute()
+                log.warning("trace_eval.quarantined", msg_id=msg_id, attempt=attempt)
+        else:
+            await self._client.hdel(_TRACE_ATTEMPTS, msg_id)
+
+    async def _evaluate_trace(self, msg_id: str, data: dict) -> None:
+        payload = json.loads(data.get("payload", "{}"))
+        tool = payload.get("tool", "")
+        results = payload.get("results", [])
+        latency_ms = payload.get("latency_ms", 0.0)
+
+        if tool not in {"find_symbol", "find_callers", "find_callees", "retrieve_context"}:
+            await self._ack(msg_id)
+            return
+
+        non_existent = 0
+        total = 0
+        for item in results:
+            qname = item if isinstance(item, str) else (item.get("qualified_name") if isinstance(item, dict) else None)
+            if qname:
+                total += 1
+                if not await self._symbol_exists(qname):
+                    non_existent += 1
+
+        score = non_existent / total if total else 0.0
+        log.info(
+            "trace_eval.score",
+            tool=tool,
+            hallucination_proxy=round(score, 4),
+            total_results=total,
+            non_existent=non_existent,
+            latency_ms=round(latency_ms, 2),
+        )
+        await self._ack(msg_id)
 
     async def _symbol_exists(self, qualified_name: str) -> bool:
         try:
@@ -196,10 +221,7 @@ class TraceEvaluator:
             return True  # optimistic: don't penalise on graph errors
 
     async def _ack(self, msg_id: str) -> None:
-        try:
-            await self._client.xack(_TRACE_STREAM, _TRACE_GROUP, msg_id)
-        except Exception:
-            pass
+        await self._client.xack(_TRACE_STREAM, _TRACE_GROUP, msg_id)
 
     async def _ensure_group(self) -> None:
         try:
