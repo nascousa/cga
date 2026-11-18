@@ -385,7 +385,21 @@ mod platform {
 #[cfg(test)]
 mod tests {
     use super::{platform, INSTANCE_NAME};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    fn reacquire(name: &str) -> platform::Guard {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            if let Some(guard) = platform::try_acquire(name)
+                .expect("mutex reacquisition should not fail")
+            {
+                return guard;
+            }
+            // A concurrent fork can retain a close-on-exec descriptor until exec.
+            assert!(Instant::now() < deadline, "released mutex remained busy: {name}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     #[test]
     fn rejects_second_guard_until_first_guard_is_dropped() {
@@ -431,9 +445,7 @@ mod tests {
         }
 
         drop(first);
-        assert!(platform::try_acquire(&name)
-            .expect("mutex reacquisition should not fail")
-            .is_some());
+        drop(reacquire(&name));
     }
 
     #[cfg(unix)]
@@ -462,7 +474,7 @@ mod tests {
             assert_eq!(std::fs::read_to_string(&path).unwrap(), data);
         }
         drop(first);
-        let next = platform::try_acquire(&name).unwrap().unwrap();
+        let next = reacquire(&name);
         let details = crate::json::parse(&platform::contention_details(&name)).unwrap();
         assert_ne!(details.get("owner").unwrap(), &crate::json::Value::Null);
         drop(next);
