@@ -20,6 +20,46 @@ or unrelated services. If ownership or permissions are unclear, report the
 blocker instead of changing ports; verify the original URL and health afterward.
 See the [ADC 1.2.4 policy](adc-framework.md#fixed-project-ports-and-conflict-cleanup).
 
+### Verified Local Lock Diagnostics Update (2026-11-18)
+
+- API image: `cga-local:1.30.135-lock-diagnostics-c3310d01`, ID
+  `sha256:40fdbd3607cb09793a3e6a222db9b7a082566a2d463cff5b76de578c842dec92`.
+  The existing health endpoint reports `ok`, version `1.30.135`; `/admin`
+  returns HTTP 200 on the original port **18001**.
+- This is a scoped overlay on the installed `1.30.134` indexing repair, not a
+  full-main deployment. Only queue-lock diagnostics, the serving version and
+  scoped local change logs changed. All **37** checked indexer/queue/graph/auth
+  and entrypoint files retained their hashes. Maintenance APIs and the host
+  updater remain unprovisioned/source-only; no new trust was bootstrapped.
+- A handoff-triggered index job was allowed to finish before cutover. Two fresh
+  idle checks found no active index jobs, database dumps, graph writers or
+  near-due schedules. API shutdown used unlimited graceful drain, not a forced
+  stop. Cutover plus verification took **13.093 s**, not a measured outage SLO.
+- All **27 graphs**, project/ADC/frontend inventories and **23 other running
+  containers** retained their checked state. Ports, mounts, environment and
+  resource limits were unchanged. The exact deployed spool passed real
+  cross-process owner/context/path checks, normal release/reacquisition and
+  legacy-lock preservation. No IWM gate, hook, code, service or data changed.
+- Installed Windows Relay is the hardened, unsigned `1.30.135` local candidate,
+  SHA256 `fb21ed807826cb2531afae78a7b852402e0386a2614a0f5c26c4f5e8ed52549d`.
+  Its identified idle tray received a normal close request; no force stop was
+  used. The existing session, seven project bindings and config/state hashes
+  were preserved, and the settings gateway reused port **17860**. Invoking a
+  contender against the installed binary verified its real global-mutex
+  diagnostic without removing the owner's lock.
+- API rollback image: `cga-local:rollback-lock-diagnostics-20261118-c3310d01`.
+  Original Compose, verified gzip auth dump, checked FalkorDB/queue snapshots,
+  payload hashes and receipts are retained under
+  `%USERPROFILE%\.nasco\docker\main\cga\backups\pre-lock-diagnostics-20261118-c3310d01`.
+  Relay binary/config/state rollback is under
+  `%USERPROFILE%\.cga\backups\lock-diagnostics-20261118-c3310d01`.
+  Recheck idle before rollback; restore application code, not databases.
+- Source and validation evidence:
+  [PR #63](https://github.com/nascousa/cga/pull/63). Local Windows Relay tests
+  passed **98**, targeted Python/version tests **29**, and the Linux parallel
+  unit suite passed **50 consecutive runs** after its test-only fork/exec
+  synchronization repair. Public release approval/signing remains separate.
+
 ### Verified Local Security And Indexing Update (2026-11-12)
 
 - The existing API now runs local image
@@ -1388,6 +1428,20 @@ no update is queued. The host logs this dedicated busy condition and retries
 after its normal two-second poll delay, keeping its heartbeat alive. Recovery,
 journal and other processing errors are not treated as lock contention or
 silently retried.
+
+Queue contention includes `CGA_UPDATE_QUEUE_LOCKED`, the absolute `queue.lock`
+and `owner.json` paths, recorded PID/host, operation, supplied task/session IDs,
+acquisition time and elapsed hold time. Install submissions include their update
+request ID as the task ID; operations without a task/session report that absence
+explicitly. Process start time and heartbeats are not tracked for this short
+mutex. There is **no TTL**, and PID/age never authorize deletion. Missing,
+legacy, corrupt or unreadable owner metadata produces an explicit diagnostic
+status while leaving the lock intact; raw metadata and credentials are not
+included in errors. This is diagnostic evidence, not proof of process liveness.
+JSON decoder recursion failures are treated as invalid metadata, so contention
+still follows the normal busy retry path without stopping the updater heartbeat.
+Normal owner release removes only its own metadata and directory; an ownership
+change prevents cleanup rather than deleting another owner's lock.
 
 The executor checks Compose ownership and the original health port, pulls the
 signed digest, stops **only the configured API service**, verifies fresh backups

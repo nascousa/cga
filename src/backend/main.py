@@ -88,7 +88,7 @@ from backend.workbriefing.store import PgVectorActivityStore, ReportSizeError, r
 
 log = structlog.get_logger()
 
-APP_VERSION = "1.30.133"
+APP_VERSION = "1.30.135"
 AUTH_SCHEMA_VERSION = 1
 GRAPH_SCHEMA_VERSION = 2
 RUNTIME_CONFIG_VERSION = 1

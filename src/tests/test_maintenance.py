@@ -1,9 +1,13 @@
 import json
 import asyncio
+import os
+import subprocess
+import sys
 import time
 from contextlib import ExitStack, asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from pathlib import Path
 from unittest.mock import AsyncMock
 
 import httpx
@@ -25,6 +29,147 @@ from backend.indexer.consumer import IndexerConsumer
 from backend.schedules import service as schedules
 from scripts.cga_update_host import HostUpdater
 from scripts import sign_update_manifest
+
+
+def test_queue_lock_reports_real_owner_across_processes_without_removing_lock(tmp_path):
+    root = Path(__file__).resolve().parents[2]
+    with queue_lock(tmp_path, operation="test_owner", task_id="task-42", session_id="session-17"):
+        owner_path = tmp_path / "queue.lock" / "owner.json"
+        original = owner_path.read_bytes()
+        script = """
+import json,sys
+from pathlib import Path
+from backend.maintenance.spool import queue_lock,QueueLockBusyError
+try:
+    with queue_lock(Path(sys.argv[1]),operation='contender',task_id='other-task'):
+        raise AssertionError('Contender acquired the owner lock')
+except QueueLockBusyError as error:
+    print(json.dumps({'message':str(error),'details':error.details}))
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", script, str(tmp_path)], capture_output=True, text=True, timeout=10,
+            env={**os.environ, "PYTHONPATH": str(root / "src"), "CGA_SESSION_ID": "not-the-owner"},
+        )
+        assert result.returncode == 0, result.stderr
+        error = json.loads(result.stdout)
+        details = error["details"]
+        assert details["owner"]["pid"] == os.getpid()
+        assert details["owner"]["task_id"] == "task-42"
+        assert details["owner"]["session_id"] == "session-17"
+        assert details["owner"]["operation"] == "test_owner"
+        assert details["owner"]["host"] and details["owner"]["acquired_at"]
+        assert details["held_seconds"] >= 0
+        assert details["expires_at"] is None and "No TTL" in details["expiry_policy"]
+        assert details["lock_path"] == str((tmp_path / "queue.lock").absolute())
+        assert details["owner_metadata_path"] == str(owner_path.absolute())
+        assert "No lock was removed" in error["message"]
+        assert "not-the-owner" not in error["message"]
+        assert owner_path.read_bytes() == original
+    assert not (tmp_path / "queue.lock").exists()
+    with queue_lock(tmp_path):
+        pass
+
+
+@pytest.mark.parametrize("record", [
+    None, "not-json-secret-sentinel", '{"pid":true}', "x" * 4097,
+    pytest.param("[" * 2000 + "]" * 2000, id="deeply-nested"),
+])
+def test_queue_lock_legacy_or_invalid_owner_remains_locked(tmp_path, record):
+    lock = tmp_path / "queue.lock"
+    lock.mkdir()
+    if record is not None:
+        (lock / "owner.json").write_text(record, encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in lock.iterdir()}
+    with pytest.raises(QueueLockBusyError) as caught:
+        with queue_lock(tmp_path):
+            pytest.fail("Legacy or invalid owner must not bypass the lock")
+    assert caught.value.details["metadata_status"] == "unavailable"
+    assert caught.value.details["owner"] is None
+    assert caught.value.details["metadata_error"]
+    assert "secret-sentinel" not in str(caught.value)
+    assert lock.is_dir()
+    assert {path.name: path.read_bytes() for path in lock.iterdir()} == before
+
+
+def test_queue_lock_decoder_recursion_remains_busy_without_removing_owner(tmp_path, monkeypatch):
+    lock = tmp_path / "queue.lock"
+    lock.mkdir()
+    path = lock / "owner.json"
+    original = ("[" * 1100 + "]" * 1100).encode()
+    path.write_bytes(original)
+
+    def decode_recursion(raw):
+        assert raw == original
+        raise RecursionError("private-error-sentinel")
+
+    monkeypatch.setattr(json, "loads", decode_recursion)
+    with pytest.raises(QueueLockBusyError) as caught:
+        with queue_lock(tmp_path):
+            pytest.fail("Decoder recursion must not bypass the lock")
+    assert caught.value.details["metadata_status"] == "unavailable"
+    assert caught.value.details["owner"] is None
+    assert caught.value.details["metadata_error"] == "Invalid owner metadata"
+    assert "private-error-sentinel" not in str(caught.value)
+    assert path.read_bytes() == original
+
+
+def test_queue_lock_reports_metadata_permission_error_without_leaking_or_removing_owner(tmp_path, monkeypatch):
+    from backend.maintenance import spool
+
+    with queue_lock(tmp_path):
+        original = (tmp_path / "queue.lock/owner.json").read_bytes()
+        with monkeypatch.context() as patch:
+            def denied(_path):
+                raise PermissionError(13, "private-error-sentinel")
+            patch.setattr(spool, "_read_owner", denied)
+            with pytest.raises(QueueLockBusyError) as caught:
+                with queue_lock(tmp_path):
+                    pytest.fail("Metadata errors must not bypass the lock")
+            assert caught.value.details["metadata_error"] == "PermissionError (errno=13)"
+            assert "private-error-sentinel" not in str(caught.value)
+        assert (tmp_path / "queue.lock/owner.json").read_bytes() == original
+
+
+def test_queue_lock_does_not_remove_replaced_owner_metadata(tmp_path):
+    with pytest.raises(RuntimeError, match="owner changed; no lock was removed"):
+        with queue_lock(tmp_path):
+            path = tmp_path / "queue.lock/owner.json"
+            owner = json.loads(path.read_text())
+            owner["owner_id"] = "replacement-owner"
+            atomic_json(path, owner)
+    assert json.loads(path.read_text())["owner_id"] == "replacement-owner"
+
+
+def test_queue_lock_corrupt_owner_on_release_reports_path_without_removing_lock(tmp_path):
+    with pytest.raises(RuntimeError, match="Cannot verify queue lock owner") as caught:
+        with queue_lock(tmp_path):
+            path = tmp_path / "queue.lock" / "owner.json"
+            path.write_text("invalid-secret-sentinel", encoding="utf-8")
+    assert str(path.parent.absolute()) in str(caught.value)
+    assert "no lock was removed" in str(caught.value)
+    assert "secret-sentinel" not in str(caught.value)
+    assert path.read_text() == "invalid-secret-sentinel"
+
+
+@pytest.mark.parametrize("context", [{"operation": None}, {"task_id": "invalid private-sentinel"}])
+def test_queue_lock_rejects_invalid_context_before_acquisition(tmp_path, context):
+    with pytest.raises(ValueError, match="Invalid lock") as caught:
+        with queue_lock(tmp_path, **context):
+            pytest.fail("Invalid context must not enter the protected section")
+    assert "private-sentinel" not in str(caught.value)
+    assert not (tmp_path / "queue.lock").exists()
+
+
+def test_queue_lock_metadata_write_failure_releases_only_its_new_directory(tmp_path, monkeypatch):
+    from backend.maintenance import spool
+
+    def fail(_path, _value):
+        raise OSError("Injected metadata persistence failure")
+    monkeypatch.setattr(spool, "atomic_json", fail)
+    with pytest.raises(OSError, match="metadata persistence"):
+        with queue_lock(tmp_path):
+            pytest.fail("A failed initialization must not enter the protected section")
+    assert not (tmp_path / "queue.lock").exists()
 
 
 @pytest.mark.asyncio
@@ -471,7 +616,11 @@ def test_host_retries_overlapping_queue_polls_without_stopping_heartbeat(
     assert host.progress["status"] == ("success" if queued else "ready")
     assert not (root / "request.json").exists()
     assert not host.thread.is_alive()
-    assert "queue is busy" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "queue is busy" in error
+    assert json.dumps(str((root / "queue.lock").absolute())) in error
+    assert f'"pid": {os.getpid()}' in error
+    assert "No lock was removed" in error
 
 
 @pytest.mark.parametrize("stage", ["recover", "process"])

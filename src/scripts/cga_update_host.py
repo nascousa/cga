@@ -186,7 +186,7 @@ asyncio.run(probe())
         self.verify_runtime(version, before)
 
     def process(self) -> None:
-        with queue_lock(self.root):
+        with queue_lock(self.root, operation="host_poll"):
             request_path = self.root / "request.json"
             if (self.root / "active.json").exists():
                 raise ValueError("An interrupted update needs journal recovery before new requests.")
@@ -292,8 +292,8 @@ asyncio.run(probe())
             while True:
                 try:
                     self.process()
-                except QueueLockBusyError:
-                    print("Update queue is busy; retrying the next poll.", file=sys.stderr)
+                except QueueLockBusyError as exc:
+                    print(f"{exc} Retrying the next poll.", file=sys.stderr)
                 else:
                     if once:
                         return
