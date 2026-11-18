@@ -119,7 +119,7 @@ async def request_install(current_version: str, version: str, image: str, actor:
         "version": version, "image": image, "manifest": token,
         "expires_at": (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(),
     }
-    with queue_lock(root):
+    with queue_lock(root, operation="request_install", task_id=request["id"]):
         if pending():
             raise ValueError("An update is already queued or active.")
         (root / "drain.json").unlink(missing_ok=True)
@@ -136,7 +136,7 @@ async def drain_loop(app) -> None:
         try:
             if pending():
                 root = state_directory()
-                with queue_lock(root):
+                with queue_lock(root, operation="drain_probe"):
                     request_path = root / "active.json"
                     if not request_path.exists():
                         request_path = root / "request.json"
@@ -154,7 +154,7 @@ async def drain_loop(app) -> None:
                             "version": app.version, "heartbeat": time.time(),
                         })
             elif os.getenv("CGA_UPDATE_STATE_DIR", "").strip():
-                with queue_lock(state_directory()):
+                with queue_lock(state_directory(), operation="drain_probe"):
                     if not pending():
                         (state_directory() / "drain.json").unlink(missing_ok=True)
         except Exception:
@@ -164,7 +164,7 @@ async def drain_loop(app) -> None:
 
 def cancel_queued() -> dict:
     root = state_directory()
-    with queue_lock(root):
+    with queue_lock(root, operation="cancel_update"):
         if (root / "active.json").exists():
             raise ValueError("The host already claimed this update; inspect status rather than interrupting it.")
         request = root / "request.json"

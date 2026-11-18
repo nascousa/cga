@@ -2,10 +2,10 @@
 
 # CGA (Context Graph Agent)
 
-- **Version:** 1.30.133
+- **Version:** 1.30.135
 - **Status:** Cross-platform source with a verified local security/indexing deployment; published artifacts remain separate from source and CI candidates
 - **Author:** Nate Scott
-- **Date:** 2026-11-12 (release-readiness status)
+- **Date:** 2026-11-18 (release-readiness status)
 
 The source version above is not a published-release claim. The latest
 published GitHub release is

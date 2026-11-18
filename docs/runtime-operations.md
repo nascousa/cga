@@ -1389,6 +1389,18 @@ after its normal two-second poll delay, keeping its heartbeat alive. Recovery,
 journal and other processing errors are not treated as lock contention or
 silently retried.
 
+Queue contention includes `CGA_UPDATE_QUEUE_LOCKED`, the absolute `queue.lock`
+and `owner.json` paths, recorded PID/host, operation, supplied task/session IDs,
+acquisition time and elapsed hold time. Install submissions include their update
+request ID as the task ID; operations without a task/session report that absence
+explicitly. Process start time and heartbeats are not tracked for this short
+mutex. There is **no TTL**, and PID/age never authorize deletion. Missing,
+legacy, corrupt or unreadable owner metadata produces an explicit diagnostic
+status while leaving the lock intact; raw metadata and credentials are not
+included in errors. This is diagnostic evidence, not proof of process liveness.
+Normal owner release removes only its own metadata and directory; an ownership
+change prevents cleanup rather than deleting another owner's lock.
+
 The executor checks Compose ownership and the original health port, pulls the
 signed digest, stops **only the configured API service**, verifies fresh backups
 and replaces only its image. Verification checks health/version, image, original

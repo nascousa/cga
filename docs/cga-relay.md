@@ -4,6 +4,18 @@
 
 Every command acquires an OS lock before doing any work: a machine-wide named global mutex on Windows and a per-effective-user non-blocking file lock in a private directory on Unix. If another CGA-Relay process already owns that lock, the new process exits with `CGA-Relay is already running` instead of starting a second instance. Separate Unix users do not block one another.
 
+Contention keeps that error prefix and adds `CGA_RELAY_ALREADY_RUNNING`, the
+exact mutex name or file path, recorded owner information and the no-TTL release
+policy. Unix owners record PID, hostname, acquisition time and optional bounded
+`CGA_TASK_ID` / `CGA_SESSION_ID` identifiers while holding the existing file
+lock. Missing IDs, legacy/invalid metadata and read failures remain explicit;
+they never permit a second process to acquire the lock. Windows named mutexes
+do not expose the creator PID or acquisition time, so those fields are reported
+as unavailable rather than attributing the contender's identity to the owner.
+Process start time and heartbeats are not tracked. These are diagnostic
+snapshots, not liveness checks or authority to remove a lock. A contender never
+deletes a file or stops another process, and OS-release behavior is unchanged.
+
 ## Install Or Build
 
 For normal developer onboarding, install `cga-relay` on the machine where the repository checkout lives. Coding agents should launch that local executable over stdio instead of connecting directly to a remote `/mcp/sse` endpoint.

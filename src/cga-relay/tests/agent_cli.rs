@@ -2386,6 +2386,8 @@ fn concurrent_processes_allow_exactly_one_mutex_holder() {
         .spawn()
         .expect("second relay process should start");
 
+    let first_pid = first.id();
+    let second_pid = second.id();
     let mut contender_exited = false;
     for _ in 0..200 {
         if first.try_wait().unwrap().is_some() || second.try_wait().unwrap().is_some() {
@@ -2420,6 +2422,32 @@ fn concurrent_processes_allow_exactly_one_mutex_holder() {
         .find(|output| !output.status.success())
         .expect("one relay process should be rejected");
     assert!(stderr(rejected).contains("CGA-Relay is already running"));
+    let error = stderr(rejected);
+    assert!(error.contains("No lock was removed."));
+    let (_, details) = error
+        .split_once("Lock diagnostics: ")
+        .expect("contention must include diagnostics");
+    #[cfg(unix)]
+    {
+        assert!(details.contains("\"lock_resource\":\"/tmp/cga-relay-"));
+        let winner = if first_output.status.success() {
+            first_pid
+        } else {
+            second_pid
+        };
+        if details.contains("\"owner\":null") {
+            assert!(details.contains("Unavailable owner metadata:"));
+        } else {
+            assert!(details.contains(&format!("\"pid\":{winner},")), "{details}");
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = (first_pid, second_pid);
+        assert!(details
+            .contains("\"lock_resource\":\"Global\\\\Nascousa.CGA-Relay.SingleInstance.test."));
+        assert!(error.contains("Windows named mutexes do not expose"));
+    }
 }
 
 #[test]

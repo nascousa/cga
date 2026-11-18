@@ -1,5 +1,28 @@
 [
   {
+    "version": "1.30.135",
+    "date": "2026-11-18",
+    "summary": "Make lock contention actionable without deleting or bypassing locks.; Correct updater polling, template destinations and Python expression scope; Keep trace recovery, maintenance drain and rule collection safe across failed entries and session changes.",
+    "changes": {
+      "Fixed": [
+        "Maintenance queue contention identifies the lock path, recorded owner PID/host, operation, supplied task/session IDs and acquisition age; unavailable fields and the absence of a TTL are explicit.",
+        "Host updater polling preserves lock diagnostics instead of replacing them with a generic busy message.",
+        "Relay contention identifies the actual mutex or file resource and expiry policy. Unix records bounded owner metadata under its existing OS lock; Windows explicitly reports owner fields unavailable from the named mutex API.",
+        "Keep the host updater and heartbeat running across transient queue-lock contention without suppressing recovery errors.",
+        "Resolve relative ADC template destinations from the caller's PowerShell location rather than the process startup directory.",
+        "Attribute eager function parameter and return annotation calls to their defining scope while respecting postponed annotations.",
+        "Keep comprehension-local names from resolving to outside imports or creating false argument dependencies, without hiding legitimate enclosing calls.",
+        "Alternate pending trace recovery with new batches and quarantine repeatedly failing entries after three attempts without hiding acknowledgement failures.",
+        "Wait for individual core and plugin MCP tool invocations before upgrade drain readiness and reject new dispatch during maintenance.",
+        "Stop rule preview, collection and follow-up project reload continuations when the originating manager or login token changes.",
+        "Reject oversized combined release summaries before changing version metadata or archiving fragments, with actionable correction guidance."
+      ],
+      "Changed": [
+        "Advance parse evidence to format 4 so the next normal repository indexing job reparses older annotation and comprehension evidence atomically."
+      ]
+    }
+  },
+  {
     "version": "1.30.133",
     "date": "2026-11-12",
     "summary": "Compact ADC editing workspaces; Audit lifecycle, version Change Logs and controlled updates; Versioned first-party plugin standards, approval policy and developer SDK; Optional first-party plugin controls and cross-platform Relay source support; Bind MCP sessions to project credentials and correct Python indexing scope and argument flows; Unified interactive reporting workspace; Remove the user menu's green active border",

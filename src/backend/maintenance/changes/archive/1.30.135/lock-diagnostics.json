@@ -1,0 +1,10 @@
+{
+  "summary": "Make lock contention actionable without deleting or bypassing locks.",
+  "changes": {
+    "Fixed": [
+      "Maintenance queue contention identifies the lock path, recorded owner PID/host, operation, supplied task/session IDs and acquisition age; unavailable fields and the absence of a TTL are explicit.",
+      "Host updater polling preserves lock diagnostics instead of replacing them with a generic busy message.",
+      "Relay contention identifies the actual mutex or file resource and expiry policy. Unix records bounded owner metadata under its existing OS lock; Windows explicitly reports owner fields unavailable from the named mutex API."
+    ]
+  }
+}
